@@ -1837,7 +1837,7 @@
     "welcome.deleteAccount": "Slett konto",
     "welcome.garminCardTitle": "Garmin-klokke",
     "welcome.wristTitle": "Din Bubble, på håndleddet.",
-    "welcome.garminNumbersImageAlt": "Tallskjerm på Garmin-klokke som viser hull, avstand, kølle og en sikteknapp",
+    "welcome.appleImageAlt": "Hullkart på Apple Watch med Bubble på siktepunktet og spiller-som-avstanden",
     "welcome.garminMapImageAlt": "Hullkart på Garmin-klokke med Bubble tegnet på siktepunktet",
     "welcome.garminNumbers": "Avstander til forkant, midten og bakkant av greenen, og køllen bagen din dekker slaget med",
     "welcome.garminMap": "Hullkartet med posisjonen din, greenen, siktepunktet ditt og din Bubble tegnet der den vil lande",

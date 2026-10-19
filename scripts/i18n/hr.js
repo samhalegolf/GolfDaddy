@@ -1913,7 +1913,7 @@
     "welcome.deleteAccount": "Izbriši račun",
     "welcome.garminCardTitle": "Garmin sat",
     "welcome.wristTitle": "Tvoj Bubble, na tvom zapešću.",
-    "welcome.garminNumbersImageAlt": "Zaslon s brojevima na Garmin satu koji prikazuje rupu, udaljenost, palicu i gumb za ciljanje",
+    "welcome.appleImageAlt": "Karta rupe na Apple Watchu s Bubbleom na točki ciljanja i stvarnom udaljenosti igranja",
     "welcome.garminMapImageAlt": "Karta rupe na Garmin satu s Bubbleom nacrtanim na točki ciljanja",
     "welcome.garminNumbers": "Udaljenosti do prednjeg ruba, sredine i stražnjeg ruba greena te palica kojom tvoja torba pokriva udarac",
     "welcome.garminMap": "Karta rupe s tvojim položajem, greenom, točkom ciljanja i tvojim Bubbleom nacrtanim ondje gdje će sletjeti",

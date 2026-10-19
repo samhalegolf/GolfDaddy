@@ -1837,7 +1837,7 @@
     "welcome.deleteAccount": "Изтрий профила",
     "welcome.garminCardTitle": "Часовник Garmin",
     "welcome.wristTitle": "Твоят Bubble, на китката ти.",
-    "welcome.garminNumbersImageAlt": "Екран с числа на часовник Garmin, показващ дупката, разстоянието, стика и бутон за прицелване",
+    "welcome.appleImageAlt": "Карта на дупката на Apple Watch с Bubble върху точката на прицелване и ефективното разстояние",
     "welcome.garminMapImageAlt": "Карта на дупката на часовник Garmin с Bubble, нарисуван върху точката на прицелване",
     "welcome.garminNumbers": "Разстояния до предния, средния и задния край на грийна и стикът, с който чантата ти покрива удара",
     "welcome.garminMap": "Картата на дупката с твоята позиция, грийна, точката на прицелване и твоя Bubble, нарисуван там, където ще кацне",

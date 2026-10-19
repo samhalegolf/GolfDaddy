@@ -1913,7 +1913,7 @@
     "welcome.deleteAccount": "Smazat účet",
     "welcome.garminCardTitle": "Hodinky Garmin",
     "welcome.wristTitle": "Tvůj Bubble, na tvém zápěstí.",
-    "welcome.garminNumbersImageAlt": "Obrazovka s čísly na hodinkách Garmin zobrazující jamku, vzdálenost, hůl a tlačítko míření",
+    "welcome.appleImageAlt": "Mapa jamky na Apple Watch s Bubble na cílovém bodě a efektivní vzdáleností",
     "welcome.garminMapImageAlt": "Mapa jamky na hodinkách Garmin s Bubble nakresleným na cílovém bodě",
     "welcome.garminNumbers": "Vzdálenosti na přední, střední a zadní okraj greenu a hůl, kterou tvůj bag ránu pokrývá",
     "welcome.garminMap": "Mapa jamky s tvou polohou, greenem, cílovým bodem a tvým Bubble nakresleným tam, kam dopadne",

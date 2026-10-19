@@ -1837,7 +1837,7 @@
     "welcome.deleteAccount": "Konto löschen",
     "welcome.garminCardTitle": "Garmin-Uhr",
     "welcome.wristTitle": "Deine Bubble, an deinem Handgelenk.",
-    "welcome.garminNumbersImageAlt": "Zahlenansicht einer Garmin-Uhr mit Loch, Entfernung, Schläger und einem Zielen-Button",
+    "welcome.appleImageAlt": "Lochkarte auf der Apple Watch mit der Bubble auf dem Zielpunkt und der effektiven Spieldistanz",
     "welcome.garminMapImageAlt": "Lochkarte auf einer Garmin-Uhr mit der Bubble auf dem Zielpunkt",
     "welcome.garminNumbers": "Entfernungen zu Vorderkante, Mitte und Hinterkante des Grüns, und der Schläger, mit dem dein Bag den Schlag abdeckt",
     "welcome.garminMap": "Die Lochkarte mit deiner Position, dem Grün, deinem Zielpunkt und deiner Bubble dort, wo sie landen wird",

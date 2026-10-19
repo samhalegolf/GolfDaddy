@@ -1913,7 +1913,7 @@
     "welcome.deleteAccount": "Ištrinti paskyrą",
     "welcome.garminCardTitle": "„Garmin“ laikrodis",
     "welcome.wristTitle": "Tavo Bubble, ant tavo riešo.",
-    "welcome.garminNumbersImageAlt": "„Garmin“ laikrodžio skaičių ekranas su duobute, atstumu, lazda ir taikymo mygtuku",
+    "welcome.appleImageAlt": "Duobutės žemėlapis „Apple Watch“ su Bubble taikymo taške ir tikruoju žaidimo atstumu",
     "welcome.garminMapImageAlt": "Duobutės žemėlapis „Garmin“ laikrodyje su Bubble, nupieštu taikymo taške",
     "welcome.garminNumbers": "Atstumai iki greeno priekio, vidurio ir galo bei lazda, kuria tavo krepšys dengia smūgį",
     "welcome.garminMap": "Duobutės žemėlapis su tavo padėtimi, greenu, taikymo tašku ir tavo Bubble, nupieštu ten, kur jis nusileis",

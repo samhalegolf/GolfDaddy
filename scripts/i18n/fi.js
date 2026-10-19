@@ -1837,7 +1837,7 @@
     "welcome.deleteAccount": "Poista tili",
     "welcome.garminCardTitle": "Garmin-kello",
     "welcome.wristTitle": "Sinun Bubblesi, ranteessasi.",
-    "welcome.garminNumbersImageAlt": "Garmin-kellon numeronäyttö, jossa väylä, etäisyys, maila ja tähtäyspainike",
+    "welcome.appleImageAlt": "Väyläkartta Apple Watchissa, Bubble tähtäyspisteessä ja todellinen pelietäisyys",
     "welcome.garminMapImageAlt": "Väyläkartta Garmin-kellossa, Bubble piirrettynä tähtäyspisteeseen",
     "welcome.garminNumbers": "Etäisyydet griinin etureunaan, keskelle ja takareunaan sekä maila, jolla bägisi kattaa lyönnin",
     "welcome.garminMap": "Väyläkartta, jossa sijaintisi, griini, tähtäyspisteesi ja Bubblesi piirrettynä sinne, minne se laskeutuu",

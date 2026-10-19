@@ -1837,7 +1837,7 @@
     "welcome.deleteAccount": "Kustuta konto",
     "welcome.garminCardTitle": "Garmini kell",
     "welcome.wristTitle": "Sinu Bubble, sinu randmel.",
-    "welcome.garminNumbersImageAlt": "Garmini kella numbrivaade, kus on rada, kaugus, kepp ja sihtimisnupp",
+    "welcome.appleImageAlt": "Raja kaart Apple Watchil, Bubble sihtpunktil ja tegelik mängukaugus",
     "welcome.garminMapImageAlt": "Raja kaart Garmini kellal, Bubble joonistatud sihtpunktile",
     "welcome.garminNumbers": "Kaugused griini ette, keskele ja taha ning kepp, millega sinu kott löögi katab",
     "welcome.garminMap": "Raja kaart sinu asukoha, griini, sihtpunkti ja sinu Bubble'iga, joonistatud sinna, kuhu see maandub",

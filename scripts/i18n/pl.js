@@ -1989,7 +1989,7 @@
     "welcome.deleteAccount": "Usuń konto",
     "welcome.garminCardTitle": "Zegarek Garmin",
     "welcome.wristTitle": "Twój Bubble, na twoim nadgarstku.",
-    "welcome.garminNumbersImageAlt": "Ekran z liczbami na zegarku Garmin pokazujący dołek, odległość, kij i przycisk celowania",
+    "welcome.appleImageAlt": "Mapa dołka na Apple Watch z Bubble w punkcie celowania i rzeczywistym dystansem gry",
     "welcome.garminMapImageAlt": "Mapa dołka na zegarku Garmin z Bubble narysowanym w punkcie celowania",
     "welcome.garminNumbers": "Odległości do przodu, środka i tyłu greenu oraz kij, którym twoja torba pokrywa uderzenie",
     "welcome.garminMap": "Mapa dołka z twoją pozycją, greenem, punktem celowania i twoim Bubble narysowanym tam, gdzie wyląduje",

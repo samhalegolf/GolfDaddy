@@ -1837,7 +1837,7 @@
     "welcome.deleteAccount": "Eliminar cuenta",
     "welcome.garminCardTitle": "Reloj Garmin",
     "welcome.wristTitle": "Tu Bubble, en tu muñeca.",
-    "welcome.garminNumbersImageAlt": "Pantalla de números de un reloj Garmin con el hoyo, la distancia, el palo y un botón de apuntar",
+    "welcome.appleImageAlt": "Mapa del hoyo en el Apple Watch con el Bubble sobre el punto de mira y la distancia efectiva",
     "welcome.garminMapImageAlt": "Mapa del hoyo en un reloj Garmin con el Bubble dibujado sobre el punto de mira",
     "welcome.garminNumbers": "Distancias a la entrada, el centro y el fondo del green, y el palo con el que tu bolsa cubre el golpe",
     "welcome.garminMap": "El mapa del hoyo con tu posición, el green, tu punto de mira y tu Bubble dibujado donde va a caer",

@@ -1837,7 +1837,7 @@
     "welcome.deleteAccount": "Διαγραφή λογαριασμού",
     "welcome.garminCardTitle": "Ρολόι Garmin",
     "welcome.wristTitle": "Το Bubble σου, στον καρπό σου.",
-    "welcome.garminNumbersImageAlt": "Οθόνη αριθμών ρολογιού Garmin που δείχνει την τρύπα, την απόσταση, το μπαστούνι και ένα κουμπί στόχευσης",
+    "welcome.appleImageAlt": "Χάρτης τρύπας σε Apple Watch με το Bubble στο σημείο στόχευσης και την πραγματική απόσταση",
     "welcome.garminMapImageAlt": "Χάρτης τρύπας σε ρολόι Garmin με το Bubble σχεδιασμένο στο σημείο στόχευσης",
     "welcome.garminNumbers": "Αποστάσεις μπροστά, κέντρο και πίσω του green, και το μπαστούνι με το οποίο ο σάκος σου καλύπτει το χτύπημα",
     "welcome.garminMap": "Ο χάρτης της τρύπας με τη θέση σου, το green, το σημείο στόχευσης και το Bubble σου σχεδιασμένο εκεί που θα προσγειωθεί",
