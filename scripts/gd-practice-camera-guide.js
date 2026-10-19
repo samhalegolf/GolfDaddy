@@ -21,6 +21,9 @@
   var win = typeof window !== 'undefined' ? window : globalThis;
   var STORAGE_KEY = 'gd_practice_camera_layout_v1';
   var SVG_NS = 'http://www.w3.org/2000/svg';
+  /* The saved photo is the template frame plus this much of the frame's size
+     on each side, so the corner finder has some context to work with. */
+  var CAPTURE_MARGIN = 0.08;
 
   var state = {
     root: null,
@@ -414,7 +417,7 @@
       return false;
     }
     var geo = state.geometry || api.guideGeometry(layout, win.innerWidth, win.innerHeight);
-    var crop = api.coverCrop(video.videoWidth, video.videoHeight, geo.viewport.width, geo.viewport.height, geo.frame, 0.08);
+    var crop = api.coverCrop(video.videoWidth, video.videoHeight, geo.viewport.width, geo.viewport.height, geo.frame, CAPTURE_MARGIN);
     var canvas = win.document.createElement('canvas');
     canvas.width = crop.sw;
     canvas.height = crop.sh;
@@ -433,7 +436,16 @@
         file = blob;
         try { file.name = name; } catch (err) {}
       }
+      /* Where the table frame sits inside the saved picture, as fractions, so
+         the scanner can put its corner pins straight onto it. The crop is the
+         frame plus the same margin on every side. */
+      var frameFrac = 1 / (1 + 2 * CAPTURE_MARGIN);
+      var edge = CAPTURE_MARGIN / (1 + 2 * CAPTURE_MARGIN);
+      try { file.__gdTemplateFrame = { x: edge, y: edge, w: frameFrac, h: frameFrac, layout: layout ? layout.key : '' }; } catch (e) {}
       close();
+      /* The photo was framed with this layout's template, so scan it with
+         the same template unless the player changes it. */
+      if (typeof win.gdPracticeSetScanTemplate === 'function') safe(function () { win.gdPracticeSetScanTemplate(layout ? layout.key : ''); });
       if (typeof win.gdHandleLaunchMonitorPhoto === 'function') win.gdHandleLaunchMonitorPhoto(file);
     };
     if (typeof canvas.toBlob === 'function') canvas.toBlob(finish, 'image/jpeg', 0.92);

@@ -23,8 +23,11 @@
 
   var target = typeof window !== 'undefined' ? window : globalThis;
 
-  function col(label, short, key) {
-    return { label: label, short: short, key: key === undefined ? null : key };
+  /* direction: the brand prints this column with a left/right marker (an L or
+     R after the number, or a sign), so template mode reads it as a direction
+     column and the scanner's deep scan looks for the marker. */
+  function col(label, short, key, direction) {
+    return { label: label, short: short, key: key === undefined ? null : key, direction: !!direction };
   }
 
   var layouts = [
@@ -47,11 +50,11 @@
       columns: [
         col('Ball Speed', 'BALL', 'ballSpeed'),
         col('Launch Angle', 'LAUNCH', 'launch'),
-        col('Side Angle', 'SIDE', 'sideAngle'),
+        col('Side Angle', 'SIDE', 'sideAngle', true),
         col('Backspin', 'BACK', 'backspin'),
-        col('Sidespin', 'SSPIN', 'sideSpin'),
+        col('Sidespin', 'SSPIN', 'sideSpin', true),
         col('Descent Angle', 'DESC', 'descent'),
-        col('Offline', 'OFF', 'offline'),
+        col('Offline', 'OFF', 'offline', true),
         col('Peak', 'PEAK', 'peakHeight'),
         col('Carry', 'CARRY', 'carry'),
         col('Total', 'TOTAL', 'total'),
@@ -78,8 +81,8 @@
         col('Club Speed', 'CLUB', 'clubSpeed'),
         col('Efficiency', 'EFF', 'smashFactor'),
         col('Angle of Attack', 'AOA', 'attackAngle'),
-        col('Club Path', 'PATH', 'clubPath'),
-        col('Face to Target', 'FACE', 'faceAngle'),
+        col('Club Path', 'PATH', 'clubPath', true),
+        col('Face to Target', 'FACE', 'faceAngle', true),
         col('Lie', 'LIE'),
         col('Loft', 'LOFT', 'dynamicLoft'),
         col('Face Impact', 'IMPACT'),
@@ -105,22 +108,22 @@
       columns: [
         col('Club Speed', 'CLUB', 'clubSpeed'),
         col('Attack Ang.', 'AOA', 'attackAngle'),
-        col('Club Path', 'PATH', 'clubPath'),
-        col('Face Ang.', 'FACE', 'faceAngle'),
-        col('Face to Path', 'FTP', 'faceToPath'),
+        col('Club Path', 'PATH', 'clubPath', true),
+        col('Face Ang.', 'FACE', 'faceAngle', true),
+        col('Face to Path', 'FTP', 'faceToPath', true),
         col('Dyn. Loft', 'DLOFT', 'dynamicLoft'),
         col('Spin Loft', 'SLOFT'),
         col('Ball Speed', 'BALL', 'ballSpeed'),
         col('Smash Fac.', 'SMASH', 'smashFactor'),
         col('Launch Ang.', 'LAUNCH', 'launch'),
-        col('Launch Dir.', 'LDIR', 'launchDirection'),
+        col('Launch Dir.', 'LDIR', 'launchDirection', true),
         col('Spin Rate', 'SPIN', 'totalSpin'),
-        col('Spin Axis', 'AXIS', 'spinAxis'),
+        col('Spin Axis', 'AXIS', 'spinAxis', true),
         col('Height', 'HGT', 'peakHeight'),
         col('Carry', 'CARRY', 'carry'),
-        col('Side', 'SIDE', 'offline'),
+        col('Side', 'SIDE', 'offline', true),
         col('Total', 'TOTAL', 'total'),
-        col('Side Tot.', 'STOT'),
+        col('Side Tot.', 'STOT', null, true),
         col('Land. Ang.', 'LAND', 'descent'),
         col('Hang Time', 'HANG')
       ]
@@ -148,11 +151,11 @@
         col('Club Speed', 'CLUB', 'clubSpeed'),
         col('Smash Factor', 'SMASH', 'smashFactor'),
         col('Launch Angle', 'LAUNCH', 'launch'),
-        col('Launch Dir.', 'LDIR', 'launchDirection'),
+        col('Launch Dir.', 'LDIR', 'launchDirection', true),
         col('Spin Rate', 'SPIN', 'totalSpin'),
-        col('Spin Axis', 'AXIS', 'spinAxis'),
+        col('Spin Axis', 'AXIS', 'spinAxis', true),
         col('Height', 'HGT', 'peakHeight'),
-        col('Side', 'SIDE', 'offline'),
+        col('Side', 'SIDE', 'offline', true),
         col('Land. Ang.', 'LAND', 'descent')
       ]
     },
@@ -179,17 +182,17 @@
         col('Club Head Speed', 'CLUB', 'clubSpeed'),
         col('Smash Factor', 'SMASH', 'smashFactor'),
         col('Launch Angle', 'LAUNCH', 'launch'),
-        col('Launch Direction', 'LDIR', 'launchDirection'),
+        col('Launch Direction', 'LDIR', 'launchDirection', true),
         col('Spin Rate', 'SPIN', 'totalSpin'),
-        col('Spin Axis', 'AXIS', 'spinAxis'),
+        col('Spin Axis', 'AXIS', 'spinAxis', true),
         col('Apex Height', 'APEX', 'peakHeight'),
-        col('Deviation Dist.', 'DEV', 'offline'),
+        col('Deviation Dist.', 'DEV', 'offline', true),
         col('Attack Angle', 'AOA', 'attackAngle'),
-        col('Club Path', 'PATH', 'clubPath'),
-        col('Face Angle', 'FACE', 'faceAngle'),
-        col('Face to Path', 'FTP', 'faceToPath'),
+        col('Club Path', 'PATH', 'clubPath', true),
+        col('Face Angle', 'FACE', 'faceAngle', true),
+        col('Face to Path', 'FTP', 'faceToPath', true),
         col('Backspin', 'BACK', 'backspin'),
-        col('Sidespin', 'SSPIN', 'sideSpin')
+        col('Sidespin', 'SSPIN', 'sideSpin', true)
       ]
     },
     {
@@ -211,9 +214,9 @@
       columns: [
         col('Total Distance', 'TOTAL', 'total'),
         col('Carry Distance', 'CARRY', 'carry'),
-        col('Side Carry', 'SIDE', 'offline'),
+        col('Side Carry', 'SIDE', 'offline', true),
         col('Ball Speed', 'BALL', 'ballSpeed'),
-        col('Launch Direction', 'LDIR', 'launchDirection'),
+        col('Launch Direction', 'LDIR', 'launchDirection', true),
         col('Club Speed', 'CLUB', 'clubSpeed'),
         col('Smash Factor', 'SMASH', 'smashFactor'),
         col('Launch Angle', 'LAUNCH', 'launch'),
@@ -221,8 +224,8 @@
         col('Shot Apex', 'APEX', 'peakHeight'),
         col('Shot Type', 'TYPE'),
         col('Spin Rate', 'SPIN', 'totalSpin'),
-        col('Spin Axis', 'AXIS', 'spinAxis'),
-        col('Club Path', 'PATH', 'clubPath'),
+        col('Spin Axis', 'AXIS', 'spinAxis', true),
+        col('Club Path', 'PATH', 'clubPath', true),
         col('Angle of Attack', 'AOA', 'attackAngle')
       ]
     },
@@ -249,13 +252,13 @@
         col('Carry', 'CARRY', 'carry'),
         col('Total', 'TOTAL', 'total'),
         col('Roll', 'ROLL'),
-        col('Lateral', 'LAT', 'offline'),
+        col('Lateral', 'LAT', 'offline', true),
         col('Apex', 'APEX', 'peakHeight'),
         col('Flight Time', 'TIME'),
         col('V. Launch', 'VLA', 'launch'),
-        col('H. Launch', 'HLA', 'launchDirection'),
+        col('H. Launch', 'HLA', 'launchDirection', true),
         col('Spin Rate', 'SPIN', 'totalSpin'),
-        col('Spin Axis', 'AXIS', 'spinAxis'),
+        col('Spin Axis', 'AXIS', 'spinAxis', true),
         col('AOA', 'AOA', 'attackAngle')
       ]
     },
@@ -279,17 +282,17 @@
         col('Ball Speed', 'BALL', 'ballSpeed'),
         col('Launch Angle', 'LAUNCH', 'launch'),
         col('Back Spin', 'BACK', 'backspin'),
-        col('Side Spin', 'SSPIN', 'sideSpin'),
-        col('Side Angle', 'SIDE', 'sideAngle'),
+        col('Side Spin', 'SSPIN', 'sideSpin', true),
+        col('Side Angle', 'SIDE', 'sideAngle', true),
         col('Descent Angle', 'DESC', 'descent'),
         col('Max Height', 'HGT', 'peakHeight'),
         col('Carry', 'CARRY', 'carry'),
         col('Total', 'TOTAL', 'total'),
-        col('Offline', 'OFF', 'offline'),
+        col('Offline', 'OFF', 'offline', true),
         col('Smash Factor', 'SMASH', 'smashFactor'),
         col('Club Speed', 'CLUB', 'clubSpeed'),
-        col('Club Path', 'PATH', 'clubPath'),
-        col('Face to Target', 'FACE', 'faceAngle')
+        col('Club Path', 'PATH', 'clubPath', true),
+        col('Face to Target', 'FACE', 'faceAngle', true)
       ]
     },
     {
@@ -311,19 +314,19 @@
       columns: [
         col('Ball Speed', 'BALL', 'ballSpeed'),
         col('Launch Angle', 'LAUNCH', 'launch'),
-        col('Side Angle', 'SIDE', 'sideAngle'),
+        col('Side Angle', 'SIDE', 'sideAngle', true),
         col('Back Spin', 'BACK', 'backspin'),
-        col('Side Spin', 'SSPIN', 'sideSpin'),
+        col('Side Spin', 'SSPIN', 'sideSpin', true),
         col('Carry', 'CARRY', 'carry'),
         col('Total', 'TOTAL', 'total'),
-        col('Side Distance', 'SDIST', 'offline'),
+        col('Side Distance', 'SDIST', 'offline', true),
         col('Flight Time', 'TIME'),
         col('Apex', 'APEX', 'peakHeight'),
         col('Descent Angle', 'DESC', 'descent'),
         col('Club Speed', 'CLUB', 'clubSpeed'),
         col('Smash Factor', 'SMASH', 'smashFactor'),
-        col('Club Path', 'PATH', 'clubPath'),
-        col('Face Angle', 'FACE', 'faceAngle'),
+        col('Club Path', 'PATH', 'clubPath', true),
+        col('Face Angle', 'FACE', 'faceAngle', true),
         col('Attack Angle', 'AOA', 'attackAngle'),
         col('Dynamic Loft', 'DLOFT', 'dynamicLoft')
       ]
@@ -351,16 +354,16 @@
         col('Ball Speed', 'BALL', 'ballSpeed'),
         col('Smash Factor', 'SMASH', 'smashFactor'),
         col('Spin Rate', 'SPIN', 'totalSpin'),
-        col('Spin Axis', 'AXIS', 'spinAxis'),
+        col('Spin Axis', 'AXIS', 'spinAxis', true),
         col('Apex', 'APEX', 'peakHeight'),
         col('Launch Angle', 'LAUNCH', 'launch'),
         col('Attack Angle', 'AOA', 'attackAngle'),
-        col('Horizontal Angle', 'HLA', 'launchDirection'),
-        col('Club Path', 'PATH', 'clubPath'),
-        col('Club Face', 'FACE', 'faceAngle'),
-        col('Face to Path', 'FTP', 'faceToPath'),
-        col('Side Carry', 'SIDE', 'offline'),
-        col('Side Total', 'STOT')
+        col('Horizontal Angle', 'HLA', 'launchDirection', true),
+        col('Club Path', 'PATH', 'clubPath', true),
+        col('Club Face', 'FACE', 'faceAngle', true),
+        col('Face to Path', 'FTP', 'faceToPath', true),
+        col('Side Carry', 'SIDE', 'offline', true),
+        col('Side Total', 'STOT', null, true)
       ]
     },
     {
@@ -385,8 +388,8 @@
         col('Ball Speed', 'BALL', 'ballSpeed'),
         col('Launch Angle', 'LAUNCH', 'launch'),
         col('Height', 'HGT', 'peakHeight'),
-        col('Side', 'SIDE', 'offline'),
-        col('Curve', 'CURVE'),
+        col('Side', 'SIDE', 'offline', true),
+        col('Curve', 'CURVE', null, true),
         col('Hang Time', 'HANG')
       ]
     },

@@ -40,6 +40,48 @@ the button goes where it always went.
   fallback, a template per layout, the cropped capture). Both run in
   `npm run test:practice`, which CI already runs.
 
+## Template mode (the second scan route)
+
+The scanner now has two routes from the same flattened checkpoint, chosen by
+the **Template** select next to the club on the scanner panel:
+
+| | No template (the old route) | Template mode (new) |
+|---|---|---|
+| Entry | `gdClarityTableOcrScanFromCheckpoint` | `gdClarityTemplateScanFromCheckpoint` |
+| What it has to work out | columns from ink corridors, metric names by reading headers through the alias registry, club from the offcut, rows by consensus across strips | nothing: the layout's column order is the map |
+| Pure module | `scripts/clarity-table-ocr.js` | `scripts/clarity-template-ocr.js` |
+| Steps | detect boxes, OCR every box, split columns, cut strips, name strips, offcut scan, read strips into rows, deep scan, payload | fit template to ink, OCR one crop per cell, OCR one label per row, assemble rows, deep scan, payload |
+| Borrowed | - | the direction deep scan (`gdClarityDeepScanDirections`, blanking + glyph classifier) for the small L / R / + / - markers, the native-resolution cell crop, the three-step cell read, `parseCell`, `isSummaryLabel` |
+| Lands through | `gdClarityScanResultToPayload` -> `gdImportLaunchMonitorPayload` | the same |
+
+How the fit works (`fitTemplate`): the flattened image is the frame the player
+put the pins on, so the header row is along the top. The template says roughly
+how tall the header is; the ink says exactly (the lowest band of text starting
+in that zone). Column boundaries start as equal slots across the width after
+the label column and each one is nudged onto the nearest quiet corridor in the
+ink below the header, within a third of a slot. Shot rows are the bands of ink
+under the header. If the layout prints AVERAGE / STD DEV, bands in the bottom
+zone are summary candidates; the label-column read decides (a summary word, or
+a blank where a shot number should be, drops the band). A band with fewer than
+40% readable values is not a shot.
+
+Direction columns are the layout's own: each column carries a `direction`
+flag (Side, Offline, Launch Dir., Club Path, Spin Axis and so on, per brand),
+and the deep scan runs on exactly those. Left is negative on the way into the
+library, as everywhere else.
+
+The guided camera and template mode fit together: a photo from the camera
+carries where the frame sits in the saved picture, so in template mode the
+pins land on the frame instead of the value-shape finder's guess (which cuts
+the header off), and the camera's layout is pre-selected as the template.
+
+Tests: `dev/clarity-template-ocr.test.js` draws a synthetic table with uneven
+columns, a rule, two header lines and two summary rows into an ink mask and
+proves the header comes from the ink, every boundary lands in the real gap,
+thirteen rows assemble from the ground-truth fixture with their L/R, and the
+summary rows drop. `dev/practice-template-mode.test.js` pins the select, the
+dispatcher, the borrowed deep scan and the camera hand-off.
+
 ## The layouts
 
 Column order is `documented` where it comes from the brand's manual, export
@@ -77,10 +119,12 @@ same apps run on a tablet or a second phone.
 
 ## What this does not do yet
 
-- The scanner is not told which layout was chosen. The hint is on the file
-  name and `window.__gdPracticeCameraLayout`; using it to pre-seed header
-  allocation when the OCR cannot read a header is the obvious next step, and
-  it would be the first change inside the scanner module.
+- Template mode has not been run on a real photo yet. The fit and the row
+  assembly are proven on a synthetic table; the first live scan will say
+  whether the snap tolerance (a third of a slot) and the summary zone (1.4x
+  the template's summary band) are right.
+- Template mode trusts the frame. A photo framed with the header cut off
+  reads the first shot row as the header; the pins hint says so.
 - No tilt or level reading. Keeping the phone square to the screen is said
   in words, not measured.
 - The layouts marked `typical` have not been checked against a live screen of
