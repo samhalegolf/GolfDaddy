@@ -14,6 +14,7 @@
     "test:payments": "node dev/payment-rollout-tests.js",
     "test:garmin-founder": "node dev/garmin-founder.test.js",
     "test:garmin-package": "node dev/garmin-package.test.js",
+    "test:watch-preview": "node dev/watch-preview-public.test.js",
     "test:referrals": "node dev/referral-surfaces.test.js && node dev/referral-invite-target.test.js && node dev/referrals-auth.test.js && node dev/referral-reward-entitlements.test.js && node dev/store-referral-reversal.test.js",
     "test:scorecard-resolve": "node dev/scorecard-resolve.test.js",
     "test:polite-fetch": "node dev/polite-fetch.test.js",

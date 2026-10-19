@@ -73,6 +73,9 @@ const publicPaths = [
   // gd-landing-redirect-v1.js; its images live under assets/landing/, which
   // rides along with the assets entry above. Web-only - see NON_APP_FILES.
   "welcome.html",
+  // The public watch preview linked from the landing page: the Studio's watch faces on a
+  // real course behind a sign-up request. Web-only, like welcome.html - see NON_APP_FILES.
+  "watch-preview.html",
   // Deep-link verification files. Android reads assetlinks.json and iOS reads
   // apple-app-site-association from this path over https; if they are not
   // deployed, links open the browser instead of the app and the failure is
@@ -246,7 +249,7 @@ if (APP_ONLY) {
      signed-out visitors. The native apps never navigate there - the redirect
      script bails when GDNative reports native - so inside a store binary the
      page is unreachable weight, and the landing images alone are megabytes. */
-  const NON_APP_FILES = ["welcome.html"];
+  const NON_APP_FILES = ["welcome.html", "watch-preview.html"];
   let prunedDirs = 0;
   NON_APP_DIRS.forEach(function (dir) {
     const target = path.join(dist, dir);

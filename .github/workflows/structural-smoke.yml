@@ -86,6 +86,7 @@ jobs:
           node dev/payment-entitlement-auth.test.js
           node dev/garmin-founder.test.js
           node dev/garmin-package.test.js
+          node dev/watch-preview-public.test.js
           node dev/store-referral-reversal.test.js
           node dev/email-public-url.test.js
           node dev/auth-refresh-resilience.test.js

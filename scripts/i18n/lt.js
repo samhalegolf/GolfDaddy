@@ -1932,6 +1932,7 @@
     "welcome.appleScore": "Rezultatas tarp duobučių, o AIM užfiksuoja smūgį ir parodo žemėlapį",
     "welcome.watchFree": "Žaidimas su laikrodžiu nemokamas. „Apple Watch“ programėlė ateina kartu su „iPhone“ programėle („watchOS 10“ arba naujesnė). „Garmin“ reikia „Clarity Caddy“ programėlės iš „Connect IQ“ parduotuvės, ir jis veikia su „iPhone“ arba „Android“.",
     "welcome.wristNav": "„Apple Watch“ ir „Garmin“",
+    "welcome.watchPreviewLink": "Peržiūrėkite savo laikrodyje",
 
     /* Practice Bubble preview banner (scripts/gd-practice-bubble-preview.js) */
     "practicePreview.title": "Bubble peržiūra",
