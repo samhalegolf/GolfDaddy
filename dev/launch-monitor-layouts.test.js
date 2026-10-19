@@ -64,6 +64,8 @@ list.forEach((layout) => {
     const label = where + ' column ' + column.label;
     assert.ok(column.label && column.short, label + ' has a label and a short name');
     assert.ok(column.short.length <= 6, label + ' short name fits a narrow column');
+    assert.strictEqual(typeof column.direction, 'boolean', label + ' says whether it carries a left/right marker');
+    if (['sideAngle', 'sideSpin', 'offline'].includes(column.key)) assert.ok(column.direction, label + ' is a direction column');
     assert.ok(!seen.has(column.label), label + ' is listed once');
     seen.add(column.label);
     if (column.key === null) return;

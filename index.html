@@ -44,6 +44,7 @@
 <script src="scripts/gd-practice-camera-guide.js?v=camera-guide-20261019"></script>
 <script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260712a"></script>
 <script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260712a"></script>
+<script src="scripts/clarity-template-ocr.js?v=template-mode-20261019"></script>
 <link rel="stylesheet" href="styles/inline/gd-app-base.css?v=course-db-sort-20261018">
 <link rel="stylesheet" href="styles/inline/gd-practice-camera-guide.css?v=camera-guide-20261019">
 
@@ -212,6 +213,7 @@
 <div class="gdPracticeScanGuide" aria-hidden="true"><span data-i18n="dataPage.scanGuide">Keep the shot table inside this frame</span></div>
 </div>
 <label class="gdPracticeScanClubField" for="gdPracticeScanClubInput"><span data-i18n="bag.club">Club</span><input id="gdPracticeScanClubInput" type="text" value="7i" placeholder="7i" autocomplete="off"></label>
+<label class="gdPracticeScanClubField gdPracticeScanTemplateField" for="gdPracticeScanTemplateSelect"><span data-i18n="dataPage.scanTemplate">Template</span><select id="gdPracticeScanTemplateSelect" onchange="gdPracticeScanTemplateChanged()"><option value="" data-i18n="dataPage.scanTemplateNone">No template</option></select></label>
 <div class="gdPracticeScannerActions"><button id="gdPracticeClearPhotoBtn" type="button" onclick="gdCancelPracticePhotoScan()" hidden data-i18n="dataPage.clearPhoto">Clear Photo</button><button class="primary" id="gdPracticeScanPhotoBtn" type="button" onclick="gdPracticePrimaryScanAction()">Scan</button><button id="gdPracticeManualQuadBtn" type="button" onclick="gdOpenPracticeManualQuadTool()" hidden data-i18n="dataPage.adjustBox">Adjust box</button><button id="gdPracticeExportFlatBtn" type="button" onclick="gdDownloadFlattenedGrid()" title="Export the flattened value-grid image for the OCR test harness">Export flat grid</button></div>
 <div class="gdPracticeScanStatus" id="gdPracticeScanStatus">Upload a table photo or take one with your phone, then scan it into the Clarity Shot Library.</div>
 </div>

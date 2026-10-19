@@ -1646,6 +1646,68 @@ function gdPracticeScanClubLabels(){
     .filter(Boolean);
   return labels.length?labels:["7i"];
 }
+// ---- Template mode (scripts/clarity-template-ocr.js) ----
+// The Template select on the scanner decides the scan route: a layout key
+// means template mode (the chosen launch monitor's column order is the map and
+// the scanner only reads cells); "No template" is the discovery route in
+// gdClarityTableOcrScanFromCheckpoint. The choice is remembered, and the guided
+// camera sets it to the layout the photo was framed with.
+const GD_PRACTICE_SCAN_TEMPLATE_KEY="gd_practice_scan_template_v1";
+function gdPracticeScanTemplateKey(){
+  const select=document.getElementById("gdPracticeScanTemplateSelect");
+  const LAY=window.GolfDaddyLaunchMonitorLayouts;
+  const value=String(select?.value||"").trim();
+  const layout=LAY&&value?LAY.get(value):null;
+  return layout?layout.key:"";
+}
+function gdPracticeScanTemplateLayout(){
+  const LAY=window.GolfDaddyLaunchMonitorLayouts;
+  const key=gdPracticeScanTemplateKey();
+  return key&&LAY?LAY.get(key):null;
+}
+function gdPracticeRenderScanTemplateSelect(){
+  const select=document.getElementById("gdPracticeScanTemplateSelect");
+  const LAY=window.GolfDaddyLaunchMonitorLayouts;
+  if(!select||!LAY)return;
+  let saved="";
+  try{saved=localStorage.getItem(GD_PRACTICE_SCAN_TEMPLATE_KEY)||"";}catch(e){}
+  const current=select.dataset.gdFilled?select.value:saved;
+  select.innerHTML="";
+  const none=document.createElement("option");
+  none.value="";
+  none.textContent=gdT("dataPage.scanTemplateNone");
+  none.setAttribute("data-i18n","dataPage.scanTemplateNone");
+  select.appendChild(none);
+  LAY.list().forEach(layout=>{
+    const option=document.createElement("option");
+    option.value=layout.key;
+    option.textContent=layout.label;
+    select.appendChild(option);
+  });
+  const keep=LAY.get(current);
+  select.value=keep?keep.key:"";
+  select.dataset.gdFilled="1";
+}
+function gdPracticeSetScanTemplate(key){
+  gdPracticeRenderScanTemplateSelect();
+  const LAY=window.GolfDaddyLaunchMonitorLayouts;
+  const layout=LAY&&key?LAY.get(key):null;
+  const select=document.getElementById("gdPracticeScanTemplateSelect");
+  if(select)select.value=layout?layout.key:"";
+  try{localStorage.setItem(GD_PRACTICE_SCAN_TEMPLATE_KEY,layout?layout.key:"");}catch(e){}
+  return layout?layout.key:"";
+}
+function gdPracticeScanTemplateChanged(){
+  const key=gdPracticeScanTemplateKey();
+  try{localStorage.setItem(GD_PRACTICE_SCAN_TEMPLATE_KEY,key);}catch(e){}
+  const manual=document.getElementById("gdPracticeManualQuadTool");
+  if(manual&&!manual.hidden&&typeof gdPracticeManualQuadStatus==="function"){
+    gdPracticeManualQuadStatus(key?gdT("practice.framePinsTemplate"):gdT("practice.framePinsThenScan"),"ready");
+  }
+  return key;
+}
+if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",gdPracticeRenderScanTemplateSelect);
+else gdPracticeRenderScanTemplateSelect();
 var gdPracticePhotoPickerPending=null;
 function gdPracticeFileSizeLabel(file){
   const bytes=Number(file?.size)||0;
@@ -2473,6 +2535,7 @@ async function gdRecognizeWithTesseract(Tesseract,image,config={},workerKey="gen
   }
 }
 let gdPracticePhotoBitmap=null;
+let gdPracticePhotoTemplateFrame=null;
 let gdPracticePhotoName="";
 let gdPracticeNormalizedCanvas=null;
 let gdPracticeClusterCheckpoint=null;
@@ -11622,6 +11685,36 @@ function gdPracticeDefaultManualCheckpoint(reason="manual framing"){
     clusterMode:reason
   };
 }
+// Guided camera + template mode: the player already framed the table on the
+// viewfinder, and the saved photo is that frame plus a margin. Put the pins
+// on the frame instead of hunting for a value shape - the template wants the
+// header row along the top edge, which the value-shape finder cuts off. When
+// the normaliser perspective-warped the photo the fractions no longer hold,
+// so the shape finder runs as usual.
+function gdPracticeTemplateFrameCheckpoint(){
+  const frame=gdPracticePhotoTemplateFrame;
+  if(!frame||typeof gdPracticeScanTemplateKey!=="function"||!gdPracticeScanTemplateKey())return null;
+  const source=gdPracticeNormalizedCanvas||gdNormalizeLaunchMonitorTable(gdPracticePhotoBitmap)||gdPracticePhotoBitmap;
+  if(!source)return null;
+  const square=source.__gdTableSquare||{};
+  if(String(square.mode||source.__gdNormalizeMode||"").startsWith("perspective-warp"))return null;
+  const srcW=Number(square.sourceWidth)||Number(gdPracticePhotoBitmap?.width)||0;
+  const srcH=Number(square.sourceHeight)||Number(gdPracticePhotoBitmap?.height)||0;
+  const outW=Number(source.width)||0,outH=Number(source.height)||0;
+  if(!srcW||!srcH||!outW||!outH)return null;
+  const crop=square.crop||{x:0,y:0,width:srcW,height:srcH};
+  const cropW=Number(crop.width)||srcW,cropH=Number(crop.height)||srcH;
+  const toOut=(fx,fy)=>({
+    x:Math.max(0,Math.min(outW-1,(fx*srcW-(Number(crop.x)||0))*(outW/Math.max(1,cropW)))),
+    y:Math.max(0,Math.min(outH-1,(fy*srcH-(Number(crop.y)||0))*(outH/Math.max(1,cropH))))
+  });
+  const quad=[toOut(frame.x,frame.y),toOut(frame.x+frame.w,frame.y),toOut(frame.x+frame.w,frame.y+frame.h),toOut(frame.x,frame.y+frame.h)];
+  const checkpoint=gdPracticeDefaultManualCheckpoint("guided camera frame");
+  if(!checkpoint)return null;
+  checkpoint.cluster=Object.assign({},checkpoint.cluster,{quad,rawQuad:quad,bufferedRawQuad:quad,templateFrame:true});
+  checkpoint.templateFrame=true;
+  return checkpoint;
+}
 function gdPracticeManualCanvasPoint(event){
   const state=gdPracticeManualQuadState;
   const canvas=document.getElementById("gdPracticeManualQuadCanvas");
@@ -11788,7 +11881,8 @@ function gdOpenPracticeManualQuadTool(){
   document.body.classList.remove("gdPracticeScanRunning");
   document.getElementById("gdPracticeScanner")?.classList.remove("active");
   document.getElementById("gdPracticeOcrReview")?.classList.remove("active","stripOnly");
-  gdPracticeManualQuadStatus(checkpoint.manualFallback?gdT("practice.framePinsThenScan"):gdT("practice.pinsLoadedFromShape"),"ready");
+  const templateMode=typeof gdPracticeScanTemplateKey==="function"&&!!gdPracticeScanTemplateKey();
+  gdPracticeManualQuadStatus(templateMode?gdT("practice.framePinsTemplate"):(checkpoint.manualFallback?gdT("practice.framePinsThenScan"):gdT("practice.pinsLoadedFromShape")),"ready");
   gdBindPracticeManualQuadEvents();
   gdRenderPracticeManualQuad();
   try{root.scrollIntoView({behavior:"smooth",block:"start"});}catch(e){}
@@ -13326,7 +13420,8 @@ function gdClarityNativeStripCanvas(flat,strip){
 async function gdClarityDeepScanDirections(flat,scanRows,strips,dataRows,Tesseract,opts){
   opts=opts||{};
   const OCR=window.ClarityTableOcr,PIX=window.ClarityTableOcrPixels;
-  const dirStrips=(Array.isArray(strips)?strips:[]).filter(s=>s&&s.metricKey&&typeof gdColumnNeedsDirection==="function"&&gdColumnNeedsDirection(s.metricKey));
+  const needsDir=typeof opts.needsDirection==="function"?opts.needsDirection:(key=>typeof gdColumnNeedsDirection==="function"&&gdColumnNeedsDirection(key));
+  const dirStrips=(Array.isArray(strips)?strips:[]).filter(s=>s&&s.metricKey&&needsDir(s.metricKey));
   const rows=(Array.isArray(dataRows)?dataRows:[]).filter(r=>r&&Number.isFinite(Number(r.y0))&&Number.isFinite(Number(r.y1)));
   const out={stripEntries:[],examined:0,updated:0,agreed:0,shapeOnly:0,ocrOnly:0,conflicts:0,noMarker:0,noColumn:0,strips:dirStrips.length};
   let done=0;
@@ -13702,13 +13797,200 @@ async function gdClarityTableOcrScanFromCheckpoint(checkpoint,opts={}){
     gdPracticeReleaseProcessingControlsSafe("clarity-table-ocr-finally");
   }
 }
+// Feedback image for template mode: the fit drawn on the flat image - header
+// line (pink), label column edge and column boundaries (gold, dashed where the
+// template boundary stood because no gap was near), shot bands (green) and
+// summary-zone bands (amber), each column labelled with its layout key.
+function gdClarityTemplateOverlay(flat,fit){
+  const maxW=900;
+  const scale=Math.min(1,maxW/Math.max(1,Number(flat.width)||1));
+  const c=document.createElement("canvas");
+  c.width=Math.max(1,Math.round((Number(flat.width)||1)*scale));
+  c.height=Math.max(1,Math.round((Number(flat.height)||1)*scale));
+  const ctx=c.getContext("2d");
+  try{ctx.drawImage(flat,0,0,c.width,c.height);}catch(e){}
+  (fit.bands||[]).forEach(b=>{
+    ctx.fillStyle=b.summaryZone?"rgba(255,184,74,.18)":"rgba(55,242,141,.14)";
+    ctx.fillRect(0,b.y0*scale,c.width,(b.y1-b.y0)*scale);
+  });
+  ctx.strokeStyle="rgba(255,120,220,.95)";ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(0,fit.headerBottom*scale);ctx.lineTo(c.width,fit.headerBottom*scale);ctx.stroke();
+  ctx.font="11px ui-monospace,Menlo,monospace";
+  (fit.columns||[]).forEach(col=>{
+    ctx.strokeStyle="rgba(255,211,116,.95)";ctx.lineWidth=1.5;
+    ctx.setLineDash(col.snapped?[]:[4,4]);
+    ctx.beginPath();ctx.moveTo(col.x0*scale,0);ctx.lineTo(col.x0*scale,c.height);ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle=col.key?"#37f28d":"#8fa39a";
+    ctx.fillText(String(col.key||"-").slice(0,12),col.x0*scale+3,12);
+  });
+  return c;
+}
+// TEMPLATE MODE. The player chose a launch monitor layout and framed the table
+// so the header row runs along the top edge. The layout's column order is the
+// map, so there is nothing to discover: fit the template to the ink (pure
+// module), read one small crop per cell, assemble rows, then borrow the
+// no-template route's direction deep scan for the small L/R/+/- markers. Same
+// job boundary, same single checkpoint into the Shot Library.
+async function gdClarityTemplateScanFromCheckpoint(checkpoint,opts={}){
+  const TPL=window.ClarityTemplateOcr,OCR=window.ClarityTableOcr,PIX=window.ClarityTableOcrPixels,LAY=window.GolfDaddyLaunchMonitorLayouts;
+  const sourceLabel=opts.sourceLabel||gdPracticePhotoName||"Practice photo scan";
+  const layout=LAY&&opts.templateKey?LAY.get(opts.templateKey):null;
+  const flat=checkpoint?.scanImage||checkpoint?.directColumnSource||checkpoint?.cluster?.displayCutoutCanvas||checkpoint?.cluster?.cutoutCanvas||gdPracticeNormalizedCanvas||null;
+  if(!TPL||!OCR||!PIX||!layout){
+    gdPracticeFeedback(gdT("shots.scanModuleNotLoaded"),"error",{state:"idle"});
+    return null;
+  }
+  if(!flat||typeof flat.width!=="number"){
+    gdPracticeFeedback(gdT("practice.scanFailTable"),"error",{state:"error"});
+    gdOpenPracticeManualQuadTool();
+    return null;
+  }
+  const job=gdPracticeStartImportJob("clarity-template-ocr",sourceLabel,{status:"scanning",checkpointText:`Fitting ${layout.label} template`,stageIndex:0,progress:8});
+  if(!job)return null;
+  const jobId=job.id;
+  gdPracticeClusterCheckpoint=checkpoint;
+  window.__gdPracticeClusterCheckpoint=checkpoint;
+  gdClosePracticeManualQuadTool();
+  gdSetPracticePhotoProcessing(true,{stageIndex:0,progress:8,preserveClubs:true});
+  gdPracticeFeedback(gdT("shots.templateScanning",{layout:layout.label}),"",{state:"scanning"});
+  await gdPracticeYieldScanPaint();
+  try{
+    const Tesseract=await gdLoadTesseract();
+    // ---- fit: template + ink -> header bottom, label column, column slots, shot bands
+    gdPracticeDebugCheckpointSafe("value_corridor_mapping","running",{inputSummary:`${flat.width}x${flat.height} flat image, ${layout.label} (${layout.columns.length} columns)`});
+    const mask=PIX.inkMask(PIX.imageData(flat));
+    const fit=TPL.fitTemplate(layout,flat.width,flat.height,mask);
+    const fitSummary=`header bottom y${fit.headerBottom}, label column 0-${fit.labelRight}, ${fit.columns.length} slots (${fit.columns.filter(c=>c.snapped).length} snapped to ink gaps), ${fit.bands.length} bands (${fit.bands.filter(b=>b.summaryZone).length} in the summary zone). ${fit.notes.join("; ")}`;
+    gdPracticeDebugCheckpointSafe("value_corridor_mapping",fit.bands.length?"success":"failed",{outputSummary:fitSummary,counts:{columns:fit.columns.length,bands:fit.bands.length},snapshot:{canvas:gdClarityTemplateOverlay(flat,fit),label:`Template fit: ${layout.label}`}});
+    if(!fit.bands.length){
+      gdPracticeFeedback(gdT("practice.scanFailTemplateRows"),"error",{state:"error"});
+      gdOpenPracticeManualQuadTool();
+      return null;
+    }
+    // ---- label column: one read per band (shot number, club, AVERAGE / STD DEV)
+    gdPracticeUpdateImportJob({checkpointText:"Reading row labels",stageIndex:1,progress:18});
+    gdSetPracticePhotoProcessing(true,{stageIndex:1,progress:18,preserveClubs:true});
+    const labels={};
+    if(fit.labelRight>=8){
+      for(const band of fit.bands){
+        gdPracticeAssertImportNotCanceled();
+        const rect=TPL.labelRect(fit,band,3);
+        const crop=gdClarityPadCanvas(PIX.binarizeCanvas(gdClarityDeepCropCell(flat,rect).canvas),12);
+        const res=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,crop,{tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.° ",tessedit_pageseg_mode:"7"},"clarity-template-label"),9000);
+        labels[band.index]=String(res?.data?.text||"").trim();
+      }
+    }
+    // ---- cells: one small crop per band x column, read on clean white
+    const cells=TPL.cellRects(fit,3).filter(cell=>cell.key);
+    const reads={};
+    const binarize=c=>(PIX.binarizeCanvas?PIX.binarizeCanvas(c):c);
+    for(let i=0;i<cells.length;i+=1){
+      gdPracticeAssertImportNotCanceled();
+      const cell=cells[i];
+      const prof=gdClarityStripProfile(cell.key);
+      const whitelist=cell.direction?"0123456789.,°ºLRlr-+ ":prof.whitelist;
+      const rawCell=gdClarityDeepCropCell(flat,cell.rect).canvas;
+      const cellImg=gdClarityPadCanvas(binarize(rawCell),14);
+      const readOnce=async(psm,img)=>{
+        const rr=await gdClarityOcrWithTimeout(gdRecognizeWithTesseract(Tesseract,img||cellImg,{tessedit_char_whitelist:whitelist,tessedit_pageseg_mode:psm},"clarity-template-cell-"+psm),12000);
+        const t=String(rr&&rr.data&&rr.data.text||"").trim();
+        return {text:t,cell:t?OCR.parseCell(t,cell.key):null};
+      };
+      // Same three-step read as the no-template route: binarised psm 7, then
+      // psm 13, then the raw pixels - the first plausible read wins.
+      const better=(cur,alt)=>((alt.cell&&alt.cell.valid)||(!cur.cell&&alt.cell)||(!cur.text&&alt.text))?alt:cur;
+      let got=await readOnce("7");
+      if(!(got.cell&&got.cell.valid))got=better(got,await readOnce("13"));
+      if(!(got.cell&&got.cell.valid))got=better(got,await readOnce("7",gdClarityPadCanvas(rawCell,14)));
+      reads[cell.row+":"+cell.col]=got.text;
+      if(i%8===0){
+        gdPracticeUpdateImportJob({checkpointText:`Reading cells ${i+1}/${cells.length}`,stageIndex:1,progress:Math.min(78,20+Math.round((i/Math.max(1,cells.length))*58))});
+        await gdPracticeYieldScanPaint();
+      }
+    }
+    // ---- rows
+    const manualClub=(typeof gdPracticeScanClubLabel==="function"?gdPracticeScanClubLabel():"7i")||"7i";
+    const assembled=TPL.assembleRows(fit,reads,labels,{club:manualClub,clubFromText:text=>(typeof gdLmClubFromLine==="function"?(gdLmClubFromLine(text)||""):"")});
+    const scanRows=assembled.rows;
+    const dropLog=assembled.dropped.map(d=>`band${d.row+1}: dropped (${d.why})${d.label?` "${d.label}"`:""}`);
+    const readDump=fit.columns.filter(c=>c.key).map(col=>{
+      const vals=scanRows.map(r=>{const c=(r.cells||[]).find(x=>x&&x.key===col.key);return c&&c.value!=null?String(c.value)+(c.direction||""):"·";});
+      return `${col.key}: ${vals.join(",")}`;
+    }).join("\n");
+    gdPracticeDebugCheckpointSafe("extraction_completed","running",{inputSummary:`${scanRows.length} rows from ${fit.bands.length} bands x ${fit.columns.length} slots`});
+    // ---- directions: the no-template route's deep scan, on the template's own
+    // direction columns (strips = column slots, bands = shot rows).
+    gdPracticeUpdateImportJob({checkpointText:"Reading direction markers",stageIndex:2,progress:84});
+    gdSetPracticePhotoProcessing(true,{stageIndex:2,progress:84,preserveClubs:true});
+    const directionKeys=new Set(fit.columns.filter(c=>c.key&&c.direction).map(c=>c.key));
+    try{
+      const strips=fit.columns.filter(c=>c.key&&c.direction).map(c=>({metricKey:c.key,left:c.x0,right:c.x1,canvas:PIX.cropCanvas(flat,c.x0,0,c.x1,flat.height,0)}));
+      const dataRows=scanRows.map(r=>{const b=fit.bands[r.band];return {y0:b.y0,y1:b.y1};});
+      gdPracticeDebugCheckpointSafe("deep_scan","running",{inputSummary:`${strips.length} direction columns (${strips.map(s=>s.metricKey).join(", ")||"none"}) x ${dataRows.length} rows`});
+      const deep=await gdClarityDeepScanDirections(flat,scanRows,strips,dataRows,Tesseract,{needsDirection:key=>directionKeys.has(key),onStrip:(n,total)=>{try{gdPracticeUpdateImportJob({checkpointText:`Direction column ${n}/${total}`,stageIndex:2,progress:Math.min(94,84+Math.round((n/Math.max(1,total))*10))});}catch(e){}}});
+      gdPracticeDebugCheckpointSafe("deep_scan",deep.examined?"success":"warning",{
+        outputSummary:`${deep.strips} direction columns, ${deep.examined} cells examined: ${deep.agreed} agree (shape+ocr), ${deep.shapeOnly} shape-only, ${deep.ocrOnly} ocr-only, ${deep.conflicts} conflict (not applied), ${deep.noMarker} no marker. ${deep.noColumn} column(s) without an aligned marker column. ${deep.updated} direction${deep.updated===1?"":"s"} changed.`,
+        counts:{strips:deep.strips,examined:deep.examined,updated:deep.updated},
+        snapshot:{canvas:gdClarityDeepScanMontage(deep.stripEntries),label:"Direction markers after blanking (blue = marker column read; right rail = per-row result)"}
+      });
+    }catch(e){
+      if(typeof gdPracticeIsQuietScanStop==="function"&&gdPracticeIsQuietScanStop(e))throw e;
+      console.warn("[GolfDaddy] Template deep scan failed",e);
+      gdPracticeDebugCheckpointSafe("deep_scan","failed",{outputSummary:`Direction deep scan failed - directions fall back to the cell read. ${e&&e.message?e.message:e}`,technicalDetails:e&&e.stack});
+    }
+    // Direction columns beyond the library's three core ones (sideAngle,
+    // sideSpin, offline) are signed here: left is negative, as everywhere else.
+    // The payload step only signs the core three itself.
+    scanRows.forEach(row=>(row.cells||[]).forEach(cell=>{
+      if(!cell||!cell.directionColumn||cell.value==null)return;
+      if(typeof gdColumnNeedsDirection==="function"&&gdColumnNeedsDirection(cell.key))return;
+      cell.value=String(cell.direction||"").toUpperCase()==="L"?-Math.abs(Number(cell.value)):Math.abs(Number(cell.value));
+    }));
+    // ---- the single checkpoint into the Shot Library
+    const payload=gdClarityScanResultToPayload(scanRows,{label:sourceLabel,club:manualClub});
+    payload.inputType="clarity-template-ocr";
+    payload.sourceIdentity={providerGuess:String(layout.key||"").split("-")[0]||"clarity_template_ocr",confidence:.85,evidence:[`Template: ${layout.label}`]};
+    const rowCount=Number(payload?.clubGroups?.length)||0;
+    gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots with the ${layout.label} template (${scanRows.length} rows x ${fit.columns.filter(c=>c.key).length} columns)\n${readDump}\n${dropLog.join("\n")}`,counts:{rows:rowCount,scanRows:scanRows.length},snapshot:{canvas:gdClarityTemplateOverlay(flat,fit),label:`Template extraction: ${rowCount} shots`}});
+    if(!rowCount){
+      gdPracticeFeedback(gdT("practice.scanFailValues"),"error",{state:"error"});
+      gdOpenPracticeManualQuadTool();
+      return null;
+    }
+    gdPracticeSetExtractionPreview(payload,sourceLabel);
+    await gdImportLaunchMonitorPayload(payload,sourceLabel);
+    gdSetPracticeScanStatus(gdTn("shots.scanCompleteSaved",rowCount),{state:"ready"});
+    gdPracticeFeedback(gdTn("shots.savedToLibrary",rowCount),"ready",{state:"idle"});
+    return payload;
+  }catch(e){
+    if(typeof gdPracticeIsQuietScanStop==="function"&&gdPracticeIsQuietScanStop(e)){
+      gdPracticeReleaseStoppedScan(e.message||"Practice photo scan stopped");
+      return null;
+    }
+    console.warn("[GolfDaddy] Clarity template scan failed",e);
+    gdPracticeDebugFailedSafe("extraction_started",e,{outputSummary:"Clarity template scan failed",technicalDetails:e&&e.stack});
+    gdPracticeFeedback(e&&e.message?e.message:gdT("practice.scanFailTable"),"error",e&&e.message?{}:{state:"error"});
+    return null;
+  }finally{
+    try{if(gdPracticeImportJobIsCurrent(jobId))gdPracticeFailImportJob(new Error("Clarity template scan ended without saving"),gdT("shots.scanEndedWithoutSaving"));}catch(e){}
+    gdSetPracticePhotoProcessing(false,{skipJob:true});
+    gdPracticeReleaseProcessingControlsSafe("clarity-template-ocr-finally");
+  }
+}
 async function gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,opts={}){
-  // Rebuilt path: delegate to the isolated Clarity Table OCR module. The old
-  // corridor/header/column pipeline is bypassed (kept as dead code for now).
+  // Two routes from the same flattened checkpoint:
+  //   template mode    - a launch monitor layout is selected; the layout's
+  //                      column order is the map and only cells are read
+  //                      (gdClarityTemplateScanFromCheckpoint);
+  //   no-template mode - the discovery route that finds columns and reads
+  //                      headers itself (gdClarityTableOcrScanFromCheckpoint).
   if(!checkpoint){
     gdPracticeFeedback(gdT("practice.scanFailTable"),"error",{state:"error"});
     return null;
   }
+  const templateKey=typeof gdPracticeScanTemplateKey==="function"?gdPracticeScanTemplateKey():"";
+  if(templateKey)return gdClarityTemplateScanFromCheckpoint(checkpoint,Object.assign({},opts,{templateKey}));
   return gdClarityTableOcrScanFromCheckpoint(checkpoint,opts);
 }
 async function gdRunPracticePhotoOcrFromCheckpoint(checkpoint){
@@ -13739,6 +14021,7 @@ async function gdHandleLaunchMonitorPhoto(file){
     gdPracticeClearTemplateOutcomes();
     gdPracticePhotoBitmap=await createImageBitmap(file);
     gdPracticePhotoName=file.name||"Photo shot data scan";
+    gdPracticePhotoTemplateFrame=file.__gdTemplateFrame&&Number.isFinite(Number(file.__gdTemplateFrame.w))?file.__gdTemplateFrame:null;
     gdPracticeDebugCheckpointSafe("photo_selected","success",{outputSummary:"Browser image bitmap created",counts:{bytes:file.size||0}});
     gdPracticeDebugCheckpointSafe("image_metadata","success",{outputSummary:`${gdPracticePhotoBitmap.width} x ${gdPracticePhotoBitmap.height}`,counts:{width:gdPracticePhotoBitmap.width,height:gdPracticePhotoBitmap.height}});
     gdPracticeDebugCheckpointSafe("image_preprocess","running",{inputSummary:"Normalize table image"});
@@ -13762,9 +14045,13 @@ async function gdHandleLaunchMonitorPhoto(file){
       return;
     }
     gdPracticeDebugCheckpointSafe("crop_cleanup","running",{inputSummary:"Finding value-grid crop"});
-    const checkpoint=await gdBuildPracticeClusterCheckpoint();
+    const frameCheckpoint=gdPracticeTemplateFrameCheckpoint();
+    const checkpoint=frameCheckpoint||await gdBuildPracticeClusterCheckpoint();
     gdPracticeClusterCheckpoint=checkpoint;
-    if(checkpoint){
+    if(frameCheckpoint){
+      gdPracticeDebugCheckpointSafe("crop_cleanup","success",{outputSummary:"Pins placed on the guided camera frame (template mode)",counts:{hasCluster:1}});
+      gdOpenPracticeManualQuadTool();
+    }else if(checkpoint){
       gdPracticeDebugCheckpointSafe("crop_cleanup","success",{outputSummary:"Value-grid checkpoint created",counts:{hasCluster:checkpoint.cluster?1:0}});
       gdOpenPracticeManualQuadTool();
     }else{
@@ -14135,7 +14422,7 @@ document.addEventListener("change",event=>{
   else gdHandleLaunchMonitorUpload(file);
   input.value="";
 },true);
-Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdAdjustPracticeGeneratedBox,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdPracticeNativePayloadFromText,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdPracticePrimaryScanAction,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScanFromCheckpoint,gdClarityTableOcrScanFromCheckpoint,gdRunValueCorridorMappingFromCheckpoint,gdRunPracticeHeaderStripScanFromColumnScan,gdRunPracticeColumnStripValueScan,gdSetPracticePhotoProcessing,gdPracticeHardStopScan,gdPracticeRefreshDebugTools,gdImportReviewedPracticeOcr,gdDownloadFlattenedGrid,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdOpenPracticeFlatTableFailureWindow,gdRenderFlatTableFailureWindow,gdOpenPracticeTemplateOutcomes,gdRunOcrGeneratedTemplateFallbackFromCheckpoint,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPracticeOpenScanOutcomeFromDebug,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData,gdPracticeHandleImportJobAction});
+Object.assign(window,{gdLoadLaunchMonitorDemo,gdClearLaunchMonitorDemo,gdPickLaunchMonitorFile,gdPickPracticePhotoFile,gdAdjustPracticeGeneratedBox,gdHandleNativePracticeTextFile,gdHandleLaunchMonitorUpload,gdPracticeNativePayloadFromText,gdHandleLaunchMonitorPhoto,gdScanPracticePhotoCrop,gdPracticePrimaryScanAction,gdOpenPracticeManualQuadTool,gdApplyPracticeManualQuad,gdRunDefaultPracticePhotoScanFromCheckpoint,gdClarityTableOcrScanFromCheckpoint,gdClarityTemplateScanFromCheckpoint,gdPracticeScanTemplateKey,gdPracticeSetScanTemplate,gdPracticeScanTemplateChanged,gdPracticeRenderScanTemplateSelect,gdRunValueCorridorMappingFromCheckpoint,gdRunPracticeHeaderStripScanFromColumnScan,gdRunPracticeColumnStripValueScan,gdSetPracticePhotoProcessing,gdPracticeHardStopScan,gdPracticeRefreshDebugTools,gdImportReviewedPracticeOcr,gdDownloadFlattenedGrid,gdCancelPracticePhotoScan,gdCancelPracticeOcrReview,gdPracticeScanClubLabel,gdPracticeScanClubLabels,gdLoadExtractedPractice7iData,gdPracticeSetExtractionPreview,gdPracticeClearExtractionPreview,gdImportPracticeExtractionPreview,gdBuildLaunchMonitorTextCapture,gdCleanLaunchMonitorOcrText,gdLmCaptureToReviewText,gdAnalyzeFlatTableImage,gdFitFlatTableTemplateFromAnalysis,gdBuildFlatTableTemplateColumnScan,gdOpenPracticeFlatTableFailureWindow,gdRenderFlatTableFailureWindow,gdOpenPracticeTemplateOutcomes,gdRunOcrGeneratedTemplateFallbackFromCheckpoint,gdRunFlatTemplateBridgeFromCheckpoint,gdRunPracticeGridExperiment,gdRunFittedCellGridOcr,gdBuildFlatDigitizedTable,gdRenderFlatDigitizedTable,gdPracticeOpenScanOutcomeFromDebug,gdPickRawCourseDataFile,gdHandleRawCourseDataUpload,gdClearCourseShotData,gdPracticeHandleImportJobAction});
 function gdLmStatusClass(status){
   if(["corroborated","cross_distance_verified","verified_by_result","cluster_candidate","delivery_only","result_only"].includes(status))return "good";
   if(["conflict_check","alignment_signal"].includes(status))return "warn";
