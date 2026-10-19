@@ -36,6 +36,7 @@ class NumbersView extends WatchUi.View {
     // Where the last draw put the things a finger can hit.
     var numberBox = null;    // [x0, y0, x1, y1]
     var windHit = null;      // [x, y, radius]
+    var unlockBox = null;    // [x0, y0, x1, y1] - the pill's UNLOCK half, while a shot is locked
 
     // The mockup's colours. A 64-colour MIP panel would snap the dark
     // crescent green to a loud one, so it gets its own nearest dark green.
@@ -244,23 +245,44 @@ class NumbersView extends WatchUi.View {
     // The mockup's AIM pill: SELECT (or a tap) opens the map in Aim Mode.
     // Where the wrist cannot aim locally yet, SELECT still LOCKs, as this
     // face always has (CaddyInputDelegate.handleSelect), and the pill says so.
+    //
+    // While a shot is locked the pill splits, as Apple's unlock band does:
+    // AIM on the left, still SELECT, and UNLOCK on the right - a tap there
+    // (CaddyInputDelegate.numbersTap) or LAP on a button watch. Marshal
+    // decides when that is offered (Scene canUnlock), never this face.
     function drawAimButton(dc, w, h) {
         var canAim = aimable != null && aimable.invoke();
         var canLock = session.scene != null && session.scene.canLock();
+        var canUnlock = session.scene != null && session.scene.canUnlock();
         var busy = session.outbox.isPending(GarminCommandKind.LOCK);
+        var unlockBusy = session.outbox.isPending(GarminCommandKind.UNLOCK);
         var label = canAim ? "AIM" : (busy ? "..." : (session.lockedShot != null ? "LOCKED" : "LOCK"));
         var live = canAim || canLock || session.lockedShot != null;
+        var split = canUnlock && !unlockBusy;
 
-        var left = w * 0.3;
+        // The split pill is wider, so UNLOCK has room beside the crosshair
+        // on a 218 px screen; the AIM half keeps the single pill's place.
+        var left = split ? w * 0.2 : w * 0.3;
         var top = h * 0.625;
-        var bw = w * 0.4;
+        var bw = split ? w * 0.6 : w * 0.4;
         var bh = h * 0.165;
         var r = bh / 2;
         var edge = (w >= 300) ? 3 : 2;
+        var aimRight = split ? w * 0.52 : left + bw;
         dc.setColor(PILL_EDGE, PILL_EDGE);
         dc.fillRoundedRectangle(left - edge, top - edge, bw + edge * 2, bh + edge * 2, r + edge);
         dc.setColor(live ? pillColour : Graphics.COLOR_DK_GRAY, Graphics.COLOR_TRANSPARENT);
         dc.fillRoundedRectangle(left, top, bw, bh, r);
+        if (split) {
+            // The UNLOCK half in the pill's edge colour, parted from AIM by
+            // the same line.
+            dc.setColor(PILL_EDGE, Graphics.COLOR_TRANSPARENT);
+            dc.fillRoundedRectangle(aimRight, top, left + bw - aimRight, bh, r);
+            dc.fillRectangle(aimRight, top, r, bh);
+            unlockBox = [aimRight, top - edge, left + bw + edge, top + bh + edge];
+        } else {
+            unlockBox = null;
+        }
 
         // Crosshair: a ring broken where the cross passes, the cross
         // running past the pill top and bottom, a dot in the middle.
@@ -282,10 +304,18 @@ class NumbersView extends WatchUi.View {
         dc.setPenWidth(1);
 
         var textLeft = ccx + bh * 0.62;
-        var textRight = left + bw - r * 0.55;
+        var textRight = aimRight - r * 0.55;
         var labelFont = font(dc, bh * 0.5, label, textRight - textLeft, [Graphics.FONT_LARGE, Graphics.FONT_MEDIUM, Graphics.FONT_SMALL, Graphics.FONT_TINY]);
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_TRANSPARENT);
         dc.drawText((textLeft + textRight) / 2, ccy, labelFont, label, Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+
+        if (split) {
+            var unlockLeft = aimRight + r * 0.3;
+            var unlockRight = left + bw - r * 0.55;
+            var unlockFont = font(dc, bh * 0.4, "UNLOCK", unlockRight - unlockLeft, [Graphics.FONT_MEDIUM, Graphics.FONT_SMALL, Graphics.FONT_TINY, Graphics.FONT_XTINY]);
+            dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+            dc.drawText((unlockLeft + unlockRight) / 2, ccy, unlockFont, "UNLOCK", Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+        }
     }
 
     // The wind marker at (x, ay), `dial` its scale - small in the corner
@@ -455,6 +485,9 @@ class NumbersView extends WatchUi.View {
         }
         if (numberBox != null && x >= numberBox[0] && x <= numberBox[2] && y >= numberBox[1] && y <= numberBox[3]) {
             return "number";
+        }
+        if (unlockBox != null && x >= unlockBox[0] && x <= unlockBox[2] && y >= unlockBox[1] && y <= unlockBox[3]) {
+            return "unlock";
         }
         return null;
     }
