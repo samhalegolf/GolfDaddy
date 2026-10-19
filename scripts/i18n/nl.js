@@ -1837,7 +1837,7 @@
     "welcome.deleteAccount": "Account verwijderen",
     "welcome.garminCardTitle": "Garmin-horloge",
     "welcome.wristTitle": "Jouw Bubble, om je pols.",
-    "welcome.garminNumbersImageAlt": "Cijferscherm van een Garmin-horloge met de hole, afstand, club en een richtknop",
+    "welcome.appleImageAlt": "Holekaart op Apple Watch met de Bubble op het richtpunt en de speelt-als-afstand",
     "welcome.garminMapImageAlt": "Holekaart op een Garmin-horloge met de Bubble getekend op het richtpunt",
     "welcome.garminNumbers": "Afstanden tot voorkant, midden en achterkant van de green, en de club waarmee je tas de slag dekt",
     "welcome.garminMap": "De holekaart met je positie, de green, je richtpunt en je Bubble getekend waar hij gaat landen",

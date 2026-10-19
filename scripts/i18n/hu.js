@@ -1837,7 +1837,7 @@
     "welcome.deleteAccount": "Fiók törlése",
     "welcome.garminCardTitle": "Garmin óra",
     "welcome.wristTitle": "A Bubble-öd, a csuklódon.",
-    "welcome.garminNumbersImageAlt": "Garmin óra számképernyője a lyukkal, a távolsággal, az ütővel és egy célzás gombbal",
+    "welcome.appleImageAlt": "Lyuktérkép Apple Watchon, a Bubble a célponton és a tényleges játéktávolság",
     "welcome.garminMapImageAlt": "Lyuktérkép Garmin órán, a Bubble a célpontra rajzolva",
     "welcome.garminNumbers": "Távolság a green elejéig, közepéig és hátuljáig, és az ütő, amellyel a táskád lefedi az ütést",
     "welcome.garminMap": "A lyuktérkép a pozícióddal, a greennel, a célpontoddal és a Bubble-öddel ott, ahol landolni fog",

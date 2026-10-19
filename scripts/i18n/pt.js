@@ -1837,7 +1837,7 @@
     "welcome.deleteAccount": "Eliminar conta",
     "welcome.garminCardTitle": "Relógio Garmin",
     "welcome.wristTitle": "A tua Bubble, no teu pulso.",
-    "welcome.garminNumbersImageAlt": "Ecrã de números de um relógio Garmin com o buraco, a distância, o taco e um botão de apontar",
+    "welcome.appleImageAlt": "Mapa do buraco no Apple Watch com a Bubble no ponto de mira e a distância efetiva",
     "welcome.garminMapImageAlt": "Mapa do buraco num relógio Garmin com a Bubble desenhada no ponto de mira",
     "welcome.garminNumbers": "Distâncias à frente, ao centro e ao fundo do green, e o taco com que o teu saco cobre a pancada",
     "welcome.garminMap": "O mapa do buraco com a tua posição, o green, o teu ponto de mira e a tua Bubble desenhada onde vai cair",

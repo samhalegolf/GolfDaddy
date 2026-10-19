@@ -1913,7 +1913,7 @@
     "welcome.deleteAccount": "Dzēst kontu",
     "welcome.garminCardTitle": "Garmin pulkstenis",
     "welcome.wristTitle": "Tavs Bubble, uz tavas rokas.",
-    "welcome.garminNumbersImageAlt": "Garmin pulksteņa skaitļu ekrāns ar bedrīti, attālumu, nūju un tēmēšanas pogu",
+    "welcome.appleImageAlt": "Bedrītes karte Apple Watch ar Bubble tēmēšanas punktā un faktisko spēles attālumu",
     "welcome.garminMapImageAlt": "Bedrītes karte Garmin pulkstenī ar Bubble, uzzīmētu tēmēšanas punktā",
     "welcome.garminNumbers": "Attālumi līdz grīna priekšai, vidum un aizmugurei un nūja, ar kuru tava soma nosedz sitienu",
     "welcome.garminMap": "Bedrītes karte ar tavu atrašanās vietu, grīnu, tēmēšanas punktu un tavu Bubble, uzzīmētu tur, kur tas nolaidīsies",

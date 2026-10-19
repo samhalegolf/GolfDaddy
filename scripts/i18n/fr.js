@@ -1837,7 +1837,7 @@
     "welcome.deleteAccount": "Supprimer le compte",
     "welcome.garminCardTitle": "Montre Garmin",
     "welcome.wristTitle": "Votre Bubble, à votre poignet.",
-    "welcome.garminNumbersImageAlt": "Écran des chiffres d’une montre Garmin avec le trou, la distance, le club et un bouton Viser",
+    "welcome.appleImageAlt": "Carte du trou sur Apple Watch avec la Bubble sur le point visé et la distance effective",
     "welcome.garminMapImageAlt": "Carte du trou sur une montre Garmin, avec la Bubble dessinée sur le point visé",
     "welcome.garminNumbers": "Distances à l’entrée, au centre et au fond du green, et le club avec lequel votre sac couvre le coup",
     "welcome.garminMap": "La carte du trou avec votre position, le green, votre point visé et votre Bubble dessinée là où elle va atterrir",

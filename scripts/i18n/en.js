@@ -1843,7 +1843,7 @@
     "welcome.deleteAccount": "Delete Account",
     "welcome.garminCardTitle": "Garmin watch",
     "welcome.wristTitle": "Your Bubble, on your wrist.",
-    "welcome.garminNumbersImageAlt": "Garmin watch numbers screen showing the hole, distance, club and an Aim button",
+    "welcome.appleImageAlt": "Apple Watch hole map with the Bubble on the aim point and the plays distance",
     "welcome.garminMapImageAlt": "Garmin watch hole map with the Bubble drawn on the aim point",
     "welcome.garminNumbers": "Front, centre and back distances, and the club your bag covers the shot with",
     "welcome.garminMap": "The hole map with your position, the green, your aim point and your Bubble drawn where it will land",

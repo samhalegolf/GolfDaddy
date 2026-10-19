@@ -1913,7 +1913,7 @@
     "welcome.deleteAccount": "Șterge contul",
     "welcome.garminCardTitle": "Ceas Garmin",
     "welcome.wristTitle": "Bubble-ul tău, la încheietura ta.",
-    "welcome.garminNumbersImageAlt": "Ecranul cu cifre al unui ceas Garmin care arată gaura, distanța, crosa și un buton de țintire",
+    "welcome.appleImageAlt": "Harta găurii pe Apple Watch cu Bubble-ul pe punctul de țintire și distanța efectivă de joc",
     "welcome.garminMapImageAlt": "Harta găurii pe un ceas Garmin cu Bubble-ul desenat pe punctul de țintire",
     "welcome.garminNumbers": "Distanțele până la fața, mijlocul și spatele greenului și crosa cu care sacul tău acoperă lovitura",
     "welcome.garminMap": "Harta găurii cu poziția ta, greenul, punctul de țintire și Bubble-ul tău desenat acolo unde va ateriza",

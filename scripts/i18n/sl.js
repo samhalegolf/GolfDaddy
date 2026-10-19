@@ -1989,7 +1989,7 @@
     "welcome.deleteAccount": "Izbriši račun",
     "welcome.garminCardTitle": "Ura Garmin",
     "welcome.wristTitle": "Tvoj Bubble, na tvojem zapestju.",
-    "welcome.garminNumbersImageAlt": "Zaslon s številkami na uri Garmin, ki prikazuje luknjo, razdaljo, palico in gumb za ciljanje",
+    "welcome.appleImageAlt": "Zemljevid luknje na Apple Watch z Bubble na točki ciljanja in dejansko razdaljo igranja",
     "welcome.garminMapImageAlt": "Zemljevid luknje na uri Garmin z Bubble, narisanim na točki ciljanja",
     "welcome.garminNumbers": "Razdalje do sprednjega roba, sredine in zadnjega roba greena ter palica, s katero tvoja torba pokrije udarec",
     "welcome.garminMap": "Zemljevid luknje s tvojim položajem, greenom, točko ciljanja in tvojim Bubble, narisanim tam, kjer bo pristal",
