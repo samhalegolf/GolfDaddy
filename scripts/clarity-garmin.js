@@ -18,12 +18,25 @@
  * callers, so activate() found no selected device and did nothing, forever.
  * This is the missing half.
  *
- * WHAT DOES NOT WORK YET, and is not pretended otherwise anywhere in this
- * file: the Connect IQ Mobile SDK is not bundled in either native build, so
- * `garminDevices` resolves { devices: [], sdkLinked: false, reason }. The page
- * words that as "cannot look" rather than "found none" — those are different
- * answers and a player deserves the real one. Every other part of the flow —
- * selection, persistence, state, disconnect — is real and runs today.
+ * WHAT `garminDevices` ACTUALLY ANSWERS. The Connect IQ Mobile SDK is bundled
+ * in both native builds (the ciq-companion-app-sdk aar on Android, the
+ * ConnectIQ Swift package on iOS) and the watch app is published, so both
+ * transports always answer with `sdkLinked: true`. What differs is how a
+ * watch gets chosen:
+ *   Android lists `getKnownDevices()` in place. If Garmin Connect is not ready
+ *   it answers an empty list plus a `reason` and wakes the SDK, so a second
+ *   tap usually succeeds; if the service drops mid-listing it answers a
+ *   different `reason`.
+ *   iOS has no in-process list. `garminDevices` starts the hand-off to the
+ *   Garmin Connect app and answers { handoff: true, reason } straight away
+ *   (or just a `reason` if Garmin Connect is not installed); the chosen watch
+ *   comes back later through the URL scheme as a state change, never in the
+ *   list.
+ * The only way `sdkLinked: false` still reaches render() is the fallback in
+ * scan() below, when the plugin call itself throws or resolves with nothing.
+ * That is a broken bridge, not a missing SDK, and the page still words it as
+ * "cannot look" rather than "found none" — those are different answers and a
+ * player deserves the real one.
  */
 (function () {
   "use strict";
@@ -185,7 +198,8 @@
     if (!devices) return "";
     /* Three different answers, worded as three different things, because a
        player can act on two of them and not the third:
-         sdkLinked false  -> this build cannot talk to Garmin at all
+         sdkLinked false  -> the plugin call itself failed (only ever set by
+                             the fallback in scan(); both natives answer true)
          a reason         -> we tried and could not look (Garmin Connect not
                              ready, service unreachable)
          empty list       -> we looked and there is nothing paired
