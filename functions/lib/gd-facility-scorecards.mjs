@@ -17,6 +17,14 @@ import { splitCourseName } from "./gd-automapper-core.mjs";
 export const MAPS_TABLE = "course_maps";
 export const SCORECARDS_TABLE = "course_scorecards";
 
+/* The same work as Update Scorecards, as a row on the mapper queue (course_mapper_jobs):
+   find the facility's cards, store them, name its courses when the match is confident. A
+   maintenance kind like find_trees - the course already plays, geometry and visuals are never
+   touched, and the worker only takes one in an idle moment. Queued by the worker's own
+   scorecard backfill (claimScorecardBackfill there), one facility at a time, for every
+   published facility that has no card yet. */
+export const SCORECARD_KIND = "resolve_scorecards";
+
 const MAP_FIELDS = "course_id,course_name,course_lat,course_lng,facility_key,course_aliases,objects_json,holes_json,region,country,published";
 
 /* The pinned course and every published sibling under its facility. Null when the

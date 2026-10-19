@@ -84,7 +84,7 @@ test("the phase tables match the stages the mapper worker actually emits", () =>
   assert.ok(emitted.size >= 10, "expected to find the worker's heartbeat stages, found " + emitted.size);
 
   const known = new Set();
-  ["automap", "collect_extra_objects", "refine_surface_shapes"].forEach(kind => {
+  ["automap", "collect_extra_objects", "refine_surface_shapes", "find_trees", "resolve_scorecards"].forEach(kind => {
     core.PHASES[kind].forEach(band => known.add(band.stage));
   });
   const missing = [...emitted].filter(stage => !known.has(stage));

@@ -125,7 +125,7 @@ test("a busy Overpass means no neighbours this time, not an error", async () => 
 
 test("the worker takes a player job before any background job", async () => {
   const calls = stubFetch({
-    jobs: rest => rest.includes("kind=not.in.(nearby_automap,find_trees)") && rest.includes("status=eq.queued") ? [{ id: "player-job", kind: "automap" }] : [],
+    jobs: rest => rest.includes("kind=not.in.(nearby_automap,find_trees,resolve_scorecards)") && rest.includes("status=eq.queued") ? [{ id: "player-job", kind: "automap" }] : [],
     patchedRows: rest => rest.includes("player-job") ? [{ id: "player-job", kind: "automap" }] : []
   });
   const job = await worker.claimNextJob({ allowNearby: true });
@@ -146,7 +146,7 @@ test("no background job is taken while a player job is running", async () => {
   const calls = stubFetch({
     jobs: rest => {
       if (rest.includes("status=eq.queued")) return rest.includes("kind=eq.nearby_automap") ? [{ id: "bg" }] : [];
-      if (rest.includes("status=in.(queued,running)") && rest.includes("kind=not.in.(nearby_automap,find_trees)")) return [{ id: "player-running" }];
+      if (rest.includes("status=in.(queued,running)") && rest.includes("kind=not.in.(nearby_automap,find_trees,resolve_scorecards)")) return [{ id: "player-running" }];
       return [];
     }
   });
@@ -158,7 +158,7 @@ test("only one background job runs at a time", async () => {
   stubFetch({
     jobs: rest => {
       if (rest.includes("status=eq.queued")) return rest.includes("kind=eq.nearby_automap") ? [{ id: "bg" }] : [];
-      if (rest.includes("status=eq.running") && rest.includes("kind=in.(nearby_automap,find_trees)")) return [{ id: "bg-running" }];
+      if (rest.includes("status=eq.running") && rest.includes("kind=in.(nearby_automap,find_trees,resolve_scorecards)")) return [{ id: "bg-running" }];
       return [];
     }
   });

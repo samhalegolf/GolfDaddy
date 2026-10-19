@@ -36,6 +36,7 @@ import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import { overlayOwnerId } from "./lib/gd-overlay-owner.mjs";
 import { loadPlayerRequests } from "./lib/gd-player-requests.mjs";
 import { TREE_KIND, queueTreeRun } from "./lib/gd-tree-queue.mjs";
+import { SCORECARD_KIND } from "./lib/gd-facility-scorecards.mjs";
 
 const TABLE = "course_mapper_jobs";
 const MAPS_TABLE = "course_maps";
@@ -216,8 +217,9 @@ export const NEARBY_PREFETCH_COUNT = 10;
 const NEARBY_PREFETCH_RADIUS_M = 25000;
 const NEARBY_ACTOR_PREFIX = "nearby:";
 
-/* Tree runs (lib/gd-tree-queue.mjs) are maintenance too: the course already plays. */
-const MAINTENANCE_KINDS = new Set([OBJECT_COLLECTION_KIND, SHAPE_REFINE_KIND, TREE_KIND]);
+/* Tree runs (lib/gd-tree-queue.mjs) and scorecard runs (lib/gd-facility-scorecards.mjs) are
+   maintenance too: the course already plays. */
+const MAINTENANCE_KINDS = new Set([OBJECT_COLLECTION_KIND, SHAPE_REFINE_KIND, TREE_KIND, SCORECARD_KIND]);
 const isMappingJob = job => !MAINTENANCE_KINDS.has(String(job && job.kind || "automap"));
 
 async function mapperBuildStateAll() {
