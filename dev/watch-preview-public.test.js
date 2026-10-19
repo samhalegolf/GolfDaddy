@@ -25,6 +25,7 @@ test("the page loads only scripts that exist, and that the deploy copies", () =>
   refs.forEach((ref) => assert.ok(/^(scripts|assets)\//.test(ref), ref + " is outside the deployed scripts/ and assets/ trees"));
   assert.ok(/"watch-preview\.html"/.test(deploy), "the deploy build does not copy watch-preview.html");
   assert.ok(/NON_APP_FILES = \[[^\]]*"watch-preview\.html"/.test(deploy), "the phone build would ship watch-preview.html");
+  assert.ok(/\["watch-preview\.html"\]\.forEach[\s\S]*stampContentVersions/.test(deploy), "the deployed page's script versions are not content-stamped");
   assert.ok(/id="gate"/.test(html) && /id="preview"[^>]*hidden/.test(html), "the preview is not behind the gate");
   ["tee", "long", "short"].forEach((p) => assert.ok(html.includes('data-preset="' + p + '"'), "no " + p + " position button"));
 });

@@ -269,7 +269,9 @@
            the player stands somewhere. */
         isDemo: function () { return false; },
         distanceTargetM: function () { return null; },
-        canLock: function () { return !!(session.player && currentHole()) && !session.locked; }
+        canLock: function () { return !!(session.player && currentHole()) && !session.locked; },
+        /* Marshal's dock offers UNLOCK whenever the shot is locked (caddy-watch.js controls). */
+        canUnlock: function () { return !!session.locked; }
       },
       currentHole: function () { return session.holeNumber; },
       holeNumbers: function () { return session.holes.map(function (h) { return h.holeNumber; }); },

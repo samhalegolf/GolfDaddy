@@ -982,10 +982,11 @@
   };
 
   /* The `session` seam is the MapFace's, plus what the numbers read beyond the map:
-       scene.isDemo(), scene.canLock(), scene.distanceTargetM()
+       scene.isDemo(), scene.canLock(), scene.canUnlock(), scene.distanceTargetM()
        greenPoint() -> {lat,lng} | null         the green centre, the aim of last resort
        windApplied() -> Boolean                 GarminConditions.windApplied
        lockedShot() -> Boolean, lockPending() -> Boolean
+       unlock()                                 the UNLOCK the pill's right half sends
      `aimable` is GarminMapView.canEnterAimMode, as CaddyAppView wires it. */
   function NumbersFace(session, device, aimable) {
     this.session = session;
@@ -994,6 +995,7 @@
     this.windZoom = false;
     this.numberBox = null;
     this.windHit = null;
+    this.unlockBox = null;   // the pill's UNLOCK half, while a shot is locked
     this.crescentColour = device.amoled ? 0x0A3F22 : 0x005500;
     this.pillColour = device.amoled ? 0x00BF63 : 0x00AA55;
     this.vectorCache = {};
@@ -1134,21 +1136,34 @@
     return String(club);
   };
 
-  /* Returns the pill's label, for the readout. */
+  /* Returns the pill's label, for the readout. While a shot is locked the pill splits, as
+     NumbersView.drawAimButton splits it: AIM on the left, still SELECT, and UNLOCK on the right
+     for a tap (CaddyAppView.pointerUp) or LAP. */
   NumbersFace.prototype.drawAimButton = function (dc, w, h) {
     var session = this.session;
     var canAim = this.aimable != null && this.aimable();
     var canLock = session.scene != null && session.scene.canLock();
+    var canUnlock = session.scene != null && typeof session.scene.canUnlock === "function" && session.scene.canUnlock();
     var busy = session.lockPending();
     var label = canAim ? "AIM" : (busy ? "..." : (session.lockedShot() ? "LOCKED" : "LOCK"));
     var live = canAim || canLock || session.lockedShot();
+    var split = canUnlock;
 
-    var left = w * 0.3, top = h * 0.625, bw = w * 0.4, bh = h * 0.165, r = bh / 2;
+    var left = split ? w * 0.2 : w * 0.3, top = h * 0.625, bw = split ? w * 0.6 : w * 0.4, bh = h * 0.165, r = bh / 2;
     var edge = w >= 300 ? 3 : 2;
+    var aimRight = split ? w * 0.52 : left + bw;
     dc.setColor(NUMBERS_PILL_EDGE, NUMBERS_PILL_EDGE);
     dc.fillRoundedRectangle(left - edge, top - edge, bw + edge * 2, bh + edge * 2, r + edge);
     dc.setColor(live ? this.pillColour : COLOR_DK_GRAY, -1);
     dc.fillRoundedRectangle(left, top, bw, bh, r);
+    if (split) {
+      dc.setColor(NUMBERS_PILL_EDGE, -1);
+      dc.fillRoundedRectangle(aimRight, top, left + bw - aimRight, bh, r);
+      dc.fillRectangle(aimRight, top, r, bh);
+      this.unlockBox = [aimRight, top - edge, left + bw + edge, top + bh + edge];
+    } else {
+      this.unlockBox = null;
+    }
 
     var ccx = left + r, ccy = top + bh / 2, ring = bh * 0.36, line = w >= 300 ? 2 : 1;
     dc.setColor(NUMBERS_INK, -1);
@@ -1162,10 +1177,18 @@
     dc.fillCircle(ccx, ccy, w >= 300 ? 3 : 2);
     dc.setPenWidth(1);
 
-    var textLeft = ccx + bh * 0.62, textRight = left + bw - r * 0.55;
+    var textLeft = ccx + bh * 0.62, textRight = aimRight - r * 0.55;
     var labelFont = this.font(dc, bh * 0.5, label, textRight - textLeft, [F_LARGE, F_MEDIUM, F_SMALL, F_TINY]);
     dc.setColor(COLOR_BLACK, -1);
     dc.drawTextV((textLeft + textRight) / 2, ccy, labelFont, label, TEXT_CENTER);
+
+    if (split) {
+      var unlockLeft = aimRight + r * 0.3, unlockRight = left + bw - r * 0.55;
+      var unlockFont = this.font(dc, bh * 0.4, "UNLOCK", unlockRight - unlockLeft, [F_MEDIUM, F_SMALL, F_TINY, F_XTINY]);
+      dc.setColor(COLOR_WHITE, -1);
+      dc.drawTextV((unlockLeft + unlockRight) / 2, ccy, unlockFont, "UNLOCK", TEXT_CENTER);
+      return label + " | UNLOCK";
+    }
     return label;
   };
 
@@ -1252,7 +1275,8 @@
     dc.drawTextV(idiv(w, 2), h * 0.88, this.font(dc, h * 0.045, speed, w * 0.5, [F_SMALL, F_TINY]), speed, TEXT_CENTER);
   };
 
-  /* "zoom" (anywhere, while the big compass is open), "wind", "number", or null. */
+  /* "zoom" (anywhere, while the big compass is open), "wind", "number", "unlock" (the pill's
+     right half while a shot is locked), or null. */
   NumbersFace.prototype.hit = function (x, y) {
     if (this.windZoom) return "zoom";
     if (this.windHit != null) {
@@ -1261,6 +1285,8 @@
     }
     var b = this.numberBox;
     if (b != null && x >= b[0] && x <= b[2] && y >= b[1] && y <= b[3]) return "number";
+    var u = this.unlockBox;
+    if (u != null && x >= u[0] && x <= u[2] && y >= u[1] && y <= u[3]) return "unlock";
     return null;
   };
 
@@ -1296,8 +1322,8 @@
      untouched.
 
      The extra session seam: stepHole(delta) for NEXT_HOLE / PREVIOUS_HOLE, lock() for LOCK,
-     toggleWindApplied(), requestUpdate() for the double-tap timer, and report(text) for what
-     the watch would send. */
+     unlock() for UNLOCK (scene.canUnlock() says when it is offered), toggleWindApplied(),
+     requestUpdate() for the double-tap timer, and report(text) for what the watch would send. */
   var DOUBLE_TAP_MS = 320, HOLD_MS = 500, SWIPE_FRACTION = 0.18;
 
   function CaddyAppView(session, device, treeBitmap) {
@@ -1370,6 +1396,21 @@
     else this.session.stepHole(-1);
   };
   CaddyAppView.prototype.togglePlays = function () { if (this.showingMap) this.mapView.togglePlays(); };
+  /* KEY_LAP (CaddyInputDelegate.onKey): not aiming, UNLOCK a locked shot on either screen, else
+     LOCK from the map. */
+  CaddyAppView.prototype.lap = function () {
+    var scene = this.session.scene;
+    if (scene == null || !scene.hasRound() || this.aiming) return;
+    if (typeof scene.canUnlock === "function" && scene.canUnlock()) this.session.unlock();
+    else if (this.showingMap && scene.canLock()) this.session.lock();
+  };
+  /* The round after an UNLOCK (GarminSessionManager: a lock or an unlock is a new shot on the
+     same hole, so the play state resets): the held aim goes, the map reframes the hole. */
+  CaddyAppView.prototype.unlock = function () {
+    if (this.mapView.aiming) this.mapView.cancelAim();
+    this.session.playState.clear();
+    this.mapView.camera = null;
+  };
 
   // ---- touch
 
@@ -1392,7 +1433,11 @@
     var dx = press.lastX - press.x, dy = press.lastY - press.y;
     if (-dx > this.device.width * SWIPE_FRACTION && Math.abs(dx) > Math.abs(dy)) { this.cancelPendingTap(); this.showMap(); return; }
     var region = this.numbersView.hit(press.x, press.y);
-    if ((now != null ? now : Date.now()) - press.at >= HOLD_MS) {
+    var held = (now != null ? now : Date.now()) - press.at >= HOLD_MS;
+    /* The pill's UNLOCK half acts at once (CaddyInputDelegate.numbersTap); a hold on it is
+       not an unlock. */
+    if (region === "unlock") { if (!held) { this.cancelPendingTap(); this.session.unlock(); } return; }
+    if (held) {
       if (region != null) { this.cancelPendingTap(); this.session.toggleWindApplied(); }
       return;
     }
