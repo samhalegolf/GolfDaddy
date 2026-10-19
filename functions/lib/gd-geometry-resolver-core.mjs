@@ -237,7 +237,11 @@ function greenCandidateFromElement(element, elements, boundary, index) {
   if (nearFairway < Infinity) evidence.push("course-context:" + Math.round(nearFairway) + "m");
   if (practiceGreenRisk) evidence.push("practice-risk:" + practiceGreenRisk.toFixed(2));
   const confidence = clamp(0.38 * shapeScore + 0.32 * osmScore + 0.3 * courseContextScore - 0.36 * practiceGreenRisk, 0, 1);
-  return { id: elementId(element, "green-" + index), link: tagText(element, LINK_TAG), centre: center, polygon, areaM2: area || undefined, shapeScore, osmScore, courseContextScore, practiceGreenRisk, confidence, evidence };
+  /* A numbered overlay link puts its number on every shape it holds (overlayToOsmElements), so
+     a green can say which hole it is even when no hole line was drawn. */
+  const hole = validHoleNumber(tagText(element, "ref")) || undefined;
+  if (hole) evidence.push("existing-ref:" + hole);
+  return { id: elementId(element, "green-" + index), link: tagText(element, LINK_TAG), hole, centre: center, polygon, areaM2: area || undefined, shapeScore, osmScore, courseContextScore, practiceGreenRisk, confidence, evidence };
 }
 function dedupeGreenCandidates(greens) {
   return (greens || []).slice().sort((a, b) => b.confidence - a.confidence)
@@ -801,13 +805,27 @@ function detectHoleGeometryCandidates(elements, greens, boundary) {
     if (candidate) { candidate.existingHoleNumber = ref || undefined; holeLineCandidates.push(candidate); }
   });
   const fairwayCandidates = greenLedFairwayCandidates(elements, greens, boundary);
+  let candidates;
   if (fairwayCandidates.length) {
     const labelledHoleLines = holeLineCandidates.filter(c => c.existingHoleNumber);
-    return dedupeCandidates(fairwayCandidates.concat(labelledHoleLines));
+    candidates = dedupeCandidates(fairwayCandidates.concat(labelledHoleLines));
+  } else {
+    const holeLineCorridors = greenLedHoleLineCorridorCandidates(elements, greens, boundary);
+    candidates = dedupeCandidates(holeLineCorridors.length ? holeLineCorridors : holeLineCandidates);
   }
-  const holeLineCorridors = greenLedHoleLineCorridorCandidates(elements, greens, boundary);
-  if (holeLineCorridors.length) return dedupeCandidates(holeLineCorridors);
-  return dedupeCandidates(holeLineCandidates);
+  /* A number on the green is a number on every reading of it. The line derived for a numbered
+     overlay link carried the only copy of the number, and dedupe dropped it for the link's own
+     tee-to-green reading, which is more confident - Parkes' hole 1 was labelled and the
+     resolver numbered the course as if it were not. */
+  const greenHole = {};
+  (greens || []).forEach(green => { if (green.hole) greenHole[green.id] = green.hole; });
+  candidates.forEach(candidate => {
+    if (!candidate.existingHoleNumber && greenHole[candidate.greenId]) {
+      candidate.existingHoleNumber = greenHole[candidate.greenId];
+      candidate.evidence.push("existing-ref:" + candidate.existingHoleNumber);
+    }
+  });
+  return candidates;
 }
 function dedupeCandidates(candidates) {
   return (candidates || []).slice().sort((a, b) => b.confidence - a.confidence).filter((candidate, index, all) =>
@@ -963,10 +981,19 @@ function distanceScale(candidates, scorecard) {
   }
   return median(pairs) || 1;
 }
+/* Equal lengths share a rank. Ranked by sort position they took neighbouring ranks in whatever
+   order they arrived, so one of two 456m par 5s on a card was a perfect match for a line and
+   the other a step off, decided by nothing. */
 function rankMap(items, getValue, getKey) {
   const sorted = items.slice().filter(item => Number.isFinite(getValue(item))).sort((a, b) => getValue(a) - getValue(b));
   const map = {};
-  sorted.forEach((item, index) => { map[getKey(item)] = sorted.length <= 1 ? 0.5 : index / (sorted.length - 1); });
+  for (let start = 0; start < sorted.length;) {
+    let end = start;
+    while (end + 1 < sorted.length && getValue(sorted[end + 1]) === getValue(sorted[start])) end += 1;
+    const rank = sorted.length <= 1 ? 0.5 : (start + end) / 2 / (sorted.length - 1);
+    for (let i = start; i <= end; i++) map[getKey(sorted[i])] = rank;
+    start = end + 1;
+  }
   return map;
 }
 /* Where each candidate's length falls among the ground's main readings - one per green, the
@@ -985,7 +1012,10 @@ function candidateRankMap(candidates) {
     const length = candidate.pathDistanceM;
     if (!Number.isFinite(length)) return;
     if (!candidate.alternative) {
-      map[candidate.candidateId] = primary.filter(c => c.pathDistanceM < length).length / last;
+      /* Equal lengths share a rank, as the card's do in rankMap. */
+      const shorter = primary.filter(c => c.pathDistanceM < length).length;
+      const equal = primary.filter(c => c.pathDistanceM === length).length;
+      map[candidate.candidateId] = (shorter + (equal - 1) / 2) / last;
       return;
     }
     const k = lengths.findIndex(value => value > length);
@@ -1003,10 +1033,6 @@ function scorePair(candidate, hole, context) {
   const rawDistanceDeltaM = Number.isFinite(hole.distanceM) ? Math.abs(candidate.pathDistanceM - hole.distanceM) : null;
   let scaledDistanceDeltaM = null, normalizedDistanceDelta = null;
   const tieBreakersUsed = [], explanation = [];
-  if (Number.isFinite(candidate.existingHoleNumber) && candidate.existingHoleNumber === hole.holeNumber) {
-    score += 0.24; evidence.push("existing-osm-ref-match"); tieBreakersUsed.push("existing-osm-ref");
-    explanation.push("Existing OSM hole number matched this scorecard hole.");
-  }
   if (Number.isFinite(hole.distanceM)) {
     const cr = context.candidateRanks[candidate.candidateId];
     const hr = context.scorecardRanks[hole.holeNumber];
@@ -1119,6 +1145,43 @@ function matchCandidatesToScorecard(candidates, scorecard, expectedHoleCount, no
   const byId = new Map(candidates.map(candidate => [String(candidate.candidateId), candidate]));
   const routeGreens = Array.isArray(routeOrder) && routeOrder.length === holes.length ? routeOrder.map(id => (byId.get(String(id)) || {}).greenId) : null;
   const readingsOf = greenId => usefulCandidates.filter(candidate => candidate.greenId === greenId);
+  /* Holes a person or OSM numbered already: a ref on the hole line, or on the green (a numbered
+     overlay link puts its number on every shape it holds). Said outright, so not weighed
+     against the card: that hole takes one of its own readings, however its length fits, and
+     no other hole may take its ground. Weighed, the hint lost: Parkes' labelled hole 1 was
+     outscored by a stray link of the right length, the resolver put hole 9 on the labelled
+     ground, the worker threw that hole out for sitting on hole 1, and the course came out
+     with 17 holes.
+     Only while each number names one green. A number on two greens is the case the worker
+     sends here to be numbered from the card instead - two nines both numbered 1-9 under an
+     18-hole card - and locking hole 7 to two lines would leave holes 10-18 nothing to take. */
+  const byNumber = new Map();
+  usefulCandidates.forEach(candidate => {
+    if (!Number.isFinite(candidate.existingHoleNumber)) return;
+    byNumber.set(candidate.existingHoleNumber, (byNumber.get(candidate.existingHoleNumber) || []).concat([candidate]));
+  });
+  const numbersUnique = [...byNumber.values()].every(list => new Set(list.map(c => c.greenId || c.candidateId)).size === 1);
+  const labelled = numbersUnique ? byNumber : new Map();
+  const reservedFor = {};
+  labelled.forEach((list, holeNumber) => list.forEach(candidate => {
+    candidateFeatureKeys(candidate).concat(candidate.greenId ? [candidate.greenId] : []).forEach(key => { reservedFor[key] = holeNumber; });
+  }));
+  const openTo = (candidate, holeNumber) => {
+    if (labelled.has(holeNumber)) return candidate.existingHoleNumber === holeNumber;
+    if (labelled.has(candidate.existingHoleNumber)) return false;
+    return !candidateFeatureKeys(candidate).concat(candidate.greenId ? [candidate.greenId] : []).some(key => reservedFor[key] !== undefined);
+  };
+  /* Back to where the round started. The walk between consecutive holes is scored, but hole 1
+     has no hole before it, so a stray reading - a shape that is nowhere near the rest of the
+     loop - was cheapest as hole 1, where its long walk was charged once instead of twice.
+     Parkes' hole 1 was put 980m from hole 2 that way. Charging the walk from the last green
+     back to the first tee as well makes the loop cost the same wherever it starts, so the
+     card's lengths and the clubhouse end of the loop decide hole 1, not a free gap. */
+  const closeLoop = state => {
+    const first = state.assignments[0];
+    const closure = first && first.hole === holes[0] && state.assignments.length > 1 ? routeContinuityScore(state.last, first.candidate) : 0;
+    return Object.assign({}, state, { score: state.score + closure, closure });
+  };
   let states = [{ score: 0, assignments: [], used: {}, last: null }];
   if (routeGreens && routeGreens.every(greenId => greenId && readingsOf(greenId).length)) {
     states = routeGreens.map((_, start) => {
@@ -1126,7 +1189,7 @@ function matchCandidatesToScorecard(candidates, scorecard, expectedHoleCount, no
       const used = {};
       const assignments = holes.map((hole, i) => {
         const options = readingsOf(routeGreens[(start + i) % routeGreens.length])
-          .filter(candidate => !candidateFeatureKeys(candidate).some(key => used[key]))
+          .filter(candidate => openTo(candidate, hole.holeNumber) && !candidateFeatureKeys(candidate).some(key => used[key]))
           .map(candidate => ({ candidate, scored: pair[hole.holeNumber + "::" + candidate.candidateId], continuity: routeContinuityScore(last, candidate) }))
           .sort((a, b) => (b.scored.score + b.continuity) - (a.scored.score + a.continuity));
         const pick = options[0];
@@ -1136,44 +1199,62 @@ function matchCandidatesToScorecard(candidates, scorecard, expectedHoleCount, no
         last = pick.candidate;
         return { hole, candidate: pick.candidate, pair: pick.scored, continuity: pick.continuity };
       });
-      return { score, assignments: assignments.filter(Boolean), used, last };
+      return closeLoop({ score, assignments: assignments.filter(Boolean), used, last });
     }).sort((a, b) => b.assignments.length - a.assignments.length || b.score - a.score);
   }
-  else holes.forEach(hole => {
-    const nextStates = [];
-    states.forEach(state => {
-      usefulCandidates.forEach(candidate => {
-        const keys = candidateFeatureKeys(candidate);
-        if (keys.some(key => state.used[key])) return;
-        const scored = pair[hole.holeNumber + "::" + candidate.candidateId];
-        if (!scored || scored.score < 0.18) return;
-        const continuity = routeContinuityScore(state.last, candidate);
-        const used = Object.assign({}, state.used);
-        keys.forEach(key => { used[key] = true; });
-        nextStates.push({
-          score: state.score + scored.score + continuity,
-          assignments: state.assignments.concat([{ hole, candidate, pair: scored, continuity }]),
-          used,
-          last: candidate
+  else {
+    holes.forEach(hole => {
+      const nextStates = [];
+      states.forEach(state => {
+        usefulCandidates.forEach(candidate => {
+          if (!openTo(candidate, hole.holeNumber)) return;
+          const keys = candidateFeatureKeys(candidate);
+          if (keys.some(key => state.used[key])) return;
+          const scored = pair[hole.holeNumber + "::" + candidate.candidateId];
+          if (!scored || (scored.score < 0.18 && !labelled.has(hole.holeNumber))) return;
+          const continuity = routeContinuityScore(state.last, candidate);
+          const used = Object.assign({}, state.used);
+          keys.forEach(key => { used[key] = true; });
+          nextStates.push({
+            score: state.score + scored.score + continuity,
+            assignments: state.assignments.concat([{ hole, candidate, pair: scored, continuity }]),
+            used,
+            last: candidate
+          });
         });
+        nextStates.push({ score: state.score - 0.18, assignments: state.assignments, used: state.used, last: state.last });
       });
-      nextStates.push({ score: state.score - 0.18, assignments: state.assignments, used: state.used, last: state.last });
+      /* Two states that have used the same ground and stand on the same hole have the same
+         future, so only the better one is kept: the beam's width goes to answers that differ
+         in substance, not to the same holes reached in a different order. */
+      const bestByFuture = new Map();
+      nextStates.forEach(state => {
+        const key = Object.keys(state.used).sort().join(",") + "|" + (state.last ? state.last.candidateId : "");
+        const held = bestByFuture.get(key);
+        if (!held || state.score > held.score) bestByFuture.set(key, state);
+      });
+      states = [...bestByFuture.values()].sort((a, b) => b.score - a.score).slice(0, MAX_BEAM_WIDTH);
     });
-    states = nextStates.sort((a, b) => b.score - a.score).slice(0, MAX_BEAM_WIDTH);
-  });
+    states = states.map(closeLoop).sort((a, b) => b.score - a.score);
+  }
   const best = states[0] || { assignments: [], score: 0 };
   const assignments = best.assignments.map(assignment => {
-    const baseConfidence = clamp(assignment.pair.score * 0.88 + assignment.candidate.confidence * 0.12 + Math.max(0, assignment.continuity), 0, 1);
+    /* A hole numbered by a person or OSM was never weighed against the card (openTo), and it is
+       not doubted afterwards either: however its length fits, it is saved. */
+    const numbered = labelled.has(assignment.hole.holeNumber) && assignment.candidate.existingHoleNumber === assignment.hole.holeNumber;
+    const fitted = clamp(assignment.pair.score * 0.88 + assignment.candidate.confidence * 0.12 + Math.max(0, assignment.continuity), 0, 1);
+    const baseConfidence = numbered ? Math.max(fitted, HIGH_CONFIDENCE) : fitted;
     const structuredEvidence = Object.assign({}, assignment.pair.assignmentEvidence || {});
     structuredEvidence.routingScore = assignment.continuity || 0;
     structuredEvidence.totalScore = assignment.pair.score + (assignment.continuity || 0);
     structuredEvidence.tieBreakersUsed = (structuredEvidence.tieBreakersUsed || []).slice();
     structuredEvidence.explanation = (structuredEvidence.explanation || []).slice();
     if (assignment.continuity > 0) { structuredEvidence.tieBreakersUsed.push("previous-hole-routing"); structuredEvidence.explanation.push("Previous green to next tee routing supported this ordering."); }
+    if (numbered) { structuredEvidence.tieBreakersUsed.push("existing-osm-ref"); structuredEvidence.explanation.push("The hole was already numbered " + assignment.hole.holeNumber + " on the ground."); }
     return {
       holeNumber: assignment.hole.holeNumber, par: assignment.hole.par, officialDistanceM: assignment.hole.distanceM, candidate: assignment.candidate,
       matchScore: assignment.pair.score, confidence: baseConfidence,
-      evidence: assignment.pair.evidence.concat(assignment.continuity ? ["routing-continuity:" + assignment.continuity.toFixed(2)] : []),
+      evidence: assignment.pair.evidence.concat(assignment.continuity ? ["routing-continuity:" + assignment.continuity.toFixed(2)] : [], numbered ? ["existing-osm-ref-match"] : []),
       assignmentEvidence: structuredEvidence
     };
   });
@@ -1185,7 +1266,7 @@ function matchCandidatesToScorecard(candidates, scorecard, expectedHoleCount, no
   if (context.scale && Math.abs(1 - context.scale) > 0.12) warnings.push("Map geometry scale differs from scorecard by " + Math.round((1 - context.scale) * -100) + "%; relative distance matching was used.");
   return {
     assignments, unresolvedScorecardHoles, confidence: clamp(confidence, 0, 1), warnings, context, score: best.score || 0,
-    alternatives: states.slice(0, 5).map(state => ({ score: state.score, holes: state.assignments.map(a => ({ holeNumber: a.hole.holeNumber, candidateId: a.candidate.candidateId })) }))
+    alternatives: states.slice(0, 5).map(state => ({ score: state.score, closure: state.closure || 0, holes: state.assignments.map(a => ({ holeNumber: a.hole.holeNumber, candidateId: a.candidate.candidateId })) }))
   };
 }
 function expectedHoleCount(input, scorecard) {
