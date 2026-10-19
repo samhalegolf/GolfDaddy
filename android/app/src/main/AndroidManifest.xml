@@ -68,5 +68,12 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
+    <!-- Practice Data: the guided camera opens the back camera inside the
+         webview (getUserMedia) to frame a launch monitor shot table. Without
+         this declaration the webview's permission request is refused outright
+         and the button falls back to the phone camera app. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
     <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>

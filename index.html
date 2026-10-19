@@ -40,9 +40,12 @@
 <script src="scripts/inline/gd-leaflet-alias.js?v=split03"></script>
 <script src="scripts/clarity-build.js?v=tool-rail-tab-hole-label-20260620"></script>
 <script src="scripts/gd-launch-monitor-alias-registry.js?v=practice-alias-registry-20260612"></script>
+<script src="scripts/gd-launch-monitor-layouts.js?v=camera-guide-20261019"></script>
+<script src="scripts/gd-practice-camera-guide.js?v=camera-guide-20261019"></script>
 <script src="scripts/clarity-table-ocr.js?v=table-ocr-deepscan-20260712a"></script>
 <script src="scripts/clarity-table-ocr-pixels.js?v=table-ocr-deepscan-20260712a"></script>
 <link rel="stylesheet" href="styles/inline/gd-app-base.css?v=course-db-sort-20261018">
+<link rel="stylesheet" href="styles/inline/gd-practice-camera-guide.css?v=camera-guide-20261019">
 
 <link rel="stylesheet" id="gdHomeButtonsHandoffCssV1" href="styles/inline/gd-home-buttons-handoff-css-v1.css?v=split04">
 </head>
@@ -165,7 +168,7 @@
 <div class="gdPracticeImportBody" id="gdPracticeImportBody">
 <label class="gdUploadFileButton" id="gdPracticePhotoLabel" for="gdPracticePhotoInput" onclick="return gdPickPracticePhotoFile(event,'photo')" data-i18n="dataPage.upload">Upload</label>
 <input class="gdUploadFileInput" id="gdPracticePhotoInput" type="file" accept="image/*">
-<label class="gdUploadFileButton primary" id="gdPracticeCameraLabel" for="gdPracticeCameraInput" onclick="return gdPickPracticePhotoFile(event,'camera')" data-i18n="dataPage.takePhoto">Take photo</label>
+<label class="gdUploadFileButton primary" id="gdPracticeCameraLabel" for="gdPracticeCameraInput" onclick="return window.gdOpenPracticeCameraGuide?gdOpenPracticeCameraGuide(event):gdPickPracticePhotoFile(event,'camera')" data-i18n="dataPage.takePhoto">Take photo</label>
 <input class="gdUploadFileInput" id="gdPracticeCameraInput" type="file" accept="image/*" capture="environment">
 <div class="gdPracticeEmailBox" id="gdPracticeEmailBox"></div>
 <details class="gdNativePracticeDrawer" id="gdNativePracticeImportDrawer">
