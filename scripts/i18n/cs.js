@@ -1243,8 +1243,6 @@
     "garmin.installHint": "Nainstaluj ji z obchodu Connect IQ a pak zahaj kolo v telefonu.",
     "garmin.startRound": "Zahaj kolo v telefonu a objeví se ti na zápěstí.",
     "garmin.disconnect": "Odpojit",
-    "garmin.notInBuild": "V tomto sestavení není k dispozici.",
-    "garmin.notBundled": "Podpora Garmin zatím není v tomto sestavení zahrnutá.",
     "garmin.chooseInConnectApp": "Vyber své hodinky v aplikaci Garmin Connect.",
     "garmin.noneFound": "Nebyly nalezeny žádné hodinky Garmin. Otevři aplikaci Garmin Connect, ověř, že v ní máš hodinky spárované, a zkus to znovu.",
     "garmin.rowConnected": "Připojeno",

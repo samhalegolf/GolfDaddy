@@ -684,14 +684,13 @@ public final class GarminTransport {
 
     // ------------------------------------------- device selection (Settings)
 
-    /** What the Settings > Garmin Watch page lists: the devices, plus whether
-     *  the SDK is actually linked — "no devices" and "we cannot look" are
-     *  different answers and the page words them differently. */
+    /** What the Settings > Garmin Watch page lists. "No devices" and "we
+     *  cannot look" are different answers, so a failure comes back as a
+     *  `reason` and the page words it differently from an empty list. */
     public Map<String, Object> availableDevices() {
         HashMap<String, Object> out = new HashMap<>();
         ArrayList<Map<String, Object>> devices = new ArrayList<>();
         out.put("devices", devices);
-        out.put("sdkLinked", true);
         if (connectIQ == null || !sdkReady) {
             /* Distinct from "looked and found none", and the settings page
                words it differently. activate(true) is called here so the
@@ -759,10 +758,6 @@ public final class GarminTransport {
         out.put("paired", current.paired);
         out.put("appInstalled", current.appInstalled);
         out.put("reachable", current.reachable);
-        // The SDK is bundled and this build talked to it: only false when
-        // initialize() failed or has not run. A stub-era hard-coded false
-        // survived here until 2026-09-20 and contradicted garminDevices().
-        out.put("sdkLinked", sdkReady);
         out.put("connectionState", String.valueOf(deviceStore.getLastKnownConnectionState()));
         GarminDeviceStore.SelectedDevice selected = deviceStore.getSelectedDevice();
         if (selected != null) {

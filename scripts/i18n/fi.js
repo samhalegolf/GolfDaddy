@@ -1211,8 +1211,6 @@
     "garmin.installHint": "Asenna se Connect IQ -kaupasta ja aloita sitten kierros puhelimellasi.",
     "garmin.startRound": "Aloita kierros puhelimellasi, niin se näkyy ranteessasi.",
     "garmin.disconnect": "Katkaise yhteys",
-    "garmin.notInBuild": "Ei saatavilla tässä versiossa.",
-    "garmin.notBundled": "Garmin-tukea ei ole vielä mukana tässä versiossa.",
     "garmin.chooseInConnectApp": "Valitse kellosi Garmin Connect -sovelluksessa.",
     "garmin.noneFound": "Garmin-kelloja ei löytynyt. Avaa Garmin Connect -sovellus, varmista että kellosi on pariliitetty siellä, ja yritä sitten uudelleen.",
     "garmin.rowConnected": "Yhdistetty",

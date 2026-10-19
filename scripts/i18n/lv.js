@@ -1243,8 +1243,6 @@
     "garmin.installHint": "Instalē to no Connect IQ veikala un tad sāc raundu savā tālrunī.",
     "garmin.startRound": "Sāc raundu savā tālrunī, un tas parādīsies uz tavas rokas.",
     "garmin.disconnect": "Atvienot",
-    "garmin.notInBuild": "Šajā versijā nav pieejams.",
-    "garmin.notBundled": "Garmin atbalsts šajā versijā vēl nav iekļauts.",
     "garmin.chooseInConnectApp": "Izvēlies savu pulksteni lietotnē Garmin Connect.",
     "garmin.noneFound": "Netika atrasts neviens Garmin pulkstenis. Atver lietotni Garmin Connect, pārliecinies, ka pulkstenis tur ir savienots pārī, un mēģini vēlreiz.",
     "garmin.rowConnected": "Savienots",

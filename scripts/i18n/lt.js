@@ -1243,8 +1243,6 @@
     "garmin.installHint": "Įdiek ją iš Connect IQ parduotuvės, tada pradėk raundą telefone.",
     "garmin.startRound": "Pradėk raundą telefone ir jis atsiras ant tavo riešo.",
     "garmin.disconnect": "Atjungti",
-    "garmin.notInBuild": "Šioje versijoje negalima.",
-    "garmin.notBundled": "Garmin palaikymas šioje versijoje dar neįtrauktas.",
     "garmin.chooseInConnectApp": "Pasirink savo laikrodį Garmin Connect programėlėje.",
     "garmin.noneFound": "Garmin laikrodžių nerasta. Atidaryk Garmin Connect programėlę, įsitikink, kad laikrodis ten susietas, ir bandyk dar kartą.",
     "garmin.rowConnected": "Prijungtas",

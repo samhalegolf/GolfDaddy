@@ -1211,8 +1211,6 @@
     "garmin.installHint": "Instala-o a partir da loja Connect IQ e depois inicia uma volta no teu telemóvel.",
     "garmin.startRound": "Inicia uma volta no teu telemóvel e ela aparece no teu pulso.",
     "garmin.disconnect": "Desligar",
-    "garmin.notInBuild": "Não disponível nesta versão.",
-    "garmin.notBundled": "O suporte Garmin ainda não está incluído nesta versão.",
     "garmin.chooseInConnectApp": "Escolhe o teu relógio na app Garmin Connect.",
     "garmin.noneFound": "Não foram encontrados relógios Garmin. Abre a app Garmin Connect, confirma que o teu relógio está emparelhado lá e tenta novamente.",
     "garmin.rowConnected": "Ligado",

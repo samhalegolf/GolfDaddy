@@ -1275,8 +1275,6 @@
     "garmin.installHint": "Namesti ga iz trgovine Connect IQ, nato začni rundo na telefonu.",
     "garmin.startRound": "Začni rundo na telefonu in pojavila se bo na tvojem zapestju.",
     "garmin.disconnect": "Prekini povezavo",
-    "garmin.notInBuild": "V tej različici ni na voljo.",
-    "garmin.notBundled": "Podpora za Garmin v tej različici še ni vključena.",
     "garmin.chooseInConnectApp": "Izberi svojo uro v aplikaciji Garmin Connect.",
     "garmin.noneFound": "Ni najdenih ur Garmin. Odpri aplikacijo Garmin Connect, preveri, ali je tvoja ura tam seznanjena, nato poskusi znova.",
     "garmin.rowConnected": "Povezano",

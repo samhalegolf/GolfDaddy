@@ -1211,8 +1211,6 @@
     "garmin.installHint": "Εγκατάστησέ το από το Connect IQ store και μετά ξεκίνα γύρο στο τηλέφωνό σου.",
     "garmin.startRound": "Ξεκίνα γύρο στο τηλέφωνό σου και θα εμφανιστεί στον καρπό σου.",
     "garmin.disconnect": "Αποσύνδεση",
-    "garmin.notInBuild": "Δεν είναι διαθέσιμο σε αυτή την έκδοση.",
-    "garmin.notBundled": "Η υποστήριξη Garmin δεν περιλαμβάνεται ακόμα σε αυτή την έκδοση.",
     "garmin.chooseInConnectApp": "Διάλεξε το ρολόι σου στην εφαρμογή Garmin Connect.",
     "garmin.noneFound": "Δεν βρέθηκαν ρολόγια Garmin. Άνοιξε την εφαρμογή Garmin Connect, βεβαιώσου ότι το ρολόι σου είναι συζευγμένο εκεί και δοκίμασε ξανά.",
     "garmin.rowConnected": "Συνδεδεμένο",

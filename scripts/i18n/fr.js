@@ -1211,8 +1211,6 @@
     "garmin.installHint": "Installez-le depuis le store Connect IQ, puis lancez une partie sur votre téléphone.",
     "garmin.startRound": "Lancez une partie sur votre téléphone et elle apparaît à votre poignet.",
     "garmin.disconnect": "Déconnecter",
-    "garmin.notInBuild": "Indisponible dans cette version.",
-    "garmin.notBundled": "La prise en charge Garmin n’est pas encore incluse dans cette version.",
     "garmin.chooseInConnectApp": "Choisissez votre montre dans l’app Garmin Connect.",
     "garmin.noneFound": "Aucune montre Garmin trouvée. Ouvrez l’app Garmin Connect, vérifiez que votre montre y est jumelée, puis réessayez.",
     "garmin.rowConnected": "Connectée",

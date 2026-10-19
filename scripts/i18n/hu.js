@@ -1211,8 +1211,6 @@
     "garmin.installHint": "Telepítsd a Connect IQ áruházból, majd indíts kört a telefonodon.",
     "garmin.startRound": "Indíts kört a telefonodon, és megjelenik a csuklódon.",
     "garmin.disconnect": "Leválasztás",
-    "garmin.notInBuild": "Ebben a verzióban nem érhető el.",
-    "garmin.notBundled": "Ez a verzió még nem tartalmaz Garmin-támogatást.",
     "garmin.chooseInConnectApp": "Válaszd ki az órádat a Garmin Connect alkalmazásban.",
     "garmin.noneFound": "Nem található Garmin óra. Nyisd meg a Garmin Connect alkalmazást, győződj meg róla, hogy az órád ott párosítva van, majd próbáld újra.",
     "garmin.rowConnected": "Csatlakoztatva",

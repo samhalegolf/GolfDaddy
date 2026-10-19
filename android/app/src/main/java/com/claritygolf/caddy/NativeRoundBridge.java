@@ -186,8 +186,8 @@ public class NativeRoundBridge extends Plugin implements GarminTransport.Listene
         call.resolve(JsonBridge.toJSObject(transport.garminState()));
     }
 
-    /** Resolves with { devices: [...], sdkLinked, reason }. An empty list with
-     *  sdkLinked false means "we cannot look", which the settings page words
+    /** Resolves with { devices: [...], reason }. An empty list with a reason
+     *  means "we cannot look", which the settings page words
      *  differently from "we looked and found none". */
     @PluginMethod
     public void garminDevices(PluginCall call) {

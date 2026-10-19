@@ -434,17 +434,11 @@ final class GarminTransport: NSObject, WearableTransport {
 
     // MARK: - Device selection (the Settings > Garmin Watch page)
 
-    /* What the settings page lists. Returns the devices plus whether the SDK
-       is actually linked, because "no devices" and "we cannot look" are
-       different answers and the page says so in different words.
+    /* What the settings page lists. "No devices" and "we cannot look" are
+       different answers, so a failure comes back as a `reason` and the page
+       words it differently from an empty list.
 
-       UNVERIFIED / NOT YET POSSIBLE: the real implementation asks
-       ConnectIQ.sharedInstance() for known devices, which on iOS means
-       handing off to the Garmin Connect Mobile app and receiving the
-       selection back through the registered URL scheme — there is no
-       in-process device list to enumerate. Until the .xcframework is
-       vendored this reports honestly that it cannot look. */
-    /* iOS has no getKnownDevices(): the only way to choose is to hand off to
+       iOS has no getKnownDevices(): the only way to choose is to hand off to
        the Garmin Connect app and be called back on our URL scheme. So this
        never returns a list — it starts the hand-off and tells the caller what
        is about to happen, and the answer arrives later through handleOpenURL.
@@ -454,7 +448,6 @@ final class GarminTransport: NSObject, WearableTransport {
         guard Self.isConnectMobileInstalled else {
             return [
                 "devices": [[String: Any]](),
-                "sdkLinked": true,
                 "selectionStyle": "handoff",
                 "reason": "The Garmin Connect app is needed to choose a watch. Install it, sign in, then try again."
             ]
@@ -462,7 +455,6 @@ final class GarminTransport: NSObject, WearableTransport {
         _ = beginDeviceSelection()
         return [
             "devices": [[String: Any]](),
-            "sdkLinked": true,
             "selectionStyle": "handoff",
             "handoff": true,
             "reason": "Choose your watch in the Garmin Connect app — you will come straight back here."
@@ -501,7 +493,6 @@ final class GarminTransport: NSObject, WearableTransport {
        booleans every transport reports through WearableTransportState. */
     func garminStateDictionary() -> [String: Any] {
         var out = state().asDictionary
-        out["sdkLinked"] = true
         /* iOS chooses a device by leaving the app for Garmin Connect, so the
            settings page has a waiting state Android does not. */
         out["awaitingSelection"] = awaitingSelection

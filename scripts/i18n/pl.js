@@ -1275,8 +1275,6 @@
     "garmin.installHint": "Zainstaluj je ze sklepu Connect IQ, a potem rozpocznij rundę w telefonie.",
     "garmin.startRound": "Rozpocznij rundę w telefonie, a pojawi się na nadgarstku.",
     "garmin.disconnect": "Odłącz",
-    "garmin.notInBuild": "Niedostępne w tej wersji.",
-    "garmin.notBundled": "Obsługa Garmin nie jest jeszcze dołączona do tej wersji.",
     "garmin.chooseInConnectApp": "Wybierz zegarek w aplikacji Garmin Connect.",
     "garmin.noneFound": "Nie znaleziono zegarków Garmin. Otwórz aplikację Garmin Connect, upewnij się, że zegarek jest w niej sparowany, i spróbuj ponownie.",
     "garmin.rowConnected": "Połączony",

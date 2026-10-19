@@ -1211,8 +1211,6 @@
     "garmin.installHint": "Installeer het via de Connect IQ-store en start dan een ronde op je telefoon.",
     "garmin.startRound": "Start een ronde op je telefoon en hij verschijnt op je pols.",
     "garmin.disconnect": "Ontkoppelen",
-    "garmin.notInBuild": "Niet beschikbaar in deze build.",
-    "garmin.notBundled": "Ondersteuning voor Garmin zit nog niet in deze build.",
     "garmin.chooseInConnectApp": "Kies je horloge in de Garmin Connect-app.",
     "garmin.noneFound": "Geen Garmin-horloges gevonden. Open de Garmin Connect-app, zorg dat je horloge daar gekoppeld is en probeer het opnieuw.",
     "garmin.rowConnected": "Gekoppeld",

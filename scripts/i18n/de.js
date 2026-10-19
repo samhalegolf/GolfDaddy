@@ -1211,8 +1211,6 @@
     "garmin.installHint": "Installiere es aus dem Connect IQ Store und starte dann eine Runde auf deinem Handy.",
     "garmin.startRound": "Starte eine Runde auf deinem Handy, dann erscheint sie an deinem Handgelenk.",
     "garmin.disconnect": "Trennen",
-    "garmin.notInBuild": "In diesem Build nicht verfügbar.",
-    "garmin.notBundled": "Garmin-Unterstützung ist in diesem Build noch nicht enthalten.",
     "garmin.chooseInConnectApp": "Wähle deine Uhr in der Garmin Connect App.",
     "garmin.noneFound": "Keine Garmin-Uhren gefunden. Öffne die Garmin Connect App, stell sicher, dass deine Uhr dort gekoppelt ist, und versuche es dann noch einmal.",
     "garmin.rowConnected": "Verbunden",

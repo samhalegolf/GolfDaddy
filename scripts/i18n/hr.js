@@ -1243,8 +1243,6 @@
     "garmin.installHint": "Instaliraj ga iz trgovine Connect IQ, a zatim započni rundu na mobitelu.",
     "garmin.startRound": "Započni rundu na mobitelu i pojavit će se na tvom zapešću.",
     "garmin.disconnect": "Prekini vezu",
-    "garmin.notInBuild": "Nije dostupno u ovoj verziji.",
-    "garmin.notBundled": "Podrška za Garmin još nije uključena u ovu verziju.",
     "garmin.chooseInConnectApp": "Odaberi svoj sat u aplikaciji Garmin Connect.",
     "garmin.noneFound": "Nije pronađen nijedan Garmin sat. Otvori aplikaciju Garmin Connect, provjeri je li sat ondje uparen i pokušaj ponovno.",
     "garmin.rowConnected": "Povezano",

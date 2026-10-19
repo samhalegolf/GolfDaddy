@@ -1211,8 +1211,6 @@
     "garmin.installHint": "Instálala desde la tienda Connect IQ y luego empieza una ronda en tu teléfono.",
     "garmin.startRound": "Empieza una ronda en tu teléfono y aparecerá en tu muñeca.",
     "garmin.disconnect": "Desconectar",
-    "garmin.notInBuild": "No disponible en esta versión.",
-    "garmin.notBundled": "Esta versión aún no incluye compatibilidad con Garmin.",
     "garmin.chooseInConnectApp": "Elige tu reloj en la app Garmin Connect.",
     "garmin.noneFound": "No se ha encontrado ningún reloj Garmin. Abre la app Garmin Connect, asegúrate de que tu reloj está emparejado allí e inténtalo de nuevo.",
     "garmin.rowConnected": "Conectado",

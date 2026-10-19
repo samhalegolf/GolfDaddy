@@ -1211,8 +1211,6 @@
     "garmin.installHint": "Installalo dallo store Connect IQ, poi avvia un giro sul telefono.",
     "garmin.startRound": "Avvia un giro sul telefono e comparirà al tuo polso.",
     "garmin.disconnect": "Scollega",
-    "garmin.notInBuild": "Non disponibile in questa versione.",
-    "garmin.notBundled": "Il supporto Garmin non è ancora incluso in questa versione.",
     "garmin.chooseInConnectApp": "Scegli il tuo orologio nell'app Garmin Connect.",
     "garmin.noneFound": "Nessun orologio Garmin trovato. Apri l'app Garmin Connect, assicurati che l'orologio sia abbinato lì, poi riprova.",
     "garmin.rowConnected": "Collegato",
