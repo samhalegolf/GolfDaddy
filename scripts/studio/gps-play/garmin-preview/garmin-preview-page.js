@@ -7,7 +7,8 @@
  * for it, the five-size tree sprite sets, the 64-colour palette on a MIP face, and its buttons
  * as CaddyInputDelegate reads them - SELECT is AIM on the numbers and enters / confirms Aim Mode
  * on the map, BACK cancels or returns to the numbers, MENU swaps the two, UP and DOWN change
- * hole (or nudge while aiming), the plays button at the foot of the map. */
+ * hole (or nudge while aiming), LAP unlocks a locked shot or locks from the map, the plays
+ * button at the foot of the map. */
 (function () {
   "use strict";
 
@@ -64,7 +65,8 @@
         { id: "menu", label: function (face) { return face && face.showingMap ? "MENU · numbers" : "MENU · map"; }, title: "MENU: swap between the numbers and the map", act: function (face) { face.menu(); } },
         { id: "up", label: "UP", title: "UP: next hole, or nudge the aim up the glass while aiming", act: function (face) { face.up(); } },
         { id: "down", label: "DOWN", title: "DOWN: previous hole, or nudge down while aiming", act: function (face) { face.down(); } },
-        { id: "plays", label: "PLAYS", title: "The plays button at the foot of the map (tap it on the face too)", act: function (face) { face.togglePlays(); } }
+        { id: "plays", label: "PLAYS", title: "The plays button at the foot of the map (tap it on the face too)", act: function (face) { face.togglePlays(); } },
+        { id: "lap", label: "LAP", title: "LAP: UNLOCK a locked shot (or tap the pill's UNLOCK half), or LOCK from the map", act: function (face) { face.lap(); } }
       ],
       onMount: function (redraw) { loadFont(redraw); }
     };

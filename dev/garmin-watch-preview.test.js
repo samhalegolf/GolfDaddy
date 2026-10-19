@@ -334,9 +334,9 @@ test("a whole frame draws, in the watch's order, and a drag moves the target thr
 
 /* The numbers screen's seam: a 126 m PW with the green 106/145 m away, wind level 2. */
 function numbersSession(overrides) {
-  const calls = { holes: [], locks: 0, windToggles: 0 };
+  const calls = { holes: [], locks: 0, unlocks: 0, windToggles: 0 };
   const session = Object.assign({
-    scene: { hasRound: () => true, isDemo: () => false, canLock: () => true, distanceTargetM: () => null, suggestedClub: () => null, shotLocked: () => false },
+    scene: { hasRound: () => true, isDemo: () => false, canLock: () => true, canUnlock: () => false, distanceTargetM: () => null, suggestedClub: () => null, shotLocked: () => false },
     greenDistances: () => ({ front: 106, centre: 126, back: 145 }),
     localBubble: () => ({ target: { lat: 0, lng: 0 }, targetDistanceM: 126, club: { club: "PW" } }),
     playerPoint: () => ({ lat: 0, lng: 0 }),
@@ -354,6 +354,7 @@ function numbersSession(overrides) {
     sendAim: () => {},
     stepHole: (d) => calls.holes.push(d),
     lock: () => { calls.locks += 1; },
+    unlock: () => { calls.unlocks += 1; },
     toggleWindApplied: () => { calls.windToggles += 1; },
     requestUpdate: () => {}
   }, overrides || {});
@@ -405,6 +406,54 @@ test("the numbers screen says LOCK when the wrist cannot aim, folds the wind in 
   const zoomTexts = draw(zoomed).filter((c) => c.name === "fillText").map((c) => c.args[0]);
   assert.ok(zoomTexts.includes("18 km/h") && !zoomTexts.includes("AIM"), "the compass covers the face: " + zoomTexts.join(","));
   assert.strictEqual(zoomed.hit(5, 5), "zoom");
+});
+
+test("a locked shot splits the pill into AIM | UNLOCK; a tap on UNLOCK and LAP send it, as the watch does", () => {
+  const device = R.DEVICES[0];
+  const lockedScene = { hasRound: () => true, isDemo: () => false, canLock: () => false, canUnlock: () => true, distanceTargetM: () => null, suggestedClub: () => null, shotLocked: () => true };
+  const draw = (face) => { const r = recordingContext(); face.onUpdate(new R.Dc(r.ctx, device.width, device.height, R.fontsFor(device), true)); return r.calls.filter((c) => c.name === "fillText").map((c) => c.args[0]); };
+  const { session, calls } = numbersSession({ scene: lockedScene, lockedShot: () => true });
+  const face = new R.NumbersFace(session, device, () => true);
+  const texts = draw(face);
+  assert.ok(texts.includes("AIM") && texts.includes("UNLOCK"), "both halves are labelled: " + texts.join(","));
+  assert.ok(face.unlockBox && face.unlockBox[0] >= device.width * 0.5, "the UNLOCK half sits right of the middle: " + face.unlockBox);
+  const ux = (face.unlockBox[0] + face.unlockBox[2]) / 2, uy = (face.unlockBox[1] + face.unlockBox[3]) / 2;
+  assert.strictEqual(face.hit(ux, uy), "unlock");
+  assert.strictEqual(face.hit(device.width * 0.3, uy), null, "the AIM half stays a plain SELECT");
+  assert.ok(/pill AIM \| UNLOCK/.test(face.trace), face.trace);
+  /* Unlocked: the single pill, nothing to hit on the right. */
+  const plain = new R.NumbersFace(numbersSession().session, device, () => true);
+  assert.ok(!draw(plain).includes("UNLOCK"));
+  assert.strictEqual(plain.unlockBox, null);
+
+  /* On the playing face: a tap on UNLOCK sends it at once, a hold on it does nothing, and LAP
+     unlocks from either screen. */
+  const app = new R.CaddyAppView(session, device, () => null);
+  app.onUpdate(recordingContext().ctx);
+  app.pointerDown(ux, uy, 1000); app.pointerUp(ux, uy, 1100);
+  assert.strictEqual(calls.unlocks, 1, "a tap on UNLOCK is the unlock");
+  assert.strictEqual(app.pendingRegion, null, "and waits for no double-tap");
+  app.pointerDown(ux, uy, 2000); app.pointerUp(ux, uy, 2700);
+  assert.strictEqual(calls.unlocks, 1, "a hold on UNLOCK is not an unlock");
+  assert.strictEqual(calls.windToggles, 0, "nor the wind toggle");
+  app.lap();
+  assert.strictEqual(calls.unlocks, 2, "LAP unlocks on the numbers");
+  app.showMap(); app.lap();
+  assert.strictEqual(calls.unlocks, 3, "and on the map");
+  /* Unlocked: LAP locks from the map only, never mid-aim. */
+  const open = numbersSession();
+  const app2 = new R.CaddyAppView(open.session, device, () => null);
+  app2.lap();
+  assert.strictEqual(open.calls.locks, 0, "LAP on the numbers does not lock (SELECT does)");
+  app2.showMap(); app2.lap();
+  assert.strictEqual(open.calls.locks, 1, "LAP on the map locks");
+  app2.mapView.enterAimMode(); app2.lap();
+  assert.strictEqual(open.calls.locks, 1, "not while aiming");
+  /* The twin's own unlock: the held aim goes and the map reframes, as the play state resets. */
+  app2.session.playState.target = { lat: 1, lng: 1 }; app2.mapView.camera = {};
+  app2.unlock();
+  assert.strictEqual(app2.session.playState.target, null);
+  assert.strictEqual(app2.mapView.camera, null);
 });
 
 test("the playing face opens on the numbers and moves to the map as CaddyInputDelegate does", () => {

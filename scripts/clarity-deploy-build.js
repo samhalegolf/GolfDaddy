@@ -211,6 +211,18 @@ fs.rmSync(dist, { recursive: true, force: true });
 fs.mkdirSync(dist, { recursive: true });
 publicPaths.forEach(copyEntry);
 
+/* watch-preview.html loads scripts with the same manual ?v= labels index.html carries (the
+   watch faces, shared with the Studio), so its deployed copy gets the same content-hash
+   stamping - otherwise a face fixed in the Studio could stay stale on the public page for as
+   long as /scripts/* is cached. */
+["watch-preview.html"].forEach(function (file) {
+  const target = path.join(dist, file);
+  if (!fs.existsSync(target)) return;
+  const result = stampContentVersions(fs.readFileSync(target, "utf8"));
+  fs.writeFileSync(target, result.html);
+  console.log(file + ": stamped " + result.stamped + " assets");
+});
+
 const sourceHtml = fs.readFileSync(path.join(dist, "index.html"), "utf8");
 const app = stripSurface(sourceHtml, STUDIO);
 const studio = stripSurface(sourceHtml, APP);

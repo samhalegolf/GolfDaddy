@@ -6,7 +6,8 @@
  * mount that puts a face on a canvas with its buttons (watch-preview-page.js mountWatch), and
  * the same course packages the watches receive (GET /api/course-watch-maps). This file is
  * only the page round them: the sign-up request gate, a course search, a hole, and three
- * places to stand.
+ * places to stand. One generic face per watch (each renderer's default model); the model
+ * table stays the Studio's.
  *
  * The three positions, on the hole's play line (tee, mapped route, green):
  *   Tee shot        the tee
@@ -84,7 +85,7 @@
   var el = {};
 
   function boot() {
-    ["gate", "gateForm", "gateName", "gateEmail", "gateNote", "gateStatus", "preview", "watchTabs", "device", "units",
+    ["gate", "gateForm", "gateName", "gateEmail", "gateNote", "gateStatus", "preview", "watchTabs", "units",
       "searchForm", "searchInput", "searchStatus", "results", "courseLine", "holePrev", "hole", "holeNext", "presets",
       "bezel", "canvas", "buttons", "readout"].forEach(function (id) { el[id] = $(id); });
     if (!el.gate || !el.preview) return;
@@ -97,12 +98,6 @@
     el.watchTabs.addEventListener("click", function (e) {
       var btn = e.target.closest("[data-watch]");
       if (btn) useWatch(btn.getAttribute("data-watch"));
-    });
-    el.device.addEventListener("change", function () {
-      if (!state.mount) return;
-      state.session.deviceId = el.device.value;
-      state.mount.newFace();
-      placePlayer();
     });
     el.units.addEventListener("change", function () { if (state.session) { state.session.units = el.units.value; state.mount.requestUpdate(); } });
     el.hole.addEventListener("change", function () { setHole(Number(el.hole.value)); });
@@ -154,10 +149,10 @@
     state.watch = key;
     state.options = options;
     el.watchTabs.querySelectorAll("[data-watch]").forEach(function (b) { b.classList.toggle("isActive", b.getAttribute("data-watch") === key); });
-    state.session = P.store("public-" + key, { deviceId: options.deviceId, mode: options.modes ? options.modes[0].value : "", units: el.units.value });
+    /* One generic face per watch: the renderer's default model, never a model picker. */
+    state.session = P.store("public-" + key, { mode: options.modes ? options.modes[0].value : "", units: el.units.value });
+    state.session.deviceId = options.deviceId;
     state.session.zoom = 1;
-    el.device.innerHTML = options.render.DEVICES.map(function (d) { return '<option value="' + esc(d.id) + '">' + esc(d.name) + "</option>"; }).join("");
-    el.device.value = state.session.deviceId;
     state.mount = P.mountWatch(options, { canvas: el.canvas, bezel: el.bezel, buttons: el.buttons }, state.session, {
       onDraw: readout,
       onStepHole: function (n) { state.mount.setHole(n); el.hole.value = String(n); placePlayer(); }
