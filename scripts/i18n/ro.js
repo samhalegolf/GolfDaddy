@@ -1243,8 +1243,6 @@
     "garmin.installHint": "Instalează-l din magazinul Connect IQ, apoi începe o rundă pe telefon.",
     "garmin.startRound": "Începe o rundă pe telefon și apare la încheietură.",
     "garmin.disconnect": "Deconectează",
-    "garmin.notInBuild": "Nu este disponibil în această versiune.",
-    "garmin.notBundled": "Suportul Garmin nu este încă inclus în această versiune.",
     "garmin.chooseInConnectApp": "Alege-ți ceasul în aplicația Garmin Connect.",
     "garmin.noneFound": "Nu s-au găsit ceasuri Garmin. Deschide aplicația Garmin Connect, asigură-te că ceasul este asociat acolo, apoi încearcă din nou.",
     "garmin.rowConnected": "Conectat",

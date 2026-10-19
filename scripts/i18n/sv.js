@@ -1211,8 +1211,6 @@
     "garmin.installHint": "Installera den från Connect IQ-butiken och starta sedan en runda i telefonen.",
     "garmin.startRound": "Starta en runda i telefonen så visas den på handleden.",
     "garmin.disconnect": "Koppla från",
-    "garmin.notInBuild": "Inte tillgängligt i den här versionen.",
-    "garmin.notBundled": "Stöd för Garmin ingår inte i den här versionen än.",
     "garmin.chooseInConnectApp": "Välj din klocka i appen Garmin Connect.",
     "garmin.noneFound": "Inga Garmin-klockor hittades. Öppna appen Garmin Connect, se till att klockan är parkopplad där och försök sedan igen.",
     "garmin.rowConnected": "Ansluten",

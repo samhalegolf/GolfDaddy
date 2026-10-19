@@ -190,9 +190,9 @@ public final class NativeRoundBridge: CAPPlugin, CAPBridgedPlugin, WearableCoord
         call.resolve(garmin.garminStateDictionary())
     }
 
-    /* Resolves with { devices: [...], sdkLinked: Bool, reason: String? }.
-       An empty list with sdkLinked false means "we cannot look", which the
-       settings page words differently from "we looked and found none". */
+    /* Resolves with { devices: [...], reason: String? }. An empty list with
+       a reason means "we cannot look", which the settings page words
+       differently from "we looked and found none". */
     @objc public func garminDevices(_ call: CAPPluginCall) {
         call.resolve(garmin.availableDevices())
     }

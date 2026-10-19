@@ -1211,8 +1211,6 @@
     "garmin.installHint": "Installer den fra Connect IQ-butikken, og start så en runde på din telefon.",
     "garmin.startRound": "Start en runde på din telefon, så vises den på dit håndled.",
     "garmin.disconnect": "Afbryd forbindelse",
-    "garmin.notInBuild": "Ikke tilgængelig i denne version.",
-    "garmin.notBundled": "Understøttelse af Garmin er endnu ikke med i denne version.",
     "garmin.chooseInConnectApp": "Vælg dit ur i Garmin Connect-appen.",
     "garmin.noneFound": "Der blev ikke fundet nogen Garmin-ure. Åbn Garmin Connect-appen, sørg for at dit ur er parret der, og prøv så igen.",
     "garmin.rowConnected": "Forbundet",

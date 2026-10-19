@@ -1217,8 +1217,6 @@
     "garmin.installHint": "Install it from the Connect IQ store, then start a round on your phone.",
     "garmin.startRound": "Start a round on your phone and it appears on your wrist.",
     "garmin.disconnect": "Disconnect",
-    "garmin.notInBuild": "Not available in this build.",
-    "garmin.notBundled": "Garmin support is not bundled in this build yet.",
     "garmin.chooseInConnectApp": "Choose your watch in the Garmin Connect app.",
     "garmin.noneFound": "No Garmin watches found. Open the Garmin Connect app, make sure your watch is paired there, then try again.",
     "garmin.rowConnected": "Connected",

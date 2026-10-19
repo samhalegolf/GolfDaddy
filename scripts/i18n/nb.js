@@ -1211,8 +1211,6 @@
     "garmin.installHint": "Installer den fra Connect IQ-butikken, og start deretter en runde på telefonen.",
     "garmin.startRound": "Start en runde på telefonen, så dukker den opp på håndleddet.",
     "garmin.disconnect": "Koble fra",
-    "garmin.notInBuild": "Ikke tilgjengelig i denne versjonen.",
-    "garmin.notBundled": "Støtte for Garmin er ikke inkludert i denne versjonen ennå.",
     "garmin.chooseInConnectApp": "Velg klokken din i Garmin Connect-appen.",
     "garmin.noneFound": "Fant ingen Garmin-klokker. Åpne Garmin Connect-appen, sørg for at klokken er paret der, og prøv igjen.",
     "garmin.rowConnected": "Tilkoblet",

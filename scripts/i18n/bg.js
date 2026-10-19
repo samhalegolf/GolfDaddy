@@ -1211,8 +1211,6 @@
     "garmin.installHint": "Инсталирай го от Connect IQ Store, след това започни рунд на телефона си.",
     "garmin.startRound": "Започни рунд на телефона и той ще се появи на китката ти.",
     "garmin.disconnect": "Прекъсни връзката",
-    "garmin.notInBuild": "Не е достъпно в тази версия.",
-    "garmin.notBundled": "Поддръжката на Garmin все още не е включена в тази версия.",
     "garmin.chooseInConnectApp": "Избери часовника си в приложението Garmin Connect.",
     "garmin.noneFound": "Не са намерени часовници Garmin. Отвори приложението Garmin Connect, увери се, че часовникът ти е сдвоен там, и опитай отново.",
     "garmin.rowConnected": "Свързан",

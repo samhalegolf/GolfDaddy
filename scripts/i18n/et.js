@@ -1211,8 +1211,6 @@
     "garmin.installHint": "Paigalda see Connect IQ poest ja alusta siis telefonis ringi.",
     "garmin.startRound": "Alusta telefonis ringi ja see ilmub su randmele.",
     "garmin.disconnect": "Katkesta ühendus",
-    "garmin.notInBuild": "Selles versioonis pole saadaval.",
-    "garmin.notBundled": "Garmini tugi pole selles versioonis veel kaasas.",
     "garmin.chooseInConnectApp": "Vali oma kell Garmin Connecti rakenduses.",
     "garmin.noneFound": "Garmini kellasid ei leitud. Ava Garmin Connecti rakendus, veendu, et kell on seal seotud, ja proovi siis uuesti.",
     "garmin.rowConnected": "Ühendatud",
