@@ -13,14 +13,40 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 
-const DIR = path.join(__dirname, "i18n");
 const BASE = "en";
+
+/* Where the language files are. Next to this file in the source tree and in a function that
+   Netlify zips as plain files - but an ES-module function (.mjs) is bundled by esbuild, which
+   inlines this file into the function and leaves __dirname pointing at the bundle, not at
+   scripts/. The pinned scripts/i18n/*.js are still in the zip at their repo path, so look for
+   them there too, and from the working directory, before giving up. Found once, kept. Without
+   this every t() returned its key, and the course-ready email went out reading
+   "email.courseReady.subject" (2026-10-15, 2026-10-19). */
+let resolvedDir = null;
+function dir() {
+  if (resolvedDir !== null) return resolvedDir;
+  const candidates = [
+    path.join(__dirname, "i18n"),
+    path.join(__dirname, "scripts", "i18n"),
+    path.join(process.cwd(), "scripts", "i18n")
+  ];
+  let up = __dirname;
+  for (let i = 0; i < 4; i++) {
+    up = path.dirname(up);
+    candidates.push(path.join(up, "scripts", "i18n"));
+  }
+  resolvedDir = candidates.find((candidate) => {
+    try { return fs.statSync(path.join(candidate, BASE + ".js")).isFile(); } catch (e) { return false; }
+  }) || "";
+  if (!resolvedDir) console.warn("gd-i18n-node: no language files found; emails will show translation keys. Looked in: " + candidates.join(", "));
+  return resolvedDir;
+}
 const ALIASES = { no: "nb", nn: "nb" };
 const cache = {};
 
 function available() {
   try {
-    return fs.readdirSync(DIR).filter((f) => /^[a-z]{2}\.js$/.test(f)).map((f) => f.slice(0, 2));
+    return fs.readdirSync(dir()).filter((f) => /^[a-z]{2}\.js$/.test(f)).map((f) => f.slice(0, 2));
   } catch (e) {
     return [BASE];
   }
@@ -32,7 +58,7 @@ function dictionary(tag) {
   try {
     const context = { GDI18n: { add: (_tag, d) => { dict = d; } } };
     context.window = context;
-    vm.runInNewContext(fs.readFileSync(path.join(DIR, tag + ".js"), "utf8"), context);
+    vm.runInNewContext(fs.readFileSync(path.join(dir(), tag + ".js"), "utf8"), context);
   } catch (e) {
     dict = null;
   }
