@@ -57,7 +57,7 @@
       candidateMetric: 'offline',
       unit: 'm',
       confidence: 0.7,
-      aliases: ['offline', 'off line', 'off', 'side', 'side carry', 'side total', 'lateral', 'dispersion']
+      aliases: ['offline', 'off line', 'off', 'side', 'side carry', 'side total', 'lateral', 'lateral landing', 'dispersion', 'deviation distance', 'deviation dist', 'deviation', 'side distance', 'side dist']
     },
     {
       key: 'clubSpeed',
@@ -93,7 +93,7 @@
       candidateMetric: 'launchDirection',
       unit: 'deg',
       confidence: 0.66,
-      aliases: ['launch direction', 'launch dir', 'launchdirection', 'launchdir', 'start direction', 'startdirection', 'start line', 'startline', 'horizontal launch', 'horizontal launch angle', 'horizontallaunch', 'azimuth', 'direction', 'hla']
+      aliases: ['launch direction', 'launch dir', 'launchdirection', 'launchdir', 'start direction', 'startdirection', 'start line', 'startline', 'horizontal launch', 'horizontal launch angle', 'horizontallaunch', 'horizontal angle', 'h launch', 'h. launch', 'push/pull', 'push pull', 'azimuth', 'direction', 'hla']
     },
     {
       key: 'ballSpeed',
@@ -113,7 +113,7 @@
       candidateMetric: 'smashFactor',
       unit: '',
       confidence: 0.58,
-      aliases: ['smash', 'smash factor', 'smashfac', 'smashfactor']
+      aliases: ['smash', 'smash factor', 'smashfac', 'smashfactor', 'efficiency']
     },
     {
       key: 'spinAxis',
@@ -186,7 +186,7 @@
       candidateMetric: 'faceAngle',
       unit: 'deg',
       confidence: 0.68,
-      aliases: ['face angle', 'face ang', 'faceangle', 'faceang', 'face to target', 'face target']
+      aliases: ['face angle', 'face ang', 'faceangle', 'faceang', 'face to target', 'face target', 'club face']
     },
     {
       key: 'dynamicLoft',
@@ -195,7 +195,7 @@
       candidateMetric: 'dynamicLoft',
       unit: 'deg',
       confidence: 0.58,
-      aliases: ['dynamic loft', 'dynamicloft', 'dyn loft', 'dynloft']
+      aliases: ['dynamic loft', 'dynamicloft', 'dyn loft', 'dynloft', 'loft', 'loft angle', 'delivered loft']
     },
     {
       key: 'launch',
@@ -204,7 +204,7 @@
       candidateMetric: 'launchAngle',
       unit: 'deg',
       confidence: 0.48,
-      aliases: ['launch', 'launch angle', 'launch ang', 'launchangle', 'launchang', 'vertical launch', 'vertical launch angle', 'vla']
+      aliases: ['launch', 'launch angle', 'launch ang', 'launchangle', 'launchang', 'vertical launch', 'vertical launch angle', 'v launch', 'v. launch', 'vla']
     },
     {
       key: 'peakHeight',
@@ -213,7 +213,7 @@
       candidateMetric: 'peakHeight',
       unit: 'ft',
       confidence: 0.42,
-      aliases: ['height', 'peak', 'peak height', 'peak ht', 'peakheight', 'peakht', 'apex', 'apex height', 'max height', 'maximum height']
+      aliases: ['height', 'peak', 'peak height', 'peak ht', 'peakheight', 'peakht', 'apex', 'apex height', 'shot apex', 'max height', 'maximum height']
     },
     {
       key: 'descent',
@@ -222,7 +222,7 @@
       candidateMetric: 'descentAngle',
       unit: 'deg',
       confidence: 0.42,
-      aliases: ['descent', 'desc', 'descent angle', 'descentangle', 'land angle', 'landing angle', 'landangle', 'landingangle']
+      aliases: ['descent', 'desc', 'descent angle', 'descentangle', 'descent ang', 'land angle', 'land ang', 'landing angle', 'landing ang', 'landangle', 'landingangle']
     },
     {
       key: 'toPin',
