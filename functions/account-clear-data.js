@@ -150,7 +150,7 @@ exports.handler = async function (event) {
     }
   } catch (_error) {
     return json(502, {
-      error: "Your data could not be fully cleared. Nothing else was changed - please try again, or email samhalegolf@gmail.com.",
+      error: "Your data could not be fully cleared. Nothing else was changed - please try again, or email sam@claritygolf.app.",
       code: "clear_failed"
     });
   }

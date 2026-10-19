@@ -165,7 +165,7 @@ exports.handler = async function (event) {
     }
   } catch (error) {
     return json(502, {
-      error: "Your account could not be fully deleted. Nothing was lost - please email samhalegolf@gmail.com and we will finish it by hand.",
+      error: "Your account could not be fully deleted. Nothing was lost - please email sam@claritygolf.app and we will finish it by hand.",
       code: "delete_failed"
     });
   }
@@ -176,7 +176,7 @@ exports.handler = async function (event) {
     await supabaseAuth("admin/users/" + encodeURIComponent(authUserId), { method: "DELETE" }, true);
   } catch (error) {
     return json(502, {
-      error: "Your data was deleted but your sign-in could not be removed. Please email samhalegolf@gmail.com so we can finish it.",
+      error: "Your data was deleted but your sign-in could not be removed. Please email sam@claritygolf.app so we can finish it.",
       code: "auth_delete_failed"
     });
   }

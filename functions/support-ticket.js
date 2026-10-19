@@ -88,7 +88,7 @@ async function sendDebugEmail(ticket, ticketId){
     return {sent:false, provider:"not_configured", publicStatus:"email_not_configured"};
   }
 
-  var to = email(env("CLARITY_DEBUG_REPORT_TO") || env("CLARITY_SUPPORT_EMAIL") || env("CLARITY_OWNER_EMAIL") || env("SUPPORT_EMAIL") || "samhalegolf@gmail.com");
+  var to = email(env("CLARITY_DEBUG_REPORT_TO") || env("CLARITY_SUPPORT_EMAIL") || env("CLARITY_OWNER_EMAIL") || env("SUPPORT_EMAIL") || "sam@claritygolf.app");
   if(!to){
     return {sent:false, provider:"not_configured", publicStatus:"email_recipient_missing"};
   }

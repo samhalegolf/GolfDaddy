@@ -208,7 +208,7 @@
   <section id="support" style="width:min(1180px,calc(100% - 44px));margin:0 auto;padding:clamp(48px,7vw,90px) 0">
     <p style="color:#20d96b;text-transform:uppercase;letter-spacing:.16em;font-weight:900;font-size:13px;margin:0 0 15px" data-i18n="welcome.supportEyebrow">Support</p>
     <h2 style="margin:0;color:#fff;font-size:clamp(36px,4vw,58px);line-height:1.05;letter-spacing:-.03em;max-width:820px" data-i18n="welcome.supportTitle">Need help with Clarity Caddy?</h2>
-    <p style="margin:22px 0 0;color:rgba(255,255,255,.72);font-size:clamp(18px,1.6vw,22px);line-height:1.55;max-width:820px" id="supportLine">For support, contact Sam Hale Golf at <a href="mailto:samhalegolf@gmail.com">samhalegolf@gmail.com</a>.</p>
+    <p style="margin:22px 0 0;color:rgba(255,255,255,.72);font-size:clamp(18px,1.6vw,22px);line-height:1.55;max-width:820px" id="supportLine">For support, contact Clarity Golf Systems Limited at <a href="mailto:sam@claritygolf.app">sam@claritygolf.app</a>.</p>
   </section>
 
   <section style="width:min(1180px,calc(100% - 44px));margin:0 auto;padding:0 0 clamp(48px,7vw,90px)">
@@ -222,8 +222,8 @@
   <footer style="width:min(1180px,calc(100% - 44px));margin:0 auto;padding:42px 0 56px;border-top:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.48);display:flex;gap:24px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap">
     <div>
       <strong style="display:block;color:#fff;font-size:18px;margin-bottom:7px">Clarity Caddy</strong>
-      <p style="margin:0;line-height:1.5" data-i18n="welcome.operatedBy" data-i18n-vars='{"company":"Sam Hale Golf","place":"Auckland, New Zealand"}'>Operated by Sam Hale Golf in Auckland, New Zealand.</p>
-      <p style="margin:0;line-height:1.5" data-i18n="welcome.copyright" data-i18n-vars='{"year":"2026","company":"Sam Hale Golf"}'>© 2026 Sam Hale Golf. All rights reserved.</p>
+      <p style="margin:0;line-height:1.5" data-i18n="welcome.operatedBy" data-i18n-vars='{"company":"Clarity Golf Systems Limited","place":"Auckland, New Zealand"}'>Operated by Clarity Golf Systems Limited in Auckland, New Zealand.</p>
+      <p style="margin:0;line-height:1.5" data-i18n="welcome.copyright" data-i18n-vars='{"year":"2026","company":"Clarity Golf Systems Limited"}'>© 2026 Clarity Golf Systems Limited. All rights reserved.</p>
     </div>
     <nav aria-label="Footer links" data-i18n-aria-label="welcome.footerLinksLabel" style="display:flex;gap:18px;flex-wrap:wrap">
       <a href="#how-it-works" style="color:rgba(255,255,255,.76);text-decoration:none;font-weight:700" data-i18n="welcome.howItWorks">How It Works</a>
@@ -290,10 +290,10 @@
   function drawSupportLine() {
     var line = document.getElementById('supportLine');
     if (!line) return;
-    var parts = L('welcome.supportBody', { company: 'Sam Hale Golf' }).split('{email}');
+    var parts = L('welcome.supportBody', { company: 'Clarity Golf Systems Limited' }).split('{email}');
     var link = document.createElement('a');
-    link.href = 'mailto:samhalegolf@gmail.com';
-    link.textContent = 'samhalegolf@gmail.com';
+    link.href = 'mailto:sam@claritygolf.app';
+    link.textContent = 'sam@claritygolf.app';
     line.textContent = parts[0];
     if (parts.length > 1) { line.appendChild(link); line.appendChild(document.createTextNode(parts.slice(1).join('{email}'))); }
   }
