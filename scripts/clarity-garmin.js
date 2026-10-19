@@ -18,12 +18,23 @@
  * callers, so activate() found no selected device and did nothing, forever.
  * This is the missing half.
  *
- * WHAT DOES NOT WORK YET, and is not pretended otherwise anywhere in this
- * file: the Connect IQ Mobile SDK is not bundled in either native build, so
- * `garminDevices` resolves { devices: [], sdkLinked: false, reason }. The page
- * words that as "cannot look" rather than "found none" — those are different
- * answers and a player deserves the real one. Every other part of the flow —
- * selection, persistence, state, disconnect — is real and runs today.
+ * WHAT `garminDevices` ACTUALLY ANSWERS. The Connect IQ Mobile SDK is bundled
+ * in both native builds (the ciq-companion-app-sdk aar on Android, the
+ * ConnectIQ Swift package on iOS) and the watch app is published. What
+ * differs is how a watch gets chosen:
+ *   Android lists `getKnownDevices()` in place. If Garmin Connect is not ready
+ *   it answers an empty list plus a `reason` and wakes the SDK, so a second
+ *   tap usually succeeds; if the service drops mid-listing it answers a
+ *   different `reason`.
+ *   iOS has no in-process list. `garminDevices` starts the hand-off to the
+ *   Garmin Connect app and answers { handoff: true, reason } straight away
+ *   (or just a `reason` if Garmin Connect is not installed); the chosen watch
+ *   comes back later through the URL scheme as a state change, never in the
+ *   list.
+ * If the plugin call itself throws or resolves with nothing, scan() below
+ * fills in a "could not look" reason, so a broken bridge is worded as
+ * "cannot look" rather than "found none" — those are different answers and a
+ * player deserves the real one.
  */
 (function () {
   "use strict";
@@ -183,20 +194,13 @@
 
   function deviceListHTML() {
     if (!devices) return "";
-    /* Three different answers, worded as three different things, because a
-       player can act on two of them and not the third:
-         sdkLinked false  -> this build cannot talk to Garmin at all
-         a reason         -> we tried and could not look (Garmin Connect not
-                             ready, service unreachable)
-         empty list       -> we looked and there is nothing paired
-       Collapsing the middle one into "none found" sends people to re-pair a
-       watch that was never the problem. */
-    if (devices.sdkLinked === false) {
-      return [
-        "<p><strong>" + H("garmin.notInBuild") + "</strong></p>",
-        "<p>" + escapeHTML(devices.reason || L("garmin.notBundled")) + "</p>"
-      ].join("");
-    }
+    /* Two different answers, worded as two different things, because a
+       player can act on one of them and not the other:
+         a reason    -> we tried and could not look (Garmin Connect not ready,
+                        service unreachable, or the plugin call itself failed)
+         empty list  -> we looked and there is nothing paired
+       Collapsing the first into "none found" sends people to re-pair a watch
+       that was never the problem. */
     /* iOS cannot list paired watches in-process — there is no equivalent of
        Android's getKnownDevices(). Choosing one means leaving for the Garmin
        Connect app and being handed back through a URL scheme, so there is
@@ -263,8 +267,8 @@
     busy = true;
     render();
     Promise.resolve(safe(function () { return p.garminDevices(); }, null))
-      .then(function (answer) { devices = answer || { devices: [], sdkLinked: false }; })
-      .catch(function () { devices = { devices: [], sdkLinked: false, reason: L("garmin.couldNotLook") }; })
+      .then(function (answer) { devices = answer || { devices: [], reason: L("garmin.couldNotLook") }; })
+      .catch(function () { devices = { devices: [], reason: L("garmin.couldNotLook") }; })
       .then(function () { busy = false; render(); });
     return false;
   }

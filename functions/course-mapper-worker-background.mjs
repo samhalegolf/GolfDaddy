@@ -14,8 +14,8 @@
    entirely server-side, so nothing client-side needs to run either stage anymore.
 
    Multi-loop courses (hole numbers repeating across separated loops - the Royal Auckland
-   case) also hand off to the resolver now instead of refusing outright: the resolver ignores
-   OSM refs and numbers holes from scorecard distances, which is exactly the evidence a
+   case) also hand off to the resolver now instead of refusing outright: the resolver keeps
+   the holes OSM or a person numbered and numbers the rest from scorecard distances, which is exactly the evidence a
    multi-nine site needs. The refusal only remains for the case it was written for - no
    scorecard, or a resolver answer that cannot beat the collapsed count.
 
@@ -53,6 +53,7 @@ import { mergeOverlayIntoPayload, overlaySummary } from "./lib/gd-map-overlay-co
 import { playOrderLoops } from "./lib/gd-play-order-core.mjs";
 import { overlayOwnerId } from "./lib/gd-overlay-owner.mjs";
 import { TREE_KIND, queueTreeRun } from "./lib/gd-tree-queue.mjs";
+import { SCORECARD_KIND, loadFacilityChildren, facilityNameOf as facilityCardName, fetchFacilityRows, cardsFromRows, relabelFacility } from "./lib/gd-facility-scorecards.mjs";
 import { findCourseTrees, packTrees, TREES_TABLE, TREE_DEFAULT_LEVEL, TREE_RUN_VERSION } from "./lib/gd-course-trees-core.mjs";
 import { readCanopy } from "./lib/gd-canopy-height.mjs";
 const { createPoliteHtmlFetcher } = politeFetch;
@@ -104,7 +105,10 @@ async function claimJob(jobId, kindFilter = "") {
    busy Overpass took all four attempts in under a minute (Fairview, "Overpass 502 (after 4
    attempts)"). Skipped, it waits for the sweeper's next pass, three minutes on. A skipped
    player job still counts as waiting below, so background work does not jump it. */
-const IDLE_KINDS = "(" + NEARBY_AUTOMAP_KIND + "," + TREE_KIND + ")";
+/* Scorecard runs (SCORECARD_KIND) sit behind trees in the same idle queue; with nothing queued,
+   the two backfills are asked in turn - trees first, then one facility with no card
+   (claimScorecardBackfill) - under the same once-an-invocation budget. */
+const IDLE_KINDS = "(" + NEARBY_AUTOMAP_KIND + "," + TREE_KIND + "," + SCORECARD_KIND + ")";
 async function claimNextJob({ allowNearby, allowBackfill, skip }) {
   const notSkipped = skip && skip.size ? "id=not.in.(" + Array.from(skip).map(encodeURIComponent).join(",") + ")&" : "";
   const player = await claimJob(null, notSkipped + "kind=not.in." + IDLE_KINDS + "&");
@@ -115,7 +119,8 @@ async function claimNextJob({ allowNearby, allowBackfill, skip }) {
   if (!Array.isArray(running) || running.length) return null;
   return (await claimJob(null, notSkipped + "kind=eq." + NEARBY_AUTOMAP_KIND + "&"))
     || (await claimJob(null, notSkipped + "kind=eq." + TREE_KIND + "&"))
-    || (allowBackfill ? await claimTreeBackfill() : null);
+    || (await claimJob(null, notSkipped + "kind=eq." + SCORECARD_KIND + "&"))
+    || (allowBackfill ? (await claimTreeBackfill()) || (await claimScorecardBackfill()) : null);
 }
 
 /* The tree backfill: courses mapped before tree runs existed get theirs a course at a time,
@@ -147,10 +152,60 @@ async function claimTreeBackfill() {
   return job ? claimJob(job.id) : null;
 }
 
+/* The scorecard backfill: published facilities with no card get one looked for, a facility
+   at a time, in the worker's idle moments - the same work as Studio's Update Scorecards
+   (runScorecardJob), queued by nobody. A facility counts as covered when course_scorecards
+   holds a card under its facility_key, or under any of its courses' own name keys (cards
+   stored before facility_key existed, and single-course sites). One job per facility: it is
+   queued against the facility's pinned course - the row whose id is the facility key - and
+   a run on any sibling covers them all. A facility whose card the web does not have is not
+   asked for again for a month (SCORECARD_BACKFILL_RETRY_MS): each run is a search and a
+   handful of page reads, and a club with no card online will not grow one overnight.
+   SCORECARD_BACKFILL=off stops it; scorecard runs queued any other way still run. */
+const SCORECARD_BACKFILL_RETRY_MS = 30 * 24 * 60 * 60 * 1000;
+async function claimScorecardBackfill() {
+  if (String(env("SCORECARD_BACKFILL")).toLowerCase() === "off") return null;
+  const cutoff = new Date(Date.now() - SCORECARD_BACKFILL_RETRY_MS).toISOString();
+  const [published, cards, recent] = await Promise.all([
+    supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,facility_key&published=eq.true&order=course_id.asc&limit=5000").catch(() => null),
+    supabaseFetch(SCORECARDS_TABLE + "?select=course_key,facility_key&hole_count=gt.0&limit=5000").catch(() => null),
+    supabaseFetch(JOBS_TABLE + "?select=course_id&kind=eq." + SCORECARD_KIND + "&created_at=gt." + encodeURIComponent(cutoff) + "&limit=5000").catch(() => null)
+  ]);
+  if (!Array.isArray(published) || !Array.isArray(cards) || !Array.isArray(recent)) return null;
+  const facilities = new Map();
+  published.forEach(row => {
+    if (!row || !row.course_id) return;
+    const key = row.facility_key || row.course_id;
+    if (!facilities.has(key)) facilities.set(key, []);
+    facilities.get(key).push(row);
+  });
+  const coveredFacilities = new Set(cards.map(card => card.facility_key).filter(Boolean));
+  const coveredNames = new Set(cards.map(card => card.course_key).filter(Boolean));
+  const tried = new Set(recent.map(row => row.course_id));
+  for (const [facilityKey, children] of facilities) {
+    if (coveredFacilities.has(facilityKey)) continue;
+    if (children.some(row => coveredNames.has(scorecardCourseKey(row.course_name)))) continue;
+    if (children.some(row => tried.has(row.course_id))) continue;
+    const pinned = children.find(row => row.course_id === facilityKey) || children[0];
+    const inserted = await supabaseFetch(JOBS_TABLE, {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify([{ course_id: pinned.course_id, kind: SCORECARD_KIND, status: "queued", requested_by: "scorecard-backfill" }])
+    }).catch(() => null);
+    const job = Array.isArray(inserted) ? inserted[0] : null;
+    return job ? claimJob(job.id) : null;
+  }
+  return null;
+}
+
 /* A background run takes the remainder of an invocation, never a fresh one's worth: started
    late, it could outlive the background-function limit and be reaped half done. The sweeper
    comes round every three minutes to carry on. */
 const NEARBY_CLAIM_BUDGET_MS = 8 * 60 * 1000;
+
+/* Jobs nobody was promised: a failure is recorded on the row and nothing else - no debug
+   session, no alert. */
+const quietKind = kind => kind === NEARBY_AUTOMAP_KIND || kind === TREE_KIND || kind === SCORECARD_KIND;
 
 /* After a player's scan settles, line up the courses around it. Only a PLAYER's scan: a guest
    install, or a signed-in account that is not an admin. Not for background jobs themselves -
@@ -357,7 +412,7 @@ async function reapStaleJobs() {
       const reapedError = "stale-running-reaped: worker died mid-job " + attempts + " times";
       /* A background job failing is not news to anyone - see NEARBY_AUTOMAP_KIND. */
       const patch = attempts >= 8
-        ? { status: "failed", error: reapedError, result: Object.assign({}, row.result || {}, { attempts }, row.kind === NEARBY_AUTOMAP_KIND || row.kind === TREE_KIND ? {} : await requestMapperDebug(row, { message: reapedError, attempts, diagnostics: row.result && row.result.diagnostics })), updated_at: new Date().toISOString() }
+        ? { status: "failed", error: reapedError, result: Object.assign({}, row.result || {}, { attempts }, quietKind(row.kind) ? {} : await requestMapperDebug(row, { message: reapedError, attempts, diagnostics: row.result && row.result.diagnostics })), updated_at: new Date().toISOString() }
         : { status: "queued", error: null, result: Object.assign({}, row.result || {}, { attempts }), updated_at: new Date().toISOString() };
       await supabaseFetch(JOBS_TABLE + "?id=eq." + row.id, { method: "PATCH", body: JSON.stringify(patch) });
     }
@@ -752,14 +807,17 @@ async function searchScorecardPages(name, region, identity, origin, signal) {
   });
 }
 
-async function resolveScorecardForCourse(course, origin, want) {
+/* budgetMs: the mapper's own runs keep the 12-second box above (a card is a nice-to-have
+   there); a scorecard run (runScorecardJob) exists for nothing else and gets its own. */
+async function resolveScorecardForCourse(course, origin, want, budgetMs = SCORECARD_RESOLVE_BUDGET_MS) {
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), SCORECARD_RESOLVE_BUDGET_MS) : null;
+  const timer = controller ? setTimeout(() => controller.abort(), budgetMs) : null;
   const signal = controller ? controller.signal : undefined;
   /* The pinned course's own id, same value publishSeparatedLoops stamps as every
      sibling's facility_key - so cards found here are findable by facility later,
-     including from Update Scorecards without re-fetching. */
-  const facilityKey = course.courseId || null;
+     including from Update Scorecards without re-fetching. A scorecard run on a
+     sibling names the facility it already belongs to. */
+  const facilityKey = course.facilityKey || course.courseId || null;
   /* The picture fallback, for clubs whose only card is an image. Its own clock,
      started only if the HTML pages all come up empty - see gd-scorecard-vision. */
   /* One read per image per scan, however many facility rounds ask - the cache
@@ -2233,6 +2291,49 @@ async function runTreeJob(job) {
   };
 }
 
+/* ---------- resolve_scorecards ------------------------------------------------------------
+
+   Update Scorecards (functions/course-scorecard-update.mjs) on the queue: the facility's
+   stored cards are read, more are looked for when there are fewer than courses - the same
+   resolver the mapper runs, picture fallback included, on a clock sized for a run that has
+   nothing else to do - and the siblings are named from them only when the match is confident
+   (relabelFacility). Nothing else: no Overpass, no objects_json, no holes_json, no visuals.
+   A scrape never replaces a confirmed or high-confidence card (shouldReplaceFacilityCard,
+   inside resolveScorecardForCourse's writeStore). */
+const SCORECARD_JOB_BUDGET_MS = 120 * 1000;
+
+async function runScorecardJob(job, origin) {
+  const facility = await loadFacilityChildren(supabaseFetch, job.course_id);
+  if (!facility) throw new Error("course " + job.course_id + " has no course_maps row");
+  const { facilityKey, pinned, children } = facility;
+  const want = children.length;
+  /* The lib's facility name (the name cards are stored under), not this file's facilityNameOf. */
+  const facilityName = facilityCardName(pinned, job.course_id);
+  let cards = cardsFromRows(await fetchFacilityRows(supabaseFetch, facilityKey));
+  let searched = null;
+  if (distinctCardCount(cards) < want) {
+    await heartbeatJob(job, { stage: "resolving-scorecard" });
+    /* The pinned course's place (region, country, centre) steers the search; the name the
+       cards are searched and labelled under is the facility's, not one sibling's. */
+    const located = await loadCourseCenter(job.course_id).catch(() => null);
+    const course = Object.assign(located || {
+      courseId: pinned.course_id, courseName: pinned.course_name, region: pinned.region || "", country: pinned.country || ""
+    }, { courseName: facilityName, facilityKey });
+    searched = await resolveScorecardForCourse(course, origin, want, SCORECARD_JOB_BUDGET_MS);
+    cards = distinctCards(cards.concat(searched.cards || []));
+  }
+  await heartbeatJob(job, { stage: "naming-courses" });
+  const relabel = await relabelFacility(supabaseFetch, { children, cards });
+  return Object.assign({ kind: SCORECARD_KIND, courseId: job.course_id, facilityKey, facilityName }, relabel, {
+    reason: (searched && searched.reason) || relabel.reason || null,
+    searched: !!searched,
+    stored: !!(searched && searched.stored),
+    pagesRead: searched ? (searched.attempts || []).length : 0,
+    visual: searched && searched.visual ? searched.visual.status : null,
+    visualsTouched: false, holeGeometryTouched: false
+  });
+}
+
 /* ---------- collect_extra_objects ---------------------------------------------------------
 
    Enrichment, and ONLY enrichment. It shares the Overpass sweep with runMapperJob and nothing
@@ -3469,18 +3570,19 @@ export default async function courseMapperWorker(req) {
   const requeued = new Set();
   const next = async () => {
     const job = await claimNextJob({ allowNearby: Date.now() - startedAt < NEARBY_CLAIM_BUDGET_MS, allowBackfill: !backfilled, skip: requeued });
-    if (job && job.requested_by === "tree-backfill") backfilled = true;
+    if (job && /-backfill$/.test(String(job.requested_by || ""))) backfilled = true;
     return job;
   };
   let job = payload && payload.jobId ? await claimJob(payload.jobId) : await next();
   while (job) {
     try {
       const kind = String(job.kind || "");
-      const maintenance = kind === OBJECT_COLLECTION_KIND || kind === SHAPE_REFINE_KIND || kind === TREE_KIND;
+      const maintenance = kind === OBJECT_COLLECTION_KIND || kind === SHAPE_REFINE_KIND || kind === TREE_KIND || kind === SCORECARD_KIND;
       const background = kind === NEARBY_AUTOMAP_KIND;
       const result = kind === OBJECT_COLLECTION_KIND ? await runObjectCollectionJob(job)
         : kind === SHAPE_REFINE_KIND ? await runShapeRefineJob(job)
         : kind === TREE_KIND ? await runTreeJob(job)
+        : kind === SCORECARD_KIND ? await runScorecardJob(job, origin)
         : await runMapperJob(job, origin);
       /* Chained BEFORE finishJob so the outcome rides on the job's own result row - a course
          whose frames never appeared should say why in the same place everything else about
@@ -3538,8 +3640,8 @@ export default async function courseMapperWorker(req) {
       const patch = retryable
         ? { status: "queued", error: null, result: Object.assign({}, job.result || {}, { attempts, lastTransientError: message }, diagnostics ? { diagnostics } : {}) }
         : { status: "failed", error: attempts > 1 ? message + " (after " + attempts + " attempts)" : message, result: Object.assign({}, job.result || {}, { attempts }, diagnostics ? { diagnostics } : {}) };
-      /* Neither a background neighbour nor a tree run was promised to anyone: no debug session. */
-      if (!retryable && job.kind !== NEARBY_AUTOMAP_KIND && job.kind !== TREE_KIND) Object.assign(patch.result, await requestMapperDebug(job, { message, attempts, diagnostics }));
+      /* Neither a background neighbour, a tree run nor a scorecard run was promised to anyone: no debug session. */
+      if (!retryable && !quietKind(job.kind)) Object.assign(patch.result, await requestMapperDebug(job, { message, attempts, diagnostics }));
       await finishJob(job.id, patch).catch(() => {});
       if (retryable) requeued.add(job.id);
       /* A failed scan still says a player is golfing around here. */
@@ -3550,4 +3652,4 @@ export default async function courseMapperWorker(req) {
   return new Response("ok", { status: 200 });
 }
 
-export const __courseMapperWorkerTest = { claimJob, claimNextJob, claimTreeBackfill, runTreeJob, queueNeighboursAfter, finishJob, heartbeatJob, reapStaleJobs, loadCourseCenter, ensureCoursePlace, runMapperJob, runObjectCollectionJob, runShapeRefineJob, publishedFramesByHole, surfaceCounts, chainVisualSnapshot, transientMapperFailure, requestMapperDebug, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, loopCourseId, MAX_TRANSIENT_ATTEMPTS };
+export const __courseMapperWorkerTest = { claimJob, claimNextJob, claimTreeBackfill, claimScorecardBackfill, runTreeJob, runScorecardJob, queueNeighboursAfter, finishJob, heartbeatJob, reapStaleJobs, loadCourseCenter, ensureCoursePlace, runMapperJob, runObjectCollectionJob, runShapeRefineJob, publishedFramesByHole, surfaceCounts, chainVisualSnapshot, transientMapperFailure, requestMapperDebug, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, loopCourseId, MAX_TRANSIENT_ATTEMPTS };

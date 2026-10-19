@@ -55,7 +55,10 @@
       { stage: "querying-overpass", from: 0, to: 18, label: "Querying OpenStreetMap" },
       { stage: "widening-for-multi-course-site", from: 18, to: 26, label: "Widening for a multi-course site" },
       { stage: "requerying-hole-gaps", from: 26, to: 34, label: "Re-querying hole gaps" },
-      { stage: "resolving-geometry", from: 34, to: 50, label: "Resolving geometry" },
+      /* The play-orders path: Studio said what the courses are, so the run goes straight to
+         publishing them (publishPlayOrders) instead of working it out below. */
+      { stage: "publishing-play-orders", from: 34, to: 38, label: "Publishing from play orders" },
+      { stage: "resolving-geometry", from: 38, to: 50, label: "Resolving geometry" },
       { stage: "resolving-scorecard", from: 50, to: 60, label: "Resolving scorecard" },
       { stage: "geometry-resolver", from: 60, to: 70, label: "Building holes" },
       { stage: "retry-wider-frame", from: 70, to: 76, label: "Retrying on a wider frame" },
@@ -77,6 +80,11 @@
     find_trees: [
       { stage: "reading-published-frames", from: 0, to: 5, label: "Reading published frames" },
       { stage: "trees-hole", from: 5, to: 100, label: "Finding trees" }
+    ],
+    /* A scorecard run (runScorecardJob in the worker): the search is nearly all of it. */
+    resolve_scorecards: [
+      { stage: "resolving-scorecard", from: 0, to: 90, label: "Looking for scorecards" },
+      { stage: "naming-courses", from: 90, to: 100, label: "Naming courses from the cards" }
     ],
     /* The Watch bake's own stages, written by functions/course-watch-maps.mjs. Unlike the
        mapper kinds these are ours to choose, so they are already shaped as one long counted
@@ -259,6 +267,7 @@
     if (jobKind === "collect_extra_objects") return "Collecting extra objects";
     if (jobKind === "refine_surface_shapes") return "Refining shapes";
     if (jobKind === "find_trees") return "Finding trees";
+    if (jobKind === "resolve_scorecards") return "Resolving scorecards";
     if (jobKind === "automap") return "Mapping";
     return "Working";
   }

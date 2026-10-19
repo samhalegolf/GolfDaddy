@@ -168,6 +168,105 @@ test("source-load failure is reported cleanly when the OSM payload has no suppor
   assert.ok(result.sourceLoadError && result.sourceLoadError.code);
 });
 
+
+/* Three holes as OSM hole lines with a green at each end, in metres east/north of an origin
+   on the equator. A and C are both 150m par 3s, so the card alone cannot tell which is hole 1. */
+function threeHoleLoop(greenTags = {}) {
+  const deg = m => m / 111320;
+  const pt = (x, y) => ({ lat: deg(y), lon: deg(x) });
+  const line = (id, from, to) => ({ type: "way", id, tags: { golf: "hole" }, geometry: [pt(...from), pt(...to)] });
+  const green = (id, x, y) => ({ type: "way", id, tags: Object.assign({ golf: "green" }, greenTags[id] || {}), geometry: [
+    pt(x - 10, y - 10), pt(x + 10, y - 10), pt(x + 10, y + 10), pt(x - 10, y + 10), pt(x - 10, y - 10)
+  ] });
+  return { elements: [
+    line(1, [0, 0], [0, 150]), green(11, 0, 150),          /* A: north from the origin */
+    line(2, [130, -10], [130, 340]), green(12, 130, 340),  /* B: 350m, its tee 130m from C's green */
+    line(3, [0, -160], [0, -10]), green(13, 0, -10)        /* C: ends 10m from A's tee */
+  ] };
+}
+const threeHoleCard = [{ holeNumber: 1, par: 3, distanceM: 150 }, { holeNumber: 2, par: 4, distanceM: 350 }, { holeNumber: 3, par: 3, distanceM: 150 }];
+async function resolveThreeHoles(payload, status = "resolved") {
+  const result = await resolver.resolveCourseGeometryForAutoMapper({ osmPayload: payload, courseId: "loop", expectedHoleCount: 3, scorecardHoles: threeHoleCard });
+  if (status) assert.strictEqual(result.status, status);
+  const byHole = {};
+  result.holes.forEach(h => { byHole[h.holeNumber] = h.candidate.greenId; });
+  return { result, byHole };
+}
+
+test("the walk from the last green back to the first tee decides hole 1 when the lengths cannot", async () => {
+  /* Walked C, B, A the holes sit closer together (C's green to B's tee 130m, B's green to A's
+     tee 354m) than A, B, C (189m and 510m) - but C ends 10m from A's tee, so the round that
+     starts at A comes back to where it began, and the one that starts at C ends 310m away.
+     Parkes: a stray link was cheapest as hole 1 because its long walk was charged once. */
+  const { result, byHole } = await resolveThreeHoles(threeHoleLoop());
+  assert.deepStrictEqual(byHole, { 1: "way-11", 2: "way-12", 3: "way-13" });
+  const best = result.debugEvidence.assignmentAlternatives[0];
+  assert.ok(best.closure >= 0.1, "the closing walk is scored, and it is a short one: " + best.closure);
+});
+
+test("a hole number on a green is a hint the resolver obeys, whatever the card and the walks say", async () => {
+  /* The same ground with C's green numbered 1 - as a numbered overlay link numbers its shapes.
+     Hole 1 is C even though the loop reads better from A, and A, now unlabelled, cannot be
+     hole 1 - it takes the number left over. */
+  const { result, byHole } = await resolveThreeHoles(threeHoleLoop({ 13: { ref: "1" } }));
+  assert.deepStrictEqual(byHole, { 1: "way-13", 2: "way-12", 3: "way-11" });
+  const c = result.holes.find(h => h.holeNumber === 1);
+  assert.strictEqual(c.candidate.existingHoleNumber, 1, "the number on the green reached the hole's reading");
+  assert.ok(c.evidence.includes("existing-ref:1") && c.evidence.includes("existing-osm-ref-match"));
+  /* A number that is on the green but fits the card badly is still kept, and kept confidently
+     enough to be saved: the person said so. */
+  const swapped = await resolveThreeHoles(threeHoleLoop({ 12: { ref: "1" } }), null);
+  assert.strictEqual(swapped.byHole[1], "way-12", "the 350m hole is hole 1 because it is numbered 1");
+  const labelled = swapped.result.holes.find(h => h.holeNumber === 1);
+  assert.ok(labelled.confidence >= resolver.__geometryResolverCoreTest.MEDIUM_CONFIDENCE, "confidence " + labelled.confidence);
+  assert.ok(resolver.guideFromResolvedHole(labelled, swapped.result), "it becomes a guide the mapper saves");
+});
+
+test("a number on two greens is no hint: the card numbers the course, as on a site numbered 1-9 twice", async () => {
+  /* Two nines both numbered 1-9 under one 18-hole card reach the resolver so the card can
+     number them; locked to the refs, holes 10-18 would have nothing to take. Here both par 3s
+     say they are hole 1, so neither is believed and the loop decides as if unnumbered. */
+  const { result, byHole } = await resolveThreeHoles(threeHoleLoop({ 11: { ref: "1" }, 13: { ref: "1" } }));
+  assert.deepStrictEqual(byHole, { 1: "way-11", 2: "way-12", 3: "way-13" });
+  assert.ok(!result.holes.some(h => h.evidence.includes("existing-osm-ref-match")), "no hole counts as numbered");
+});
+
+test("Parkes: one labelled link numbers the whole course around it", async () => {
+  /* The real overlay (dev/fixtures/parkes-overlay.json): 18 links, no OSM, and a card pasted
+     by hand. Unlabelled, the lengths put a stray 164m link at the far end of the course as hole
+     1, 980m from hole 2. The person then numbered the link by the clubhouse as hole 1 and got
+     17 holes: the resolver had weighed the label against the card and lost it, numbered that
+     ground 9, and the worker threw hole 9 out for sitting on hole 1. With the label obeyed the
+     resolver's hole 1 is that link, nothing else touches its ground, and all 18 are numbered. */
+  const overlay = await import(path.join(root, "functions", "lib", "gd-map-overlay-core.mjs"));
+  const parkes = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "parkes-overlay.json"), "utf8"));
+  const LINK = "l-mveomg2u-cvhs";
+  const features = parkes.features.map(f => f.link === LINK ? Object.assign({}, f, { hole: 1 }) : f);
+  const elements = overlay.overlayToOsmElements(features);
+  const result = await resolver.resolveCourseGeometryForAutoMapper({
+    osmPayload: { elements }, courseId: "parkes", courseCentre: parkes.centre, expectedHoleCount: 18,
+    scorecardHoles: parkes.scorecard, scorecardEvidence: { holes: parkes.scorecard, source: "manual-upload" }
+  });
+  assert.strictEqual(result.status, "resolved");
+  assert.strictEqual(result.holes.length, 18);
+  const linkIds = new Set(elements.filter(e => e.tags["clarity:link"] === LINK).map(e => "way-" + e.id));
+  const hole1 = result.holes.find(h => h.holeNumber === 1);
+  assert.ok(linkIds.has(hole1.candidate.greenId), "hole 1 is the labelled link's green");
+  assert.ok(Math.abs(hole1.candidate.pathDistanceM - 189) < 5, "read from the link's back tee: " + Math.round(hole1.candidate.pathDistanceM) + "m");
+  result.holes.filter(h => h.holeNumber !== 1).forEach(h => {
+    const keys = (h.candidate.featureKeys || []).concat([h.candidate.greenId]);
+    assert.ok(!keys.some(key => linkIds.has(key)), "hole " + h.holeNumber + " keeps off hole 1's ground");
+  });
+  /* Unlabelled, the lengths still decide, and the loop closes on the stray: the answer the
+     person saw. */
+  const plain = await resolver.resolveCourseGeometryForAutoMapper({
+    osmPayload: { elements: overlay.overlayToOsmElements(parkes.features) }, courseId: "parkes", courseCentre: parkes.centre, expectedHoleCount: 18,
+    scorecardHoles: parkes.scorecard, scorecardEvidence: { holes: parkes.scorecard, source: "manual-upload" }
+  });
+  assert.strictEqual(plain.holes.length, 18);
+  assert.ok(plain.debugEvidence.assignmentAlternatives[0].closure < 0, "the stray's walk back to hole 1 is charged");
+});
+
 (async function run() {
   resolver = await import(path.join(root, "functions", "lib", "gd-geometry-resolver-core.mjs"));
   automapperCore = await import(path.join(root, "functions", "lib", "gd-automapper-core.mjs"));
