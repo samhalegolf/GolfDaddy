@@ -18,7 +18,8 @@ using Toybox.Timer;
 //   SELECT   not aiming -> enter Aim Mode / aiming -> confirm (send AIM_AT once)
 //   BACK     aiming -> cancel (no AIM_AT sent) / not aiming -> back to Numbers
 //   UP/DOWN  aiming -> nudge target / not aiming -> hole navigation (unchanged)
-//   KEY_LAP  not aiming -> LOCK directly from the map (plan step 22)
+//   KEY_LAP  not aiming -> UNLOCK a locked shot (map or Numbers), else
+//            LOCK directly from the map (plan step 22)
 // Lateral (LEFT/RIGHT) nudging is NOT wired for button devices in this pass
 // — no device in the Phase 1 matrix (Approach S62/S70, Fenix 6, Forerunner
 // 55) has a physical left/right control, and inventing an unproven
@@ -143,17 +144,21 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
     // KEY_LAP: the physical LAP/light button most 5-button Garmin devices
     // in the Phase 1 matrix expose, used here for "LOCK directly from the
     // map" (plan step 22) since SELECT is already spoken for by Aim Mode
-    // entry/confirm. UNVERIFIED — see garmin/README.md's Phase 3 section:
-    // whether WatchUi.KEY_LAP fires through onKey on a BehaviorDelegate
-    // subclass (rather than needing the lower-level InputDelegate) needs
-    // confirming against the installed SDK and real devices.
+    // entry/confirm - and, while a shot is locked, for UNLOCK on either
+    // face, the button watch's twin of the Numbers pill's UNLOCK half.
+    // UNVERIFIED — see garmin/README.md's Phase 3 section: whether
+    // WatchUi.KEY_LAP fires through onKey on a BehaviorDelegate subclass
+    // (rather than needing the lower-level InputDelegate) needs confirming
+    // against the installed SDK and real devices.
     function onKey(keyEvent) {
         if (keyEvent has :getKey && keyEvent.getKey() == WatchUi.KEY_LAP) {
-            if (view.showingMap && !view.mapView.aiming
-                    && session.face().equals(GarminSessionManager.FACE_PLAYING)
-                    && session.scene != null && session.scene.canLock()) {
-                session.send(GarminCommandKind.LOCK);
-                WatchUi.requestUpdate();
+            var aiming = view.showingMap && view.mapView.aiming;
+            if (!aiming && session.face().equals(GarminSessionManager.FACE_PLAYING) && session.scene != null) {
+                if (session.scene.canUnlock()) {
+                    router.dispatch(InputAction.UNLOCK);
+                } else if (view.showingMap && session.scene.canLock()) {
+                    router.dispatch(InputAction.LOCK);
+                }
             }
             return true;
         }
@@ -218,8 +223,10 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
         if (!mapAimable()) {
             // On the numbers face a long press on the compass or the big
             // number switches the wind into the big number, or back out.
+            // A hold on UNLOCK is not an unlock: only a tap is.
             var region = numbersRegion(clickEvent);
             if (region == null) { return false; }
+            if (region.equals("unlock")) { return true; }
             cancelPendingTap();
             toggleWindApplied();
             return true;
@@ -269,6 +276,13 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
         if (clickEvent.getType() != WatchUi.CLICK_TYPE_TAP) { return false; }
         var region = numbersRegion(clickEvent);
         if (region == null) { return false; }
+        // The pill's UNLOCK half acts at once: there is no double-tap on it
+        // to wait for, and a golfer walking off wants it gone now.
+        if (region.equals("unlock")) {
+            cancelPendingTap();
+            router.dispatch(InputAction.UNLOCK);
+            return true;
+        }
         if (pendingRegion != null && pendingRegion.equals(region)) {
             cancelPendingTap();
             toggleWindApplied();
@@ -351,6 +365,13 @@ class CaddyInputDelegate extends WatchUi.BehaviorDelegate {
             if (session.scene != null && session.scene.canNextHole()) { session.sendSimple(GarminCommandKind.NEXT_HOLE); }
         } else if (action.equals(InputAction.PREVIOUS_HOLE)) {
             if (session.scene != null && session.scene.canPreviousHole()) { session.sendSimple(GarminCommandKind.PREVIOUS_HOLE); }
+        } else if (action.equals(InputAction.LOCK)) {
+            if (session.scene != null && session.scene.canLock()) { session.send(GarminCommandKind.LOCK); }
+        } else if (action.equals(InputAction.UNLOCK)) {
+            // Marshal's UNLOCK: back to Track with the shot record kept
+            // (app/js/marshal.js). The Scene it publishes clears any
+            // GarminLockedShot still showing, so nothing is reset here.
+            if (session.scene != null && session.scene.canUnlock()) { session.sendSimple(GarminCommandKind.UNLOCK); }
         } else if (action.equals(InputAction.OPEN_MAP)) {
             view.showMap();
         } else if (action.equals(InputAction.OPEN_NUMBERS)) {

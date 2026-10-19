@@ -5,7 +5,9 @@ using Toybox.WatchUi;
 // never learns whether an action came from a drag or a button — physical
 // input is translated to one of these constants here, once, and every view
 // consumes only the semantic form. Phase 1 wired NEXT/PREVIOUS/SELECT/BACK/
-// LOCK/UNLOCK/NEXT_HOLE/PREVIOUS_HOLE. Phase 3 wires AIM_UP/DOWN/LEFT/RIGHT
+// NEXT_HOLE/PREVIOUS_HOLE; LOCK and UNLOCK are dispatched by KEY_LAP and the
+// Numbers pill's UNLOCK half (CaddyInputDelegate.onKey / numbersTap), and
+// SELECT's own LOCK still goes through handleSelect. Phase 3 wires AIM_UP/DOWN/LEFT/RIGHT
 // (CaddyInputDelegate.onAction, nudging GarminMapView's target) and
 // OPEN_MAP/OPEN_NUMBERS (CaddyAppView).
 //
