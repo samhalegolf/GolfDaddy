@@ -60,6 +60,14 @@ More at https://claritygolf.app
 ## What's New (4000 max, optional)
 
 ```
+1.1.8: Unlock a shot from the watch. While a shot is locked the AIM pill on the
+Numbers screen splits, with UNLOCK on its right; on button watches, press LAP.
+Unlocking keeps the shot's record and takes you back to tracking.
+```
+
+Earlier (1.1.5):
+
+```
 1.1.5: Folding the wind into your distance now updates the plays number too.
 ```
 
