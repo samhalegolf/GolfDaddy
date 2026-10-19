@@ -1856,6 +1856,7 @@
     "welcome.appleScore": "Pontszám a lyukak között, az AIM pedig rögzíti az ütést és előhozza a térképet",
     "welcome.watchFree": "Az órával való játék ingyenes. Az Apple Watch alkalmazás az iPhone-alkalmazással együtt érkezik (watchOS 10 vagy újabb). A Garminhoz a Connect IQ áruházból letölthető Clarity Caddy alkalmazás kell, és iPhone-nal vagy Androiddal is működik.",
     "welcome.wristNav": "Apple Watch és Garmin",
+    "welcome.watchPreviewLink": "Nézd meg az órádon",
 
     /* Practice Bubble preview banner (scripts/gd-practice-bubble-preview.js) */
     "practicePreview.title": "Bubble előnézet",

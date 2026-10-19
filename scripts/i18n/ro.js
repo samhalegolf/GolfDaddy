@@ -1932,6 +1932,7 @@
     "welcome.appleScore": "Scor între găuri, iar AIM blochează lovitura și afișează harta",
     "welcome.watchFree": "Jocul cu ceasul este gratuit. Aplicația pentru Apple Watch vine cu aplicația pentru iPhone (watchOS 10 sau mai nou). Un Garmin are nevoie de aplicația Clarity Caddy din magazinul Connect IQ și funcționează cu iPhone sau Android.",
     "welcome.wristNav": "Apple Watch și Garmin",
+    "welcome.watchPreviewLink": "Previzualizează pe ceasul tău",
 
     /* Practice Bubble preview banner (scripts/gd-practice-bubble-preview.js) */
     "practicePreview.title": "Previzualizare Bubble",

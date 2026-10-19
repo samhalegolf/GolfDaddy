@@ -1856,6 +1856,7 @@
     "welcome.appleScore": "Score tussen de holes, en AIM vergrendelt de slag en haalt de kaart naar voren",
     "welcome.watchFree": "Spelen met het horloge is gratis. De Apple Watch-app zit bij de iPhone-app (watchOS 10 of nieuwer). Een Garmin heeft de Clarity Caddy-app uit de Connect IQ-store nodig en werkt met iPhone of Android.",
     "welcome.wristNav": "Apple Watch en Garmin",
+    "welcome.watchPreviewLink": "Bekijk het op je horloge",
 
     /* Practice Bubble preview banner (scripts/gd-practice-bubble-preview.js) */
     "practicePreview.title": "Bubble-voorbeeld",

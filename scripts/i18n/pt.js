@@ -1856,6 +1856,7 @@
     "welcome.appleScore": "Resultado entre buracos, e AIM bloqueia a pancada e mostra o mapa",
     "welcome.watchFree": "Jogar com o relógio é grátis. A app para Apple Watch vem com a app para iPhone (watchOS 10 ou posterior). Um Garmin precisa da app Clarity Caddy da loja Connect IQ e funciona com iPhone ou Android.",
     "welcome.wristNav": "Apple Watch e Garmin",
+    "welcome.watchPreviewLink": "Veja no seu relógio",
 
     /* Practice Bubble preview banner (scripts/gd-practice-bubble-preview.js) */
     "practicePreview.title": "Pré-visualização da Bubble",

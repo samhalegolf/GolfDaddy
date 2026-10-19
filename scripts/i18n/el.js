@@ -1856,6 +1856,7 @@
     "welcome.appleScore": "Σκορ ανάμεσα στις τρύπες, και το AIM κλειδώνει το χτύπημα και εμφανίζει τον χάρτη",
     "welcome.watchFree": "Το παιχνίδι με ρολόι είναι δωρεάν. Η εφαρμογή Apple Watch έρχεται με την εφαρμογή iPhone (watchOS 10 ή νεότερο). Ένα Garmin χρειάζεται την εφαρμογή Clarity Caddy από το Connect IQ store και λειτουργεί με iPhone ή Android.",
     "welcome.wristNav": "Apple Watch και Garmin",
+    "welcome.watchPreviewLink": "Δείτε το στο ρολόι σας",
 
     /* Practice Bubble preview banner (scripts/gd-practice-bubble-preview.js) */
     "practicePreview.title": "Προεπισκόπηση Bubble",
