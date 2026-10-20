@@ -198,12 +198,15 @@ h1{margin:0;font-size:clamp(34px,5vw,58px);line-height:1.04;letter-spacing:-.03e
 h2{margin:60px 0 14px;font-size:clamp(24px,2.6vw,32px);letter-spacing:-.02em}
 .sub{margin:0 0 22px;color:rgba(255,255,255,.62);font-size:16px}
 .card{max-width:680px;padding:clamp(18px,3vw,30px);border:1px solid rgba(255,255,255,.12);border-radius:24px;background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.025))}
-table{width:100%;border-collapse:collapse;font-size:16px;font-variant-numeric:tabular-nums}
-th,td{padding:11px 10px;text-align:right;border-bottom:1px solid rgba(255,255,255,.08)}
+h2.small{font-size:20px;margin-top:44px;color:rgba(255,255,255,.85)}
+.nines{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;max-width:680px}
+.nines .card{padding:6px 12px;border-radius:16px}
+table{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums;color:rgba(255,255,255,.8)}
+th,td{padding:4px 6px;text-align:right;border-bottom:1px solid rgba(255,255,255,.06)}
 th:first-child,td:first-child{text-align:left}
-th{font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:rgba(255,255,255,.55);font-weight:800}
-tr:last-child td{border-bottom:0}
-tfoot td{font-weight:800;color:#20d96b;border-top:1px solid rgba(255,255,255,.18)}
+th{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:rgba(255,255,255,.45);font-weight:800}
+tbody tr:last-child td{border-bottom:0}
+tfoot td{font-weight:800;color:#20d96b;border-top:1px solid rgba(255,255,255,.14);border-bottom:0}
 .card.isWide{max-width:none}
 .wpGrid{display:grid;grid-template-columns:minmax(260px,1fr) minmax(300px,520px);gap:26px;align-items:start}
 .wpBar{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
@@ -307,20 +310,22 @@ function findSection() {
     + "</div>";
 }
 
+/* Compact, and deliberately second-tier: the visuals are the page, the card is reference.
+   Nine holes per table, side by side on a wide screen, each with its own subtotal. */
 function holeTable(holes, yards) {
   if (!holes.length) return "";
-  const unit = yards ? "yards" : "metres";
   const hasIndex = holes.some((h) => h.index != null);
-  const totalPar = holes.reduce((s, h) => s + (h.par || 0), 0);
-  const totalLen = holes.reduce((s, h) => s + (h.metres || 0), 0);
-  const rows = holes.map((h) => "<tr><td>" + h.hole + "</td><td>" + (h.par == null ? "" : h.par) + "</td>"
-    + (hasIndex ? "<td>" + (h.index == null ? "" : h.index) + "</td>" : "")
-    + "<td>" + distance(h.metres, yards) + "</td></tr>").join("");
-  return '<h2 id="holes">Hole by hole</h2>'
-    + '<p class="sub">Par and length in ' + unit + ' from the scorecard’s standard tee. On the course, Clarity measures from where you stand.</p>'
-    + '<div class="card"><table><thead><tr><th>Hole</th><th>Par</th>' + (hasIndex ? "<th>Index</th>" : "") + "<th>" + (yards ? "Yards" : "Metres") + "</th></tr></thead>"
-    + "<tbody>" + rows + "</tbody>"
-    + "<tfoot><tr><td>Total</td><td>" + totalPar + "</td>" + (hasIndex ? "<td></td>" : "") + "<td>" + distance(totalLen, yards) + "</td></tr></tfoot></table></div>";
+  const unitHead = yards ? "Yds" : "M";
+  const nines = [holes.slice(0, 9), holes.slice(9)].filter((n) => n.length);
+  const total = (list, key) => list.reduce((s, h) => s + (h[key] || 0), 0);
+  const table = (list, label, footLabel) => '<div class="card"><table><thead><tr><th>' + label + "</th><th>Par</th>" + (hasIndex ? "<th>SI</th>" : "") + "<th>" + unitHead + "</th></tr></thead><tbody>"
+    + list.map((h) => "<tr><td>" + h.hole + "</td><td>" + (h.par == null ? "" : h.par) + "</td>" + (hasIndex ? "<td>" + (h.index == null ? "" : h.index) + "</td>" : "") + "<td>" + distance(h.metres, yards) + "</td></tr>").join("")
+    + "</tbody><tfoot><tr><td>" + footLabel + "</td><td>" + total(list, "par") + "</td>" + (hasIndex ? "<td></td>" : "") + "<td>" + distance(total(list, "metres"), yards) + "</td></tr></tfoot></table></div>";
+  const split = nines.length > 1;
+  const grand = split ? '<p class="sub" style="margin:10px 0 0;font-size:13px">Total par ' + total(holes, "par") + " \u00b7 " + distance(total(holes, "metres"), yards) + (yards ? " yards" : " m") + "</p>" : "";
+  return '<h2 id="holes" class="small">Scorecard</h2>'
+    + '<p class="sub" style="font-size:13px;margin-bottom:12px">Standard tee, ' + (yards ? "yards" : "metres") + ". On the course, Clarity measures from where you stand.</p>"
+    + '<div class="nines">' + nines.map((n, i) => table(n, split ? (i === 0 ? "Out" : "In") : "Hole", split ? (i === 0 ? "Out" : "In") : "Total")).join("") + "</div>" + grand;
 }
 
 function jsonLd(map, name, url, origin) {

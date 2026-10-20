@@ -63,14 +63,24 @@ test("the hole table shows one tee - the card's leading distance - never the oth
   const html = renderCoursePage(data, "https://example.test");
   assert.ok(/<td>1<\/td><td>4<\/td><td>1<\/td><td>301<\/td>/.test(html), "hole 1 row wrong: " + html.match(/<tbody>.*?<\/tr>/)[0]);
   assert.ok(!/<th>White<\/th>|<th>Blue<\/th>/.test(html), "other tees leaked into the table");
-  assert.ok(/<th>Metres<\/th>/.test(html), "NZ reads metres");
+  assert.ok(/<th>M<\/th>/.test(html), "NZ reads metres");
   assert.ok(/<td>Total<\/td><td>12<\/td><td><\/td><td>906<\/td>/.test(html), "totals wrong");
+});
+
+test("eighteen holes split into Out and In, each with its own line, plus the total", async () => {
+  const { renderCoursePage } = await import("../functions/course-page.mjs");
+  const card = { holes_json: Array.from({ length: 18 }, (_, i) => ({ hole: i + 1, par: 4, metres: 300 })) };
+  const html = renderCoursePage({ map: MAP, visual: {}, card }, "https://example.test");
+  assert.strictEqual((html.match(/<table>/g) || []).length, 2);
+  assert.ok(/<th>Out<\/th>/.test(html) && /<th>In<\/th>/.test(html));
+  assert.ok(/<td>Out<\/td><td>36<\/td><td>2700<\/td>/.test(html) && /<td>In<\/td><td>36<\/td><td>2700<\/td>/.test(html), "nine-hole subtotals");
+  assert.ok(/Total par 72 \u00b7 5400 m/.test(html), "grand total line");
 });
 
 test("a yards country converts the same card to yards", async () => {
   const { renderCoursePage } = await import("../functions/course-page.mjs");
   const html = renderCoursePage({ map: Object.assign({}, MAP, { country_code: "US" }), visual: {}, card: CARD }, "https://example.test");
-  assert.ok(/<th>Yards<\/th>/.test(html) && /<td>329<\/td>/.test(html), "301 m should read 329 yards");
+  assert.ok(/<th>Yds<\/th>/.test(html) && /<td>329<\/td>/.test(html), "301 m should read 329 yards");
 });
 
 test("no images yet: no hero picture, no phone section, a plain summary card", async () => {
