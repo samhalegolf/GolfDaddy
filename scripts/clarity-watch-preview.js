@@ -277,6 +277,8 @@
     if (!el.readout || !state.mount) return;
     var session = state.session, hole = state.mount.currentHole(), face = state.mount.face();
     var lines = [];
+    var problem = state.mount.problem ? state.mount.problem() : "";
+    if (problem) lines.push(problem);
     if (!state.course) lines.push("Search for a course to see it on the watch.");
     else if (!hole) lines.push("No hole to show yet.");
     else {

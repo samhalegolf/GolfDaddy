@@ -46,7 +46,7 @@
       spriteBitmap: function (onLoad) {
         return function (amoled, type, sizeIndex) {
           var set = amoled ? "amoled" : "mip", size = R.TREE_SIZES[sizeIndex];
-          return window.GDWatchPreviewPage.spriteImage("garmin/resources-trees/drawables/trees/" + set + "/" + R.TREE_TYPES[type] + "_" + size + ".png", onLoad);
+          return window.GDWatchPreviewPage.spriteImage("/garmin/resources-trees/drawables/trees/" + set + "/" + R.TREE_TYPES[type] + "_" + size + ".png", onLoad);
         };
       },
       /* The hub's linked drag: another device's aim, held as the Garmin holds its own - in

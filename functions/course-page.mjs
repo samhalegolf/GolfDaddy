@@ -48,12 +48,12 @@ export const WATCH_SCRIPTS = [
   "/scripts/inline/gd-leaflet-alias.js?v=split03",
   "/scripts/gd-bubble-signals-core.js?v=bubble-signals-core-001",
   "/scripts/studio/gps-play/watch-preview/watch-common.js?v=watch-preview-002",
-  "/scripts/studio/gps-play/watch-preview/watch-preview-page.js?v=watch-preview-004",
-  "/scripts/studio/gps-play/garmin-preview/garmin-watch-render.js?v=watch-preview-002",
-  "/scripts/studio/gps-play/garmin-preview/garmin-preview-page.js?v=watch-preview-005",
+  "/scripts/studio/gps-play/watch-preview/watch-preview-page.js?v=watch-preview-005",
+  "/scripts/studio/gps-play/garmin-preview/garmin-watch-render.js?v=watch-preview-003",
+  "/scripts/studio/gps-play/garmin-preview/garmin-preview-page.js?v=watch-preview-006",
   "/scripts/studio/gps-play/apple-preview/apple-watch-render.js?v=watch-preview-004",
-  "/scripts/studio/gps-play/apple-preview/apple-preview-page.js?v=watch-preview-005",
-  "/scripts/clarity-watch-preview.js?v=watch-preview-public-002"
+  "/scripts/studio/gps-play/apple-preview/apple-preview-page.js?v=watch-preview-006",
+  "/scripts/clarity-watch-preview.js?v=watch-preview-public-003"
 ];
 /* The picker at the foot of the page, this page's own. */
 export const PAGE_SCRIPTS = ["/scripts/clarity-course-page.js?v=course-page-001"];
