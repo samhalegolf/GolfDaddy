@@ -67,8 +67,13 @@ Order on the page, top to bottom:
 
 ## Which courses get a page
 
-A page exists only when `page_public` is on, `published = true` and the visual has
-`published_version > 0`. A scorecard is not a condition - several of the richest maps (Tara Iti,
+A page exists only when `page_public` is on, `published = true` and there is something to
+show: a published Clarity visual (`course_visuals.published_version > 0`) **or** a Garmin package
+(`course_garmin_maps`). The second case is the international course outside licensed imagery:
+no bake is possible, but its objects still draw a good watch map, and the page is watch-first
+The bar for one of these is the range of objects, not the count: a green on every hole, some
+trees and some bunkers (`green_count >= hole_count`, `tree_count > 0`, `bunker_count > 0`,
+9+ holes). 2026-10-20: applied to every such published course outside NZ (151 on). A scorecard is not a condition - several of the richest maps (Tara Iti,
 Twin Isles, Wairakei, Chamberlain Park) have no card yet, and the visuals are the point - but
 without one the page has no hole table, so running Update Scorecards on them is worth doing
 before launch. The watch packages are not a condition either:
