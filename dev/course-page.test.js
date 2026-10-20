@@ -168,6 +168,52 @@ test("the Apple bake is asked for only when there is no package and nothing is r
   assert.ok(/if \(fromPage && map\.page_public !== true\) return new Response\("not a public course page", \{ status: 403 \}\)/.test(worker), "the secret must only bake public-page courses");
 });
 
+test("a visitor's first click asks for the Apple bake; the render no longer does", async () => {
+  const { coursePageWake, config } = await import("../functions/course-page-wake.mjs");
+  assert.strictEqual(config.path, "/api/course-page-wake");
+  const page = read("functions", "course-page.mjs");
+  assert.ok(!/wakeAppleBake|appleBakeNeeded/.test(page), "the page function must not wake the bake on render (a render is mostly a crawler)");
+  const client = read("scripts", "clarity-course-page.js");
+  assert.ok(/\["pointerdown", "keydown"\]\.forEach\(function \(type\) \{ document\.addEventListener\(type, wake, \{ once: true/.test(client), "the first click or key does not wake the bake");
+  assert.ok(/fetch\("\/api\/course-page-wake", \{ method: "POST"/.test(client), "the client does not post to the wake endpoint");
+  assert.ok(/getAttribute\("data-course-id"\)/.test(client), "the client must take the course from the page's preview lock");
+  const { PAGE_SCRIPTS } = await import("../functions/course-page.mjs");
+  assert.ok(!PAGE_SCRIPTS.includes("/scripts/clarity-course-page.js?v=course-page-001"), "the client script's cache label must move with this change");
+
+  const woken = [];
+  const run = (body, rows, wakeOk = true, method = "POST", secret = "s3cret") => coursePageWake(new Request("https://example.test/api/course-page-wake", { method, body: method === "POST" ? JSON.stringify(body) : undefined }), {
+    supabaseFetch: async (path) => path.startsWith("course_maps?") ? rows.maps : rows.watch,
+    wake: async (origin, courseId, s) => { woken.push({ origin, courseId, secret: s }); return wakeOk; },
+    secret
+  });
+  const PUBLIC = { maps: [{ course_id: "tara-iti" }], watch: [] };
+  let res = await run({ courseId: "tara-iti" }, PUBLIC);
+  assert.strictEqual(res.status, 202);
+  assert.deepStrictEqual(await res.json(), { courseId: "tara-iti", apple: "queued" });
+  assert.deepStrictEqual(woken, [{ origin: "https://example.test", courseId: "tara-iti", secret: "s3cret" }], "the wake carries the service secret to the worker");
+  assert.strictEqual(res.headers.get("Cache-Control"), "no-store");
+
+  woken.length = 0;
+  res = await run({ courseId: "tara-iti" }, { maps: [{ course_id: "tara-iti" }], watch: [{ ready_hole_count: 18 }] });
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(await res.json(), { courseId: "tara-iti", apple: "ready" });
+  res = await run({ courseId: "tara-iti" }, { maps: [{ course_id: "tara-iti" }], watch: [{ ready_hole_count: 0, progress: { updatedAt: new Date().toISOString() } }] });
+  assert.strictEqual((await res.json()).apple, "building");
+  assert.deepStrictEqual(woken, [], "a package that exists or is being made is never asked for again");
+
+  res = await run({ courseId: "secret-club" }, { maps: [], watch: [] });
+  assert.strictEqual(res.status, 404, "a course without a public page cannot be baked from the outside");
+  assert.deepStrictEqual(woken, []);
+  res = await run({}, PUBLIC);
+  assert.strictEqual(res.status, 400);
+  res = await run({ courseId: "tara-iti" }, PUBLIC, false);
+  assert.strictEqual(res.status, 503, "a wake that did not get through says so, so the next click tries again");
+  res = await run({ courseId: "tara-iti" }, PUBLIC, true, "GET");
+  assert.strictEqual(res.status, 405);
+  res = await run({ courseId: "tara-iti" }, PUBLIC, true, "POST", "");
+  assert.strictEqual(res.status, 503, "no secret configured, no wake");
+});
+
 test("the picker: search-shaped, every result can ask for an upgrade, nothing lists courses", async () => {
   const { loadCoursePage, renderCoursePage, PAGE_SCRIPTS } = await import("../functions/course-page.mjs");
   const data = await loadCoursePage("maungakiekie-golf-club", deps({ maps: [MAP], visuals: [{ published_version: 1 }], cards: [CARD] }));

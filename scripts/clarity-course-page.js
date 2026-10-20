@@ -8,7 +8,12 @@
  * The two requests are one form (name, email, a note) sent to POST /api/watch-preview-request
  * with `request` and the course, the same ticket the watch preview's sign-up makes. There is
  * no list of courses to browse: discovery here is search-shaped on purpose, and every request
- * is a signal of what to map or improve next. */
+ * is a signal of what to map or improve next.
+ *
+ * Also the page's one side effect: the first click or key anywhere on it asks for this
+ * course's Apple Watch map (POST /api/course-page-wake, functions/course-page-wake.mjs), so by
+ * the time the visitor opens the Apple Watch tab the bake is that much further along. Once per
+ * page load; the answer is not needed. */
 (function (root) {
   "use strict";
   if (!root || !root.document) return;
@@ -24,7 +29,22 @@
   var el = {};
   var state = { searching: null, request: null };
 
+  function wakeAppleOnFirstInteraction() {
+    var preview = $("preview");
+    var courseId = preview && preview.getAttribute("data-course-id");
+    if (!courseId) return;
+    var sent = false;
+    function wake() {
+      if (sent) return;
+      sent = true;
+      fetch("/api/course-page-wake", { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ courseId: courseId }), keepalive: true })
+        .catch(function () {});
+    }
+    ["pointerdown", "keydown"].forEach(function (type) { document.addEventListener(type, wake, { once: true, passive: true }); });
+  }
+
   function boot() {
+    wakeAppleOnFirstInteraction();
     ["findForm", "findInput", "findStatus", "findResults", "requestForm", "requestTitle", "requestName", "requestEmail", "requestNote", "requestStatus", "requestCancel"]
       .forEach(function (id) { el[id] = $(id); });
     if (!el.findForm || !el.requestForm) return;

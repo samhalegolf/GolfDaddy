@@ -30,12 +30,10 @@ import { createSupabaseStorage } from "./lib/gd-supabase-storage.mjs";
 import { fetchFacilityRows } from "./lib/gd-facility-scorecards.mjs";
 import { scorecardCourseKey, cardNameMatchesCourse } from "./lib/gd-scorecard-resolve.mjs";
 import { splitCourseName } from "./lib/gd-automapper-core.mjs";
-import { appleBakeNeeded, wakeAppleBake } from "./lib/gd-apple-bake-wake.mjs";
 import store from "../clarity-caddy-app-store.js";
 
 const MAPS_TABLE = "course_maps";
 const VISUALS_TABLE = "course_visuals";
-const WATCH_TABLE = "course_watch_maps";
 const GARMIN_TABLE = "course_garmin_maps";
 
 /* The watch section runs on the watch preview's own scripts (watch-preview.html lists the
@@ -56,7 +54,7 @@ export const WATCH_SCRIPTS = [
   "/scripts/clarity-watch-preview.js?v=watch-preview-public-003"
 ];
 /* The picker at the foot of the page, this page's own. */
-export const PAGE_SCRIPTS = ["/scripts/clarity-course-page.js?v=course-page-001"];
+export const PAGE_SCRIPTS = ["/scripts/clarity-course-page.js?v=course-page-002"];
 const MAP_FIELDS = "course_id,course_name,course_lat,course_lng,region,country,country_code,hole_count,facility_key,"
   + "object_count,bunker_count,water_count,tree_count,published_at,updated_at";
 
@@ -111,14 +109,12 @@ export async function loadCoursePage(courseId, deps = {}) {
   const garmin = Array.isArray(garmins) && garmins[0] && Number(garmins[0].garmin_package_version) > 0 ? garmins[0] : null;
   if (!visual && !garmin) return null;
 
-  const [cardRows, images, watchRows] = await Promise.all([
+  const [cardRows, images] = await Promise.all([
     fetchFacilityRows(fetchRows, map.facility_key || map.course_id),
-    loadImages(courseId, deps.imageStore || imageStore),
-    fetchRows(WATCH_TABLE + "?select=status,ready_hole_count,progress&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => [])
+    loadImages(courseId, deps.imageStore || imageStore)
   ]);
   const card = pickCard(cardRows, map.course_name);
-  const watch = Array.isArray(watchRows) ? watchRows[0] || null : null;
-  return { map, visual, card, images, appleBakeNeeded: appleBakeNeeded(watch) };
+  return { map, visual, card, images };
 }
 
 /* Whatever the runner has uploaded for this course; a course with no frames yet has none, and
@@ -420,10 +416,9 @@ export default async function coursePage(req) {
   }
   if (!data) return notFound();
 
-  /* The Apple Watch package, if this course has none yet: ask the worker now, so by the time
-     the visitor opens that tab (the page polls) it is on its way. Awaited and capped; a lost
-     wake costs nothing but a later visit. */
-  if (data.appleBakeNeeded) await wakeAppleBake(url.origin, courseId, env("CLARITY_SERVICE_SECRET"));
+  /* The Apple Watch package, if this course has none yet, is asked for by the visitor's first
+     click (scripts/clarity-course-page.js -> functions/course-page-wake.mjs), not here: a
+     render is mostly a crawler, and a cached page does not render at all. */
 
   return new Response(renderCoursePage(data, url.origin), {
     status: 200,
