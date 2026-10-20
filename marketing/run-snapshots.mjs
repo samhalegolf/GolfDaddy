@@ -43,6 +43,9 @@ const require = createRequire(import.meta.url);
    approach hole would carry a standing point for the old one, so it is re-derived from the
    package the app itself loaded. One source for "where 130m out is". */
 const core = require('../scripts/gd-marketing-snapshot-core.js');
+/* --upload: the frames also become the public course page's images (web sizes + the share
+   card) in the course-pages bucket. Needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. */
+import { storageConfig, publishCourseAssets } from './course-page-assets.mjs';
 
 const root = process.cwd();
 const PLAN_FILE = path.join(root, 'marketing', 'snapshot-plan.json');
@@ -378,6 +381,52 @@ async function shootCourse(context, course, outDir, report) {
   }
 }
 
+/* ------------------------------------------------------------------ course page images */
+
+/* "Auckland, New Zealand" for the card's eyebrow. The plan does not carry it, so it is asked
+   of the same search the picker uses; best-effort, the card reads "Mapped course" without it. */
+async function placeFor(course) {
+  try {
+    const res = await fetch(`${BASE_URL}/api/course-search?q=${encodeURIComponent(course.name || course.courseId)}`, { headers: { Accept: 'application/json' } });
+    const body = res.ok ? await res.json() : null;
+    const hit = (body && Array.isArray(body.results) ? body.results : []).find((r) => r.courseId === course.courseId);
+    return hit ? [hit.region, hit.country].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(', ') : '';
+  } catch (error) {
+    return '';
+  }
+}
+
+async function publishForPage(browser, course, dir, storage) {
+  try {
+    const place = await placeFor(course);
+    const paths = await publishCourseAssets(browser, { courseId: course.courseId, dir, name: course.name || course.courseId, place }, storage);
+    console.log(paths.length ? `  ${course.name || course.courseId}: ${paths.length} page image(s) uploaded` : `  ${course.name || course.courseId}: no frames to upload`);
+  } catch (error) {
+    console.log(`  ${course.name || course.courseId}: page images FAILED - ${String(error && error.message || error)}`);
+    process.exitCode = 1;
+  }
+}
+
+async function uploadRun(runDir, storage) {
+  let report = { courses: [] };
+  try { report = JSON.parse(await fs.readFile(path.join(runDir, 'run-report.json'), 'utf8')); } catch (error) { /* a folder of frames with no report still uploads */ }
+  const names = new Map((report.courses || []).map((c) => [c.courseId, c.name]));
+  const folders = (await fs.readdir(runDir, { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name);
+  if (!folders.length) {
+    console.error(`No course folders in ${runDir}.`);
+    process.exitCode = 1;
+    return;
+  }
+  const browser = await chromium.launch();
+  try {
+    for (const courseId of folders) {
+      await publishForPage(browser, { courseId, name: names.get(courseId) || courseId }, path.join(runDir, courseId), storage);
+    }
+  } finally {
+    await browser.close();
+  }
+}
+
 /* ------------------------------------------------------------------ contact sheet */
 
 /* One page showing everything the run produced, at a size a human can judge. Written as a file
@@ -674,6 +723,18 @@ async function main() {
     return setPlanValues(setFor, assignments);
   }
 
+  const upload = hasFlag('--upload') || !!argValue('--upload-only');
+  const storage = upload ? storageConfig() : null;
+  if (upload && !storage) {
+    console.error('Uploading needs SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in the environment.');
+    process.exitCode = 1;
+    return;
+  }
+
+  /* --upload-only <run dir>: no shooting; the frames of an earlier run become page images. */
+  const uploadOnly = argValue('--upload-only');
+  if (uploadOnly) return uploadRun(path.resolve(uploadOnly), storage);
+
   let plan;
   try {
     plan = JSON.parse(await fs.readFile(PLAN_FILE, 'utf8'));
@@ -753,6 +814,7 @@ async function main() {
     await fs.mkdir(outDir, { recursive: true });
     await shootCourse(context, course, outDir, report);
     await context.close();
+    if (storage) await publishForPage(browser, course, outDir, storage);
   }
 
   await browser.close();

@@ -67,8 +67,11 @@ Order on the page, top to bottom:
 
 ## Which courses get a page
 
-A page exists only when all three hold: `published = true`, visual `published_version > 0`, and a
-scorecard with par/length for every hole. The watch packages are not a condition:
+A page exists only when `page_public` is on, `published = true` and the visual has
+`published_version > 0`. A scorecard is not a condition - several of the richest maps (Tara Iti,
+Twin Isles, Wairakei, Chamberlain Park) have no card yet, and the visuals are the point - but
+without one the page has no hole table, so running Update Scorecards on them is worth doing
+before launch. The watch packages are not a condition either:
 
 - **Garmin** is always available. `course_garmin_maps` is pure geometry drawn from `objects_json`,
   builds in seconds, and `GET /api/course-watch-maps?watch=garmin` already wakes the builder when
@@ -112,10 +115,19 @@ them; nothing else has to change.
 
 ## Build order
 
-1. **Function + template + gate** — `course-page.mjs` rendering the hero, hole table and store
-   badges for one course from live data; redirect; gate opened for `/courses/`; 404 path.
-   Hand-set `page_public` in SQL for 3–4 courses. (Pages are useful from here.)
-2. **Images** — snapshot uploads to storage; hero and phone tab use them; OG image.
+1. **Function + template + gate** — DONE 2026-10-20. `functions/course-page.mjs` routes itself
+   with `config.path = "/courses/:courseId"` (no toml redirect needed); the gate passes
+   `/courses/`; non-public courses get a noindex 404; `page_public` migration applied and
+   switched on for the ten first-batch courses. Test: `npm run test:course-page`.
+   Found on the way: `akarana-golf-club` has `facility_key = maungakiekie-golf-club`, so its
+   page would pick up Maungakiekie's card - the facility link needs fixing in Studio before
+   Akarana's page is trusted. CDN cache is a day with no purge on republish yet.
+2. **Images** — DONE 2026-10-20. `marketing/course-page-assets.mjs` + `--upload` /
+   `--upload-only <run>` on the snapshot runner: web-size JPEGs and a 1200x630 share card, made
+   in the runner's own Chromium (no sharp), into the public `course-pages` bucket (migration
+   applied). The page lists the folder and uses what is there; no frames, no pictures. Still
+   to do by hand: run the uploader for the first batch (needs SUPABASE_URL and the service key
+   in the shell) - see marketing/README.md.
 3. **Device tabs** — mount the Garmin/Apple renderers from the watch preview on the page,
    course-locked, position buttons kept.
 4. **Picker section** — reuse the search; mapped → page link, unmapped → request form.

@@ -32,6 +32,10 @@ const PUBLIC_PAGES = new Set([
   "/delete-account", "/delete-account.html"
 ]);
 
+/* Public course pages (functions/course-page.mjs): one indexable page per well-mapped course.
+   The function itself 404s anything not switched on, so the gate has nothing to decide here. */
+const PUBLIC_TREES = /^\/courses(\/|$)/;
+
 /* A file request (has an extension) that is not HTML passes; pages do not. */
 const FILE_EXT = /\.[a-z0-9]+$/i;
 const GATED_TREES = /^\/(studio|app|demo)(\/|$)/;
@@ -71,6 +75,7 @@ function safeNext(value) {
 
 function isGated(pathname) {
   if (PUBLIC_PAGES.has(pathname)) return false;
+  if (PUBLIC_TREES.test(pathname)) return false;
   if (GATED_TREES.test(pathname)) return true;
   if (pathname.endsWith("/")) return true;
   if (/\.html?$/i.test(pathname)) return true;

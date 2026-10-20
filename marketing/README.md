@@ -193,3 +193,22 @@ course nobody is standing on.
 Each course gets a fresh browser context, so the units seed lands before any
 script runs and one course's scorecard/bag state cannot leak into the next
 course's frames.
+
+## Course page images
+
+The public course pages (`/courses/<courseId>`, `functions/course-page.mjs`) show these same
+frames. `--upload` turns a run's frames into the page's images - web-size JPEGs and a 1200x630
+share card, made in the runner's own browser - and puts them in the public `course-pages`
+bucket under `<courseId>/`. The page picks them up on its next render (it is cached at the CDN
+for a day).
+
+```bash
+SUPABASE_URL=https://<project>.supabase.co SUPABASE_SERVICE_ROLE_KEY=... \
+  node marketing/run-snapshots.mjs --upload                       # shoot the plan, then upload
+SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+  node marketing/run-snapshots.mjs --upload-only marketing-output/<run>   # an earlier run's frames
+```
+
+Only `page_public` courses have a page; uploading frames for any other course is harmless and
+shows nothing. See `marketing/course-page-assets.mjs` for what is made.
+

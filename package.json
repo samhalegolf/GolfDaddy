@@ -123,7 +123,8 @@
     "test:garmin": "node dev/garmin-settings-surface.test.js && node dev/garmin-launcher-icons.test.js && node dev/garmin-build-flavours.test.js && node dev/generate-garmin-parity-fixture.js --check && node garmin/tools/sync-devices.js --check",
     "test:garmin-preview": "node dev/garmin-watch-preview.test.js",
     "test:apple-preview": "node dev/apple-watch-preview.test.js",
-    "test:garmin:parity": "node garmin/tools/run-parity.js"
+    "test:garmin:parity": "node garmin/tools/run-parity.js",
+    "test:course-page": "node dev/course-page.test.js"
   },
   "codex": {
     "entry": "index.html",
