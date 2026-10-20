@@ -19,6 +19,10 @@
    GET ?playerRequests=1 (admin only) -> {items} - every course players (not admins) asked the
    app to map, one item per course with request and player counts, newest first
    (lib/gd-player-requests.mjs). Studio's Course Mapping page is that list.
+   GET ?queue=1 (admin only) -> {counts, running, queued, recent, waiting} - what the worker is
+   doing now, what it will take next and in which order, the last day's finished and failed
+   runs, and courses people are waiting to be emailed about (lib/gd-mapper-queue.mjs).
+   Studio's Mapping Queue page.
    POST {kind:"region_list", lat, lng, radiusKm, elements} (admin only) -> {courses} - every
    course within the radius, marked hasMap when we hold it. `elements` is the Overpass answer,
    fetched by the Studio page itself (see coursesInRegion). Studio's Regional Bulk Scan list.
@@ -35,6 +39,7 @@ import { boundingBox, coursesFromOverpass, mergeWithLibrary, nearbyCoursesQuery 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import { overlayOwnerId } from "./lib/gd-overlay-owner.mjs";
 import { loadPlayerRequests } from "./lib/gd-player-requests.mjs";
+import { loadMapperQueue } from "./lib/gd-mapper-queue.mjs";
 import { TREE_KIND, queueTreeRun } from "./lib/gd-tree-queue.mjs";
 import { SCORECARD_KIND } from "./lib/gd-facility-scorecards.mjs";
 
@@ -698,6 +703,12 @@ export default async function courseMapperJobs(req) {
       /* The caller's own scans in the app are not player requests. */
       return json(200, { items: await loadPlayerRequests(supabaseFetch, { adminUserIds: [user.id] }) });
     }
+    if (url.searchParams.get("queue") === "1") {
+      const user = await verifiedUser(req);
+      if (!(user && user.isAdmin)) return json(403, { error: "Admin verification failed" });
+      /* Idle kinds in the order claimNextJob takes them, so positions match the worker. */
+      return json(200, await loadMapperQueue(supabaseFetch, { idleKinds: [NEARBY_AUTOMAP_KIND, TREE_KIND, SCORECARD_KIND], adminUserIds: [user.id], stallSeconds: STALL_SECONDS }));
+    }
     const courseId = slug(url.searchParams.get("courseId") || url.searchParams.get("course_id"));
     /* No courseId now means "all of them" rather than an error. The admin list
        needs every course's state at once; asking per row is what stopped it
@@ -841,15 +852,21 @@ export default async function courseMapperJobs(req) {
 
      So clear what is actually stale - the geometry and its version - and leave the identity
      and the location alone. Emptying objects_json also clears the dedupe in enqueueMapperJob,
-     which is what makes the enqueue below take rather than come back deduped. */
+     which is what makes the enqueue below take rather than come back deduped.
+
+     The one exception is a remap that says where the course is: Studio's "Move course pin"
+     sends {courseLat, courseLng} because the old pin was on the wrong ground, and the Overpass
+     query is centred on it. The pin moves in the same write that clears the geometry, so the
+     run that follows maps round the new one. */
   if (remap) {
+    const pin = remapPin(payload);
     const cleared = await supabaseFetch(MAPS_TABLE + "?course_id=eq." + encodeURIComponent(courseId), {
       method: "PATCH",
       headers: { Prefer: "return=representation" },
-      body: JSON.stringify({
+      body: JSON.stringify(Object.assign({
         objects_json: {}, holes_json: {}, geometry_version: null,
         updated_at: new Date().toISOString()
-      })
+      }, pin ? { course_lat: pin.lat, course_lng: pin.lng } : {}))
     });
     if (!Array.isArray(cleared) || !cleared.length) {
       /* No row to clear. Enqueuing anyway would hand the worker a course with no centre and
@@ -861,10 +878,13 @@ export default async function courseMapperJobs(req) {
     }
   }
 
+  /* A remap's pin was written above. Passed on, it would also run the new-course path - the
+     duplicate guard and ensureCourseCenter's upsert, which renames the row to whatever name
+     came with it - on a course that already exists. */
   const result = await enqueueMapperJob({
     courseId,
-    courseLat: payload && payload.courseLat,
-    courseLng: payload && payload.courseLng,
+    courseLat: remap ? null : payload && payload.courseLat,
+    courseLng: remap ? null : payload && payload.courseLng,
     courseName: payload && payload.courseName,
     actorKey,
     origin: new URL(req.url).origin
@@ -893,6 +913,15 @@ export default async function courseMapperJobs(req) {
   const ranOn = courseId !== askedFor ? { ranOn: courseId } : {};
   if (result.deduped) return json(200, Object.assign({ deduped: true, remapped: remap }, result, ranOn));
   return json(202, Object.assign({ job: result.job, state: "queued", remapped: remap }, ranOn));
+}
+
+/* The new pin a remap carries, or null: both coordinates, finite and on the globe. A half or
+   garbled pin is no pin - the remap then keeps the course where it was. */
+function remapPin(payload) {
+  if (!payload || payload.courseLat == null || payload.courseLng == null) return null;
+  const lat = Number(payload.courseLat), lng = Number(payload.courseLng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
 }
 
 /* AWAITED, not fire-and-forget - see course-visual-jobs.mjs's pingWorker for why: serverless

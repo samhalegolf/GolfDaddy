@@ -1018,6 +1018,14 @@
     "mapNotify.incompleteDetailNoList": "{mapped} de {expected} buracos estão mapeados. Vamos terminar o resto.",
     "mapNotify.incompleteOnList": "Está na lista - enviamos um e-mail quando o mapa completo estiver pronto.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Antes de pesquisar",
+    "searchEmail.detail": "Deixe o seu email – só o usaremos para avisar se o mapa de um campo for atualizado.",
+    "searchEmail.placeholder": "O seu endereço de email",
+    "searchEmail.continue": "Continuar",
+    "searchEmail.notNow": "Agora não",
+    "searchEmail.couldNotSave": "Não foi possível guardar o seu email",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Perfil do jogador",
     "profilePage.intro": "Os perfis definem a mão dominante, as distâncias do saco e a calibração dos dados de pancadas. As permissões da conta estão nas Definições de administrador.",

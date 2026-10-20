@@ -1043,6 +1043,14 @@
     "mapNotify.incompleteDetailNoList": "Kartēti {mapped} no {expected} bedrītēm. Pārējo pabeigsim.",
     "mapNotify.incompleteOnList": "Jūs esat sarakstā - nosūtīsim e-pastu, kad pilnā karte būs gatava.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Pirms meklēšanas",
+    "searchEmail.detail": "Atstājiet savu e-pastu – mēs to izmantosim tikai, lai paziņotu, ja laukuma karte tiks atjaunināta.",
+    "searchEmail.placeholder": "Jūsu e-pasta adrese",
+    "searchEmail.continue": "Turpināt",
+    "searchEmail.notNow": "Ne tagad",
+    "searchEmail.couldNotSave": "Neizdevās saglabāt e-pastu",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Spēlētāja profils",
     "profilePage.intro": "Profili nosaka spēlētāja roku, somas attālumus un sitienu datu kalibrēšanu. Konta atļaujas atrodas administratora iestatījumos.",

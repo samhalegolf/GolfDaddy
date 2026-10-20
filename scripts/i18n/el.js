@@ -1018,6 +1018,14 @@
     "mapNotify.incompleteDetailNoList": "{mapped} από {expected} τρύπες έχουν χαρτογραφηθεί. Θα ολοκληρώσουμε τις υπόλοιπες.",
     "mapNotify.incompleteOnList": "Είστε στη λίστα - θα σας στείλουμε email όταν ο πλήρης χάρτης είναι έτοιμος.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Πριν κάνετε αναζήτηση",
+    "searchEmail.detail": "Αφήστε το email σας – θα το χρησιμοποιήσουμε μόνο για να σας ενημερώσουμε αν ενημερωθεί ο χάρτης ενός γηπέδου.",
+    "searchEmail.placeholder": "Η διεύθυνση email σας",
+    "searchEmail.continue": "Συνέχεια",
+    "searchEmail.notNow": "Όχι τώρα",
+    "searchEmail.couldNotSave": "Δεν ήταν δυνατή η αποθήκευση του email σας",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Προφίλ παίκτη",
     "profilePage.intro": "Τα προφίλ τροφοδοτούν το χέρι παιχνιδιού, τις αποστάσεις του σάκου και τη βαθμονόμηση των δεδομένων χτυπημάτων. Τα δικαιώματα λογαριασμού βρίσκονται στις Ρυθμίσεις διαχειριστή.",

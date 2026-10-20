@@ -1510,6 +1510,13 @@
       const input=byId("searchInput");
       if(input)input.value=requested;
     }
+    /* Once per device, before the first typed search, ask for an email for map-update news
+       (scripts/gd-course-search-email.js). Skippable; the search runs either way. */
+    const askEmail=window.GDCourseSearchEmail;
+    if(requested&&askEmail&&askEmail.needed()){
+      askEmail.ask().then(()=>searchOwner(requested));
+      return false;
+    }
     const run=++searchRun;
     const context=searchContext();
     view.query=requested;

@@ -66,7 +66,7 @@ function readCookie(request, name) {
 /* Only same-site paths, so the form can never bounce anyone off-site. */
 function safeNext(value) {
   const next = String(value || "");
-  return next.startsWith("/") && !next.startsWith("//") && !next.startsWith(ACCESS_PATH) ? next : "/?login=1";
+  return next.startsWith("/") && !next.startsWith("//") && !next.startsWith(ACCESS_PATH) ? next : "/";
 }
 
 function isGated(pathname) {

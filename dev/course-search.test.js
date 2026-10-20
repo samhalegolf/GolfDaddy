@@ -298,6 +298,23 @@ test("a Mapbox POI with no OSM course polygon but mapped holes nearby is a confi
   assert.strictEqual(scored.confidence, "confirmed_course", scored.reasons.join("; "));
 });
 
+test("a practice range drawn as a golf_course outline beside a real course is not offered to players", async () => {
+  /* 名古屋商科大学ゴルフ練習場: a university range in OSM as leisure=golf_course, next to Miyoshi
+     CC's holes. It scored as a confirmed course on its neighbour's ground and a guest mapped it. */
+  const core = await import(CORE);
+  const range = core.listingsFromNominatim([{ name: "名古屋商科大学ゴルフ練習場", lat: "35.1533", lon: "137.0965",
+    osm_type: "way", osm_id: 493209666, category: "leisure", type: "golf_course", address: { country: "Japan", country_code: "jp" } }])[0];
+  const ground = core.groundEvidence({ elements: holesAround(35.1533, 137.0965, 18) }, range);
+  const scored = core.scoreCandidate(range, ground, null);
+  assert.strictEqual(scored.confidence, "possible_golf_facility", scored.reasons.join("; "));
+  assert.strictEqual(core.playerVisible(scored), false, "hidden from the player list");
+  assert.strictEqual(scored.ambiguous, false, "and not sent to the scorecard check to be promoted back");
+  /* A course that also has a range keeps its place: the name says course. */
+  const course = core.listingsFromNominatim([{ name: "Fairway Golf Course & Driving Range", lat: "35.1533", lon: "137.0965",
+    osm_type: "way", osm_id: 1, category: "leisure", type: "golf_course", address: { country: "Japan", country_code: "jp" } }])[0];
+  assert.ok(core.playerVisible(core.scoreCandidate(course, ground, null)), "a course named with its range stays");
+});
+
 test("a golf POI with no golf features but a large outdoor footprint is a likely course", async () => {
   const core = await import(CORE);
   const c = await candidateFor(mapboxFeature("Desert Springs Golf Club", 33.8, -116.4, { categories: ["sports"] }));

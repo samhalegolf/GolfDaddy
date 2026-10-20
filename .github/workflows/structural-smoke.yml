@@ -38,6 +38,7 @@ jobs:
         run: |
           node dev/surface-split.test.js
           node dev/studio-wiring.test.js
+          node dev/mapper-queue.test.mjs
           node dev/studio-map-viewport.test.js
           node dev/marketing-snapshot-core.test.js
           node dev/marketing-hole-intel.test.js
@@ -58,6 +59,7 @@ jobs:
           node dev/course-data-snapshot-backfill.test.js
           node dev/course-identity-resolution.test.js
           node dev/course-search.test.js
+          node dev/course-search-email.test.js
           node dev/course-search-owner.test.js
           node dev/auth-route-boot-release.test.js
           node dev/password-reset-surface.test.js

@@ -1018,6 +1018,14 @@
     "mapNotify.incompleteDetailNoList": "{mapped} от {expected} дупки са картографирани. Ще довършим останалото.",
     "mapNotify.incompleteOnList": "В списъка сте - ще ви пишем, когато пълната карта е готова.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Преди да търсите",
+    "searchEmail.detail": "Оставете имейла си – ще го използваме само за да ви уведомим, ако картата на игрището бъде обновена.",
+    "searchEmail.placeholder": "Вашият имейл адрес",
+    "searchEmail.continue": "Продължи",
+    "searchEmail.notNow": "Не сега",
+    "searchEmail.couldNotSave": "Имейлът не можа да бъде запазен",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Профил на играча",
     "profilePage.intro": "Профилите задават коя ръка ползваш, разстоянията в чантата и калибрирането на данните за ударите. Правата на профила се управляват от администраторските настройки.",

@@ -1018,6 +1018,14 @@
     "mapNotify.incompleteDetailNoList": "{mapped} van {expected} holes zijn in kaart gebracht. We maken de rest af.",
     "mapNotify.incompleteOnList": "Je staat op de lijst - we mailen je zodra de volledige kaart klaar is.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Voordat je zoekt",
+    "searchEmail.detail": "Laat je e-mail achter – we gebruiken die alleen om je te laten weten als een baankaart is bijgewerkt.",
+    "searchEmail.placeholder": "Je e-mailadres",
+    "searchEmail.continue": "Doorgaan",
+    "searchEmail.notNow": "Niet nu",
+    "searchEmail.couldNotSave": "Je e-mail kon niet worden opgeslagen",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Spelersprofiel",
     "profilePage.intro": "Profielen bepalen links- of rechtshandigheid, tasafstanden en de kalibratie van slaggegevens. Accountrechten staan in Beheerinstellingen.",

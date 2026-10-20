@@ -1373,6 +1373,43 @@ export function foreignGroundClaim(payload, centre, options) {
   };
 }
 
+/* ---------- the pin is off the golf (Miyoshi Country Club, 2026-10-19) ---
+ *
+ * A guest picked 名古屋商科大学ゴルフ練習場 - a university practice range, drawn in OSM as a
+ * leisure=golf_course outline - and the run found Miyoshi CC's 15 greens next door, every one
+ * of them 870m or more from the pin. With no hole numbers and no scorecard nothing could be
+ * numbered, the run failed, and because a failure carried no fit the player got "map not
+ * available" rather than a chance to pin the course they meant. foreignGroundClaim cannot see
+ * this: it needs numbered holes to say whose ground it is.
+ *
+ * What the run does know is distance. A pin is a clubhouse or the middle of the course; on any
+ * real course some green is within a few hundred metres of it. Greens that are all far off say
+ * the pin is on something else - a range, a car park, a geocoded road - and golf is beside it.
+ * Only asked of a run that has already failed to number anything, so it can never cost a
+ * course that maps a prompt. Returns null when golf is at the pin or too little was found to
+ * say. */
+export const PIN_OFF_GOLF_M = 500;
+const PIN_OFF_GOLF_MIN_GREENS = 3;
+
+export function pinOffGolfClaim(payload, centre) {
+  if (!centre || !Number.isFinite(centre.lat) || !Number.isFinite(centre.lng)) return null;
+  const greens = ((payload && payload.elements) || [])
+    .filter(element => String((element && element.tags && element.tags.golf) || "").toLowerCase() === "green")
+    .map(element => centroidOfPoints(osmGuidePointsFromElement(element)))
+    .filter(Boolean);
+  if (greens.length < PIN_OFF_GOLF_MIN_GREENS) return null;
+  const nearestM = Math.round(Math.min(...greens.map(green => distance(centre, green))));
+  if (nearestM <= PIN_OFF_GOLF_M) return null;
+  /* Whose greens, when OSM says: the named outline holding most of them, and only if it is
+     not the outline the pin itself sits in. */
+  const outline = coursePolygonsFrom(payload)
+    .filter(polygon => polygon.name && !pointInRing(centre, polygon.ring))
+    .map(polygon => ({ name: polygon.name, holding: greens.filter(green => pointInRing(green, polygon.ring)).length }))
+    .filter(entry => entry.holding > 0)
+    .sort((a, b) => b.holding - a.holding)[0] || null;
+  return { greens: greens.length, nearestM, outlineName: outline ? outline.name : "" };
+}
+
 export function separateLoops(payload, centre, options) {
   const features = holeFeatures(payload);
   if (!features.length) return null;

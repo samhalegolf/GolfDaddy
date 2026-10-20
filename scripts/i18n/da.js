@@ -1018,6 +1018,14 @@
     "mapNotify.incompleteDetailNoList": "{mapped} af {expected} huller er kortlagt. Vi gør resten færdigt.",
     "mapNotify.incompleteOnList": "Du er på listen - vi mailer dig, når hele kortet er klart.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Før du søger",
+    "searchEmail.detail": "Skriv din e-mail – vi bruger den kun til at give dig besked, hvis et banekort bliver opdateret.",
+    "searchEmail.placeholder": "Din e-mailadresse",
+    "searchEmail.continue": "Fortsæt",
+    "searchEmail.notNow": "Ikke nu",
+    "searchEmail.couldNotSave": "Din e-mail kunne ikke gemmes",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Spillerprofil",
     "profilePage.intro": "Profiler styrer højre-/venstrehåndethed, køllelængder og kalibrering af slagdata. Kontorettigheder findes i Administratorindstillinger.",

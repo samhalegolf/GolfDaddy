@@ -175,6 +175,12 @@
         window.GDStudioRouter.go(navBtn.getAttribute("data-gd-studio-nav"));
         return;
       }
+      if (e.target.closest("[data-gd-studio-signout]")) {
+        signOut();
+        runCleanup();
+        renderSignIn("");
+        return;
+      }
       var tabBtn = e.target.closest("[data-gd-studio-tab]");
       if (tabBtn) {
         activeTab = tabBtn.getAttribute("data-gd-studio-tab");
@@ -183,15 +189,71 @@
     });
   }
 
+  /* Studio talks to the database as a signed-in admin, so it needs a Clarity account session as
+     well as the site's access key (netlify/edge-functions/web-app-gate.js). It asks for it here,
+     in place, rather than sending the operator through the player app's profile screen. */
+  function signedInAdmin() {
+    var api = window.GolfDaddyAccounts;
+    var account = api && typeof api.current === "function" ? api.current() : null;
+    return account && account.role === "admin" ? account : null;
+  }
+
   function mount() {
     root = document.getElementById("gdStudioShellRoot");
     if (!root) return;
     root.hidden = false;
+    var auth = window.ClaritySupabaseAuth;
+    var tokenCheck = auth && typeof auth.freshAccessToken === "function" ? auth.freshAccessToken() : Promise.resolve("");
+    Promise.resolve(tokenCheck).catch(function () { return ""; }).then(function (token) {
+      if (token && signedInAdmin()) mountShell();
+      else renderSignIn(token ? "This account is not an admin. Sign in with an admin account." : "");
+    });
+  }
+
+  function renderSignIn(message) {
+    root.innerHTML =
+      '<div class="gdStudioSignIn"><form class="gdStudioSignInCard" id="gdStudioSignInForm">' +
+      '<div class="gdStudioBrand">Clarity Studio</div>' +
+      '<p class="gdStudioLede">Sign in with your Clarity admin account.</p>' +
+      '<label for="gdStudioSignInEmail">Email</label>' +
+      '<input id="gdStudioSignInEmail" type="email" autocomplete="username" required>' +
+      '<label for="gdStudioSignInPassword">Password</label>' +
+      '<input id="gdStudioSignInPassword" type="password" autocomplete="current-password" required>' +
+      '<p class="gdStudioSignInError" id="gdStudioSignInError">' + esc(message || "") + "</p>" +
+      '<button type="submit" class="gdStudioSignInBtn">Sign in</button>' +
+      "</form></div>";
+    var form = document.getElementById("gdStudioSignInForm");
+    var errorEl = document.getElementById("gdStudioSignInError");
+    var button = form.querySelector("button");
+    document.getElementById("gdStudioSignInEmail").focus();
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var auth = window.ClaritySupabaseAuth;
+      if (!auth) { errorEl.textContent = "Sign-in is not ready yet. Reload and try again."; return; }
+      button.disabled = true;
+      errorEl.textContent = "";
+      auth.login(document.getElementById("gdStudioSignInEmail").value, document.getElementById("gdStudioSignInPassword").value, { keepLoggedIn: true })
+        .then(function () {
+          if (signedInAdmin()) { mountShell(); return; }
+          signOut();
+          errorEl.textContent = "That account is not an admin.";
+        })
+        .catch(function (error) { errorEl.textContent = (error && error.message) || "Sign-in failed."; })
+        .then(function () { button.disabled = false; });
+    });
+  }
+
+  function signOut() {
+    var api = window.GolfDaddyAccounts;
+    try { if (api && typeof api.logout === "function") api.logout(); } catch (e) {}
+  }
+
+  function mountShell() {
     root.innerHTML =
       '<div class="gdStudioShell">' +
       '<aside class="gdStudioNavRail"><div class="gdStudioBrand">Clarity Studio</div><nav><ul class="gdStudioNavList" id="gdStudioNavList"></ul></nav></aside>' +
       '<div class="gdStudioMain">' +
-      '<header class="gdStudioHeader"><div class="gdStudioBreadcrumb" id="gdStudioBreadcrumb"></div><div class="gdStudioEnvStatus" id="gdStudioEnvStatus"></div></header>' +
+      '<header class="gdStudioHeader"><div class="gdStudioBreadcrumb" id="gdStudioBreadcrumb"></div><div class="gdStudioEnvStatus" id="gdStudioEnvStatus"></div><div class="gdStudioAccount">' + esc(signedInAdmin().email) + ' <button type="button" class="gdStudioCrumbLink" data-gd-studio-signout>Sign out</button></div></header>' +
       '<div class="gdStudioTabStrip" id="gdStudioTabStrip"></div>' +
       '<main class="gdStudioWorkspace" id="gdStudioWorkspace"></main>' +
       "</div></div>";

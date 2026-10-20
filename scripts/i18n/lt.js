@@ -1043,6 +1043,14 @@
     "mapNotify.incompleteDetailNoList": "Sužymėta {mapped} iš {expected} duobučių. Užbaigsime likusias.",
     "mapNotify.incompleteOnList": "Esate sąraše - parašysime el. paštu, kai visas žemėlapis bus paruoštas.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Prieš ieškant",
+    "searchEmail.detail": "Palikite savo el. paštą – naudosime jį tik pranešti, kai aikštyno žemėlapis bus atnaujintas.",
+    "searchEmail.placeholder": "Jūsų el. pašto adresas",
+    "searchEmail.continue": "Tęsti",
+    "searchEmail.notNow": "Ne dabar",
+    "searchEmail.couldNotSave": "Nepavyko išsaugoti el. pašto",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Žaidėjo profilis",
     "profilePage.intro": "Profiliai lemia žaidžiančią ranką, krepšio atstumus ir smūgių duomenų kalibravimą. Paskyros teisės valdomos administratoriaus nustatymuose.",

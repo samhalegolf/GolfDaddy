@@ -1018,6 +1018,14 @@
     "mapNotify.incompleteDetailNoList": "{mapped}/{expected} reikää on kartoitettu. Teemme loput valmiiksi.",
     "mapNotify.incompleteOnList": "Olet listalla - lähetämme sähköpostia, kun koko kartta on valmis.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Ennen hakua",
+    "searchEmail.detail": "Jätä sähköpostisi – käytämme sitä vain kertoaksemme, jos kentän kartta päivittyy.",
+    "searchEmail.placeholder": "Sähköpostiosoitteesi",
+    "searchEmail.continue": "Jatka",
+    "searchEmail.notNow": "Ei nyt",
+    "searchEmail.couldNotSave": "Sähköpostia ei voitu tallentaa",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Pelaajaprofiili",
     "profilePage.intro": "Profiilit ohjaavat kätisyyttä, bägin matkoja ja lyöntitietojen kalibrointia. Tilin käyttöoikeudet ovat ylläpitäjän asetuksissa.",

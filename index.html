@@ -12,10 +12,9 @@
 <!-- Translation layer and its English base (scripts/gd-i18n.js), ahead of
      every script that writes text. -->
 <script src="scripts/gd-i18n.js?v=i18n-001"></script>
-<script src="scripts/i18n/en.js?v=course-search-20261004"></script>
+<script src="scripts/i18n/en.js?v=search-email-20261020"></script>
 <script src="clarity-caddy-app-store.js?v=store-badges-004"></script>
 <script src="scripts/gd-app-download-prompt.js?v=store-badges-004"></script>
-<script src="scripts/inline/gd-landing-redirect-v1.js?v=20260811a"></script>
 <script src="scripts/inline/gd-durable-storage.js?v=durable-20260720"></script>
 <!-- Course maps live in IndexedDB (localStorage was full on phones). Before every script that
      reads the course libraries, which it answers from memory. -->
@@ -340,6 +339,7 @@
 <script src="scripts/gd-course-version-label.js?v=course-version-label-001"></script>
 <script src="app/js/course-versions.js?v=course-freshness-20260809"></script>
 <script src="scripts/gd-course-map-notify.js?v=email-box-20261013"></script>
+<script src="scripts/gd-course-search-email.js?v=search-email-20261020"></script>
 <script src="scripts/gd-course-library-pin-lock.js?v=incomplete-saved-map-20261012"></script>
 <script src="scripts/gd-course-play-pipeline.js?v=course-play-pipeline-001"></script>
 <link rel="stylesheet" id="gdGpsViewportLockCssV1" href="styles/inline/gd-gps-viewport-lock-css-v1.css?v=split04">
@@ -447,7 +447,7 @@
 
 <!-- Removed gdFinalStructureGuardCssV3: final CSS hiders masked retired-panel bleed-through. -->
 <!-- Removed gdFinalStructureGuardV3: blank-route recovery masked route ownership problems. -->
-<script id="gdCoursePickerSearchV2" src="scripts/inline/gd-course-picker-search-v2.js?v=course-search-20261004"></script>
+<script id="gdCoursePickerSearchV2" src="scripts/inline/gd-course-picker-search-v2.js?v=search-email-20261020"></script>
 <script id="gdResumeRoundPickerV1" src="scripts/inline/gd-resume-round-picker-v1.js?v=20261001a"></script>
 <link rel="stylesheet" id="gdBubbleDataGeneratorV1" href="styles/inline/gd-bubble-data-generator-v1.css?v=split04">
 <link rel="stylesheet" id="gdShotDataVisualPolishV1" href="styles/inline/gd-shot-data-visual-polish-v1.css?v=course-library-single-pill-20260912">
@@ -469,7 +469,7 @@
 <link rel="stylesheet" id="gdHubAccordionWrapPolishV1" href="styles/inline/gd-hub-accordion-wrap-polish-v1.css?v=split04">
 <script src="scripts/inline/gd-practice-import-action-bridge.js?v=split03"></script>
 
-<link data-gd-surface="studio" rel="stylesheet" id="gdStudioShellCss" href="scripts/studio/studio-shell.css?v=ai-help-001">
+<link data-gd-surface="studio" rel="stylesheet" id="gdStudioShellCss" href="scripts/studio/studio-shell.css?v=studio-signin-001">
 <div data-gd-surface="studio" id="gdStudioShellRoot" hidden></div>
 <script data-gd-surface="studio" src="scripts/studio/studio-registry.js?v=region-scan-002"></script>
 <script data-gd-surface="studio" src="scripts/studio/studio-router.js?v=ownership-shell-001"></script>
@@ -480,6 +480,7 @@
 <script data-gd-surface="studio" src="scripts/studio/courses/course-mapping/course-mapping-page.js?v=player-requests-20261012"></script>
 <script data-gd-surface="studio" src="scripts/studio/courses/course-mapping/mapper-prompts-page.js?v=mapper-prompts-20261014"></script>
 <script data-gd-surface="studio" src="scripts/studio/courses/region-scan/region-scan-page.js?v=region-scan-20261017"></script>
+<script data-gd-surface="studio" src="scripts/studio/courses/mapping-queue/mapping-queue-page.js?v=mapping-queue-20261020"></script>
 <script data-gd-surface="studio" src="scripts/studio/gd-studio-course-pick.js?v=map-overlay-001"></script>
 <script data-gd-surface="studio" src="scripts/studio/courses/map-viewport/map-viewport-page.js?v=map-overlay-001"></script>
 <script data-gd-surface="studio" src="scripts/studio/courses/map-overlay/map-overlay-shapes.js?v=map-overlay-along-play-017"></script>
@@ -509,7 +510,7 @@
 <script data-gd-surface="studio" src="scripts/studio/gps-play/apple-preview/apple-preview-page.js?v=watch-preview-005"></script>
 <script data-gd-surface="studio" src="scripts/studio/gps-play/record-hub/record-hub-page.js?v=record-hub-006"></script>
 <script data-gd-surface="studio" src="scripts/studio/marketing/snapshot-machine-page.js?v=marketing-snapshot-001"></script>
-<script data-gd-surface="studio" src="scripts/studio/studio-shell.js?v=ownership-shell-001"></script>
+<script data-gd-surface="studio" src="scripts/studio/studio-shell.js?v=studio-signin-001"></script>
 
 </body>
 </html>

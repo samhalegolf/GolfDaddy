@@ -1068,6 +1068,14 @@
     "mapNotify.incompleteDetailNoList": "Zmapowano {mapped} z {expected} dołków. Dokończymy resztę.",
     "mapNotify.incompleteOnList": "Jesteś na liście - napiszemy, gdy pełna mapa będzie gotowa.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Zanim zaczniesz szukać",
+    "searchEmail.detail": "Zostaw swój e-mail – użyjemy go tylko, aby dać Ci znać, gdy mapa pola zostanie zaktualizowana.",
+    "searchEmail.placeholder": "Twój adres e-mail",
+    "searchEmail.continue": "Dalej",
+    "searchEmail.notNow": "Nie teraz",
+    "searchEmail.couldNotSave": "Nie udało się zapisać e-maila",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Profil gracza",
     "profilePage.intro": "Profil określa rękę, odległości w torbie i kalibrację danych uderzeń. Uprawnienia konta są w ustawieniach administratora.",
