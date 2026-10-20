@@ -84,6 +84,16 @@
 #gdStudioShellRoot .gdStudioCrumbCurrent { color: var(--gdStudioText); font-weight: 700; }
 #gdStudioShellRoot .gdStudioCrumbSep { margin: 0 6px; color: var(--gdStudioMuted); }
 #gdStudioShellRoot .gdStudioEnvStatus { font-size: 12px; color: var(--gdStudioMuted); }
+#gdStudioShellRoot .gdStudioAccount { font-size: 12px; color: var(--gdStudioMuted); display: flex; gap: 10px; align-items: center; }
+
+#gdStudioShellRoot .gdStudioSignIn { min-height: 100%; display: grid; place-items: center; padding: 16px; background: var(--gdStudioBg); }
+#gdStudioShellRoot .gdStudioSignInCard { width: min(360px, 100%); display: grid; gap: 10px; padding: 28px; border-radius: 16px; background: var(--gdStudioPanel); border: 1px solid var(--gdStudioBorder); }
+#gdStudioShellRoot .gdStudioSignInCard label { font-size: 13px; font-weight: 700; color: var(--gdStudioMuted); }
+#gdStudioShellRoot .gdStudioSignInCard input { font: inherit; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--gdStudioBorder); background: var(--gdStudioBg); color: var(--gdStudioText); }
+#gdStudioShellRoot .gdStudioSignInCard input:focus { outline: none; border-color: var(--gdStudioAccent); }
+#gdStudioShellRoot .gdStudioSignInError { margin: 0; min-height: 1em; font-size: 13px; color: var(--gdStudioWarn); }
+#gdStudioShellRoot .gdStudioSignInBtn { font: inherit; font-weight: 800; padding: 12px; border: 0; border-radius: 10px; background: var(--gdStudioAccent); color: #04140a; cursor: pointer; }
+#gdStudioShellRoot .gdStudioSignInBtn:disabled { opacity: .6; cursor: default; }
 
 #gdStudioShellRoot .gdStudioTabStrip { display: flex; flex-shrink: 0; gap: 4px; padding: 0 22px; border-bottom: 1px solid var(--gdStudioBorder); }
 #gdStudioShellRoot .gdStudioTab {
