@@ -814,10 +814,35 @@
 
     {
       id: "marketing", label: "Marketing", parent: null,
-      function: "Marketing assets built from the real app rather than mocked up. Today that is one workspace: the Snapshot Machine.",
+      function: "Marketing assets built from the real app rather than mocked up: the Public Facing Hub (which courses get public pages, their headers and publishing) and the Snapshot Machine that shoots the headers.",
       owner: "n/a (nav grouping only)", runtime: { app: false, studio: true, server: false },
       code: [], inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [], keyFunctions: [],
       status: "group", needsVerification: false
+    },
+    {
+      id: "marketing-public-hub", label: "Public Facing Hub", parent: "marketing",
+      function: "Runs the public course pages (/courses/<courseId>). Two rule makers of the same shape \u2014 countries, minimum holes/objects/bunkers/water/trees, published map/visual, all three headers \u2014 decide which courses land in the hub to get their header snapshots and which are switched on when publishing runs. Lists the hub's courses with header and page status; headers are added by hand (frames from a Snapshot Machine run, resized here to the page's 585px JPEGs) and each page can be switched on or taken down. Taking one down holds it so publishing never switches it back on. Publishing never takes a page down by itself.",
+      owner: "scripts/studio/marketing/public-hub-page.js",
+      runtime: { app: false, studio: true, server: true },
+      code: [
+        { role: "Studio page (rules, publishing, hub table, header upload)", path: "scripts/studio/marketing/public-hub-page.js" },
+        { role: "Admin API (rules, page switch, publish, header store)", path: "functions/public-hub.mjs" },
+        { role: "The rules, pure", path: "functions/lib/gd-public-hub-rules.mjs" },
+        { role: "The page it publishes", path: "functions/course-page.mjs" }
+      ],
+      inputs: ["course_maps (counts, country, published, page_public)", "course_visuals.published_version", "course-pages bucket (header frames)", "public_hub_settings (the saved rules and held courses)"],
+      outputs: ["course_maps.page_public", "public_hub_settings", "course-pages/<courseId>/web/<frame>.jpg"],
+      owns: ["Which courses land in the hub", "Which courses publishing switches on", "Which pages are held back by hand"],
+      doesNotOwn: ["Taking the snapshots (Snapshot Machine + marketing/run-snapshots.mjs)", "What a public page shows (functions/course-page.mjs)"],
+      connections: [
+        { target: "marketing-snapshots", direction: "uses", label: "sends courses to its basket for header snapshots" }
+      ],
+      keyFunctions: [
+        { name: "evaluate", purpose: "Every course against the hub and auto-publish rules, with the reasons it misses.", codePath: "functions/lib/gd-public-hub-rules.mjs" },
+        { name: "publishPlan", purpose: "What Run publishing switches on; what is on but no longer matches.", codePath: "functions/lib/gd-public-hub-rules.mjs" }
+      ],
+      status: "implemented", needsVerification: false,
+      warnings: ["Publishing and the page switch write course_maps.page_public on the live project \u2014 a switched-on page is public and in the sitemap."]
     },
     {
       id: "marketing-snapshots", label: "Snapshot Machine", parent: "marketing",
@@ -851,7 +876,7 @@
       ],
       keyFunctions: [
         { name: "pickHoles", purpose: "Two holes per course: signature-hole evidence first, terrain variance otherwise.", codePath: "scripts/gd-marketing-snapshot-core.js" },
-        { name: "standingPoint", purpose: "Where to stand for the approach frame \u2014 130m back from the green along the line the hole plays.", codePath: "scripts/gd-marketing-snapshot-core.js" },
+        { name: "standingPoint", purpose: "Where to stand for the approach frame \u2014 130m back from the green along the line the hole plays, with the route's bends sorted down the hole first (the watches' orderedRoute rule).", codePath: "scripts/gd-marketing-snapshot-core.js" },
         { name: "unitsForPoint", purpose: "Yards or metres, from where the course is.", codePath: "scripts/gd-marketing-snapshot-core.js" }
       ],
       status: "implemented", needsVerification: false,
@@ -915,7 +940,7 @@
     { id: "players-coaches" },
     { id: "commerce" },
     { id: "communications" },
-    { id: "marketing", children: ["marketing-snapshots"] },
+    { id: "marketing", children: ["marketing-public-hub", "marketing-snapshots"] },
     { id: "system", children: ["system-integrations", "system-storage", "system-diagnostics", "system-feature-controls"] }
   ];
 

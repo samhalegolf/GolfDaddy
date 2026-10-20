@@ -180,7 +180,7 @@
     var water = surfaceCentres(surfaces.water);
     var fairways = surfaceCentres(surfaces.fairways);
 
-    var corridor = [rec.tee].concat(rec.route, [rec.green]).filter(Boolean);
+    var corridor = holeLine(rec) || [];
     var corridorBunkers = bunkers.filter(function (p) { return nearAny(p, corridor, CORRIDOR_M); });
     var corridorWater = water.filter(function (p) { return nearAny(p, corridor, CORRIDOR_M); });
     var corridorFairways = fairways.filter(function (p) { return nearAny(p, corridor, CORRIDOR_M); });
@@ -217,6 +217,7 @@
       par: rec.par,
       lengthM: Math.round(lengthM),
       hasVisual: rec.hasVisual,
+      routeInOrder: routeInOrder(rec),
       teeShot: Math.round(teeShot * 10) / 10,
       approach: Math.round(approach * 10) / 10,
       counts: {
@@ -328,6 +329,14 @@
       var score = scores.find(function (s) { return s.holeNumber === r.holeNumber; });
       return eligibleForTee(score);
     });
+    var inOrder = teeCandidates.filter(function (r) {
+      var score = scores.find(function (s) { return s.holeNumber === r.holeNumber; });
+      return score.routeInOrder !== false;
+    });
+    if (inOrder.length && inOrder.length < teeCandidates.length) {
+      notes.push((teeCandidates.length - inOrder.length) + " hole(s) have a route stored out of order - kept off the tee shot, the app would aim it sideways.");
+      teeCandidates = inOrder;
+    }
     if (!teeCandidates.length) {
       notes.push("No par 4 or 5 found - the tee-shot frame falls back to the longest hole.");
       teeCandidates = ranked.slice().sort(function (a, b) { return b.lengthM - a.lengthM; }).slice(0, 1);
@@ -402,15 +411,64 @@
      has one number to honour. */
   var FAIRWAY_OFFSET_M = 30;
 
-  /* The line the hole plays along, green LAST. Null when there is nothing to walk. */
+  /* The package's route ([tee, ...bends, green] from gd-course-package-shape.mjs) carries its
+     bends in objects_json KEY order, which nothing guarantees runs down the hole. Walked as
+     stored, a shuffled route zig-zags, and a standing point found on a backwards segment sits
+     off the line the hole plays - which is how some approach frames were shot from beside the
+     target line. The watches never had this: gd-watch-map-core.js orderedRoute sorts the bends
+     by how far down the tee->green axis they sit, and this is the same rule. */
+  function samePoint(a, b) {
+    return !!(a && b && Math.abs(a.lat - b.lat) < 1e-7 && Math.abs(a.lng - b.lng) < 1e-7);
+  }
+
+  function bends(rec) {
+    return (Array.isArray(rec.route) ? rec.route.filter(Boolean) : []).filter(function (p) {
+      return !samePoint(p, rec.tee) && !samePoint(p, rec.green);
+    });
+  }
+
+  function alongAxis(rec, toPlane) {
+    var start = toPlane(rec.tee), end = toPlane(rec.green);
+    var ax = end.x - start.x, ay = end.y - start.y;
+    var len2 = ax * ax + ay * ay;
+    return function (p) {
+      var q = toPlane(p);
+      return len2 > 0 ? ((q.x - start.x) * ax + (q.y - start.y) * ay) / len2 : 0;
+    };
+  }
+
+  /* The line the hole plays along, tee first, green LAST, bends in playing order. Null when
+     there is nothing to walk. A hole with no tee keeps its stored order - there is no axis to
+     sort along. */
   function holeLine(rec) {
     if (!rec || !rec.green) return null;
-    var route = Array.isArray(rec.route) ? rec.route.filter(Boolean) : [];
+    var middle = bends(rec);
+    if (rec.tee && middle.length > 1) {
+      var along = alongAxis(rec, localPlane(rec.tee));
+      middle = middle.map(function (p) { return { p: p, t: along(p) }; })
+        .sort(function (a, b) { return a.t - b.t; })
+        .map(function (entry) { return entry.p; });
+    }
     var line = [];
     if (rec.tee) line.push(rec.tee);
-    route.forEach(function (p) { line.push(p); });
+    middle.forEach(function (p) { line.push(p); });
     line.push(rec.green);
     return line.length >= 2 ? line : null;
+  }
+
+  /* Whether the package's own route already runs down the hole. The app's Head To the Tee
+     lays up along the STORED route (bubble-engine.js currentRoute), so a hole whose route is
+     out of order can aim its tee-shot bubble sideways; the planner keeps such holes off the
+     tee frame rather than shoot it. */
+  function routeInOrder(rec) {
+    if (!rec || !rec.tee || !rec.green) return true;
+    var middle = bends(rec);
+    if (middle.length < 2) return true;
+    var along = alongAxis(rec, localPlane(rec.tee));
+    for (var i = 1; i < middle.length; i += 1) {
+      if (along(middle[i]) < along(middle[i - 1])) return false;
+    }
+    return true;
   }
 
   /* Interpolate a fraction along a segment, in local metres so it is a straight line on the
@@ -519,6 +577,7 @@
     pickHoles: pickHoles,
     standingPoint: standingPoint,
     holeLine: holeLine,
+    routeInOrder: routeInOrder,
     offsetFromHoleLine: offsetFromHoleLine,
     unitsForPoint: unitsForPoint,
     packageCentre: packageCentre,

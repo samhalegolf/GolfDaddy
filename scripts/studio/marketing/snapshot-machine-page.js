@@ -970,4 +970,22 @@
 
   window.GDStudioPages = window.GDStudioPages || {};
   window.GDStudioPages["marketing-snapshots"] = render;
+
+  /* The Public Facing Hub sends the courses it wants headers for here. Same basket, same row
+     shape as a pick; a course already in it is left as it is. Answers whether it was added. */
+  window.GDSnapshotBasket = {
+    add: function (course) {
+      var courseId = String(course && course.courseId || "");
+      if (!courseId) return false;
+      var state = readStore();
+      if (state.courses.some(function (c) { return c.courseId === courseId; })) return false;
+      state.courses.push({ courseId: courseId, name: String(course.name || courseId),
+        lat: course.lat == null ? null : num(course.lat), lng: course.lng == null ? null : num(course.lng), include: true });
+      writeStore(state);
+      return true;
+    },
+    has: function (courseId) {
+      return readStore().courses.some(function (c) { return c.courseId === courseId; });
+    }
+  };
 })();

@@ -296,6 +296,11 @@ async function shootCourse(context, course, outDir, report) {
     await settle(page);
 
     const teeRec = await holeRecord(page);
+    if (teeRec && !core.routeInOrder(teeRec)) {
+      /* Head To the Tee lays up along the stored route; out of order, the bubble can aim across
+         the hole. The planner avoids these; a hand-set tee hole can still land on one. */
+      errors.push(`Hole ${course.teeHole}'s route is stored out of order - the tee-shot bubble may aim off the line.`);
+    }
     if (teeRec && Number.isFinite(teeRec.par) && teeRec.par < 4) {
       /* Not fatal - the frame is still usable - but the plan asked for a par 4 or 5 and this is
          the only place that can see what the package actually says. */
@@ -328,6 +333,12 @@ async function shootCourse(context, course, outDir, report) {
        for the hole now on screen. */
     const stand = rec ? core.standingPoint(rec, course.approachFromM || 130) : null;
     if (!stand) throw new Error(`Could not work out a ${course.approachFromM || 130}m point on hole ${course.approachHole}.`);
+    /* Checked against the ordered line, not trusted: a frame shot from beside the target line
+       is the failure this whole step exists to prevent. */
+    const offLine = core.offsetFromHoleLine(rec, stand);
+    if (offLine !== null && offLine > core.constants.FAIRWAY_OFFSET_M) {
+      throw new Error(`The ${course.approachFromM || 130}m point on hole ${course.approachHole} is ${Math.round(offLine)}m off the hole's line - not shooting it.`);
+    }
 
     const placed = await signal(page, 'PLACED', { point: stand });
     if (!placed) throw new Error('PLACED was refused - the hole is not in preview setup.');
