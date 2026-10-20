@@ -15,6 +15,10 @@
 <script src="scripts/i18n/en.js?v=search-email-20261020"></script>
 <script src="clarity-caddy-app-store.js?v=store-badges-004"></script>
 <script src="scripts/gd-app-download-prompt.js?v=store-badges-004"></script>
+<!-- Web only, app surface only: a browser with no account goes to welcome.html before the
+     shell paints. The edge gate (netlify/edge-functions/web-app-gate.js) keeps strangers out;
+     this keeps a signed-out browser that holds the Studio key out of guest mode. -->
+<script data-gd-surface="app" src="scripts/inline/gd-landing-redirect-v1.js?v=landing-20261020"></script>
 <script src="scripts/inline/gd-durable-storage.js?v=durable-20260720"></script>
 <!-- Course maps live in IndexedDB (localStorage was full on phones). Before every script that
      reads the course libraries, which it answers from memory. -->

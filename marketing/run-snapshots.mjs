@@ -97,27 +97,21 @@ async function login() {
   const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext();
   const page = await context.newPage();
-  await page.goto(`${BASE_URL}/`, { waitUntil: 'domcontentloaded' });
-
-  /* The home screen has no visible way in at all. The route is Player Profile tile ->
-     the guest panel's "Sign In" -> the login form (#gd67AuthEmail / #gd67AuthPassword). Walked
-     here so the window opens ON the form; leaving somebody to find it themselves is how the
-     first two attempts at this timed out having shown nothing but the home screen.
-
-     Note the login form's fields are gd67Auth*, NOT the gdPlayerSettings* pair that also exists
-     in the DOM - those belong to the profile editor and are never visible on this route. */
+  /* /studio is the only way to sign in on the web: a signed-out browser at / is sent to
+     welcome.html (scripts/inline/gd-landing-redirect-v1.js), which has no sign-in form. The
+     Studio asks for the site's access key first, then shows its own sign-in card in place
+     (#gdStudioSignInEmail). The session it writes is the same one the app at / reads. */
+  await page.goto(`${BASE_URL}/studio`, { waitUntil: 'domcontentloaded' });
   let onForm = false;
   try {
-    await page.locator('button.gdProfileTile').first().click({ timeout: 20_000 });
-    await page.getByRole('button', { name: /^sign in$/i }).first().click({ timeout: 20_000 });
-    await page.waitForSelector('#gd67AuthEmail', { state: 'visible', timeout: 20_000 });
+    await page.waitForSelector('#gdStudioSignInEmail', { state: 'visible', timeout: 20_000 });
     onForm = true;
   } catch (e) { onForm = false; }
 
-  console.log(`\nA browser window has opened at ${BASE_URL} - it may be BEHIND your other windows.`);
+  console.log(`\nA browser window has opened at ${BASE_URL}/studio - it may be BEHIND your other windows.`);
   console.log(onForm
-    ? 'It is sitting on the sign-in form. Enter your email and password there.'
-    : 'Go to Player Profile, then Sign In, and enter your email and password there.');
+    ? 'It is sitting on the Studio sign-in form. Enter your email and password there.'
+    : 'Enter the site access key, then sign in on the Studio sign-in form with your email and password.');
   console.log('This notices by itself when you are signed in; nothing to press here.');
   console.log(`Waiting up to ${Math.round(LOGIN_TIMEOUT_MS / 60000)} minutes.\n`);
 

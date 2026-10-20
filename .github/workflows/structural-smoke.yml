@@ -37,6 +37,7 @@ jobs:
       - name: Run structural regression tests
         run: |
           node dev/surface-split.test.js
+          node dev/landing-redirect.test.js
           node dev/studio-wiring.test.js
           node dev/mapper-queue.test.mjs
           node dev/studio-map-viewport.test.js
