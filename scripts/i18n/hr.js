@@ -1043,6 +1043,14 @@
     "mapNotify.incompleteDetailNoList": "Mapirano je {mapped} od {expected} rupa. Dovršit ćemo ostatak.",
     "mapNotify.incompleteOnList": "Na popisu ste - poslat ćemo vam e-mail kad cijela karta bude gotova.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Prije pretraživanja",
+    "searchEmail.detail": "Ostavite svoju e-poštu – koristit ćemo je samo da vas obavijestimo ako se karta igrališta ažurira.",
+    "searchEmail.placeholder": "Vaša adresa e-pošte",
+    "searchEmail.continue": "Nastavi",
+    "searchEmail.notNow": "Ne sada",
+    "searchEmail.couldNotSave": "E-pošta nije mogla biti spremljena",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Profil igrača",
     "profilePage.intro": "Profili pokreću stranu igranja, udaljenosti u torbi i kalibraciju podataka o udarcima. Ovlasti računa nalaze se u administratorskim postavkama.",

@@ -1018,6 +1018,14 @@
     "mapNotify.incompleteDetailNoList": "{mapped} trous sur {expected} sont cartographiés. Nous terminerons le reste.",
     "mapNotify.incompleteOnList": "Vous êtes sur la liste - nous vous enverrons un e-mail quand la carte complète sera prête.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Avant de chercher",
+    "searchEmail.detail": "Laissez votre e-mail : nous l'utiliserons uniquement pour vous prévenir si la carte d'un parcours est mise à jour.",
+    "searchEmail.placeholder": "Votre adresse e-mail",
+    "searchEmail.continue": "Continuer",
+    "searchEmail.notNow": "Pas maintenant",
+    "searchEmail.couldNotSave": "Impossible d'enregistrer votre e-mail",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Profil du joueur",
     "profilePage.intro": "Le profil détermine la latéralité, les distances du sac et le calibrage des données de coups. Les autorisations du compte se trouvent dans les Réglages admin.",

@@ -1018,6 +1018,14 @@
     "mapNotify.incompleteDetailNoList": "{mapped} de {expected} hoyos están mapeados. Terminaremos el resto.",
     "mapNotify.incompleteOnList": "Estás en la lista - te enviaremos un correo cuando el mapa completo esté listo.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Antes de buscar",
+    "searchEmail.detail": "Déjanos tu correo: solo lo usaremos para avisarte si se actualiza el mapa de un campo.",
+    "searchEmail.placeholder": "Tu correo electrónico",
+    "searchEmail.continue": "Continuar",
+    "searchEmail.notNow": "Ahora no",
+    "searchEmail.couldNotSave": "No se pudo guardar tu correo",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Perfil del jugador",
     "profilePage.intro": "El perfil define si eres diestro o zurdo, las distancias de la bolsa y la calibración de los datos de golpes. Los permisos de la cuenta están en los ajustes de administración.",

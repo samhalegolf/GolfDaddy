@@ -1018,6 +1018,14 @@
     "mapNotify.incompleteDetailNoList": "{mapped} von {expected} Löchern sind kartiert. Wir ergänzen den Rest.",
     "mapNotify.incompleteOnList": "Du stehst auf der Liste - wir mailen dir, sobald die vollständige Karte fertig ist.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Bevor du suchst",
+    "searchEmail.detail": "Hinterlasse deine E-Mail – wir nutzen sie nur, um dir Bescheid zu geben, wenn eine Platzkarte aktualisiert wird.",
+    "searchEmail.placeholder": "Deine E-Mail-Adresse",
+    "searchEmail.continue": "Weiter",
+    "searchEmail.notNow": "Nicht jetzt",
+    "searchEmail.couldNotSave": "Deine E-Mail konnte nicht gespeichert werden",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Spielerprofil",
     "profilePage.intro": "Profile steuern Schlaghand, Bag-Distanzen und die Kalibrierung der Schlagdaten. Kontoberechtigungen findest du in den Admin-Einstellungen.",

@@ -1068,6 +1068,14 @@
     "mapNotify.incompleteDetailNoList": "Kartiranih je {mapped} od {expected} lukenj. Preostalo bomo dokončali.",
     "mapNotify.incompleteOnList": "Ste na seznamu - pisali vam bomo, ko bo celoten zemljevid pripravljen.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Preden iščete",
+    "searchEmail.detail": "Pustite svoj e-poštni naslov – uporabili ga bomo le, da vas obvestimo, če se zemljevid igrišča posodobi.",
+    "searchEmail.placeholder": "Vaš e-poštni naslov",
+    "searchEmail.continue": "Nadaljuj",
+    "searchEmail.notNow": "Ne zdaj",
+    "searchEmail.couldNotSave": "E-pošte ni bilo mogoče shraniti",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Profil igralca",
     "profilePage.intro": "Profili določajo roko igranja, razdalje v torbi in umerjanje podatkov o udarcih. Dovoljenja računa so v skrbniških nastavitvah.",

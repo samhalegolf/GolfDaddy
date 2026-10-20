@@ -1018,6 +1018,14 @@
     "mapNotify.incompleteDetailNoList": "{mapped} av {expected} hål är kartlagda. Vi gör klart resten.",
     "mapNotify.incompleteOnList": "Du står på listan - vi mejlar dig när hela kartan är klar.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Innan du söker",
+    "searchEmail.detail": "Lämna din e-post – vi använder den bara för att meddela dig om en bankarta uppdateras.",
+    "searchEmail.placeholder": "Din e-postadress",
+    "searchEmail.continue": "Fortsätt",
+    "searchEmail.notNow": "Inte nu",
+    "searchEmail.couldNotSave": "Det gick inte att spara din e-post",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Spelarprofil",
     "profilePage.intro": "Profiler styr höger/vänsterhänthet, baglängder och kalibrering av slagdata. Kontobehörigheter finns i Admininställningar.",
