@@ -19,6 +19,10 @@
    GET ?playerRequests=1 (admin only) -> {items} - every course players (not admins) asked the
    app to map, one item per course with request and player counts, newest first
    (lib/gd-player-requests.mjs). Studio's Course Mapping page is that list.
+   GET ?queue=1 (admin only) -> {counts, running, queued, recent, waiting} - what the worker is
+   doing now, what it will take next and in which order, the last day's finished and failed
+   runs, and courses people are waiting to be emailed about (lib/gd-mapper-queue.mjs).
+   Studio's Mapping Queue page.
    POST {kind:"region_list", lat, lng, radiusKm, elements} (admin only) -> {courses} - every
    course within the radius, marked hasMap when we hold it. `elements` is the Overpass answer,
    fetched by the Studio page itself (see coursesInRegion). Studio's Regional Bulk Scan list.
@@ -35,6 +39,7 @@ import { boundingBox, coursesFromOverpass, mergeWithLibrary, nearbyCoursesQuery 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import { overlayOwnerId } from "./lib/gd-overlay-owner.mjs";
 import { loadPlayerRequests } from "./lib/gd-player-requests.mjs";
+import { loadMapperQueue } from "./lib/gd-mapper-queue.mjs";
 import { TREE_KIND, queueTreeRun } from "./lib/gd-tree-queue.mjs";
 import { SCORECARD_KIND } from "./lib/gd-facility-scorecards.mjs";
 
@@ -697,6 +702,12 @@ export default async function courseMapperJobs(req) {
       if (!(user && user.isAdmin)) return json(403, { error: "Admin verification failed" });
       /* The caller's own scans in the app are not player requests. */
       return json(200, { items: await loadPlayerRequests(supabaseFetch, { adminUserIds: [user.id] }) });
+    }
+    if (url.searchParams.get("queue") === "1") {
+      const user = await verifiedUser(req);
+      if (!(user && user.isAdmin)) return json(403, { error: "Admin verification failed" });
+      /* Idle kinds in the order claimNextJob takes them, so positions match the worker. */
+      return json(200, await loadMapperQueue(supabaseFetch, { idleKinds: [NEARBY_AUTOMAP_KIND, TREE_KIND, SCORECARD_KIND], adminUserIds: [user.id], stallSeconds: STALL_SECONDS }));
     }
     const courseId = slug(url.searchParams.get("courseId") || url.searchParams.get("course_id"));
     /* No courseId now means "all of them" rather than an error. The admin list
