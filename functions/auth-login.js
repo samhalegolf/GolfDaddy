@@ -22,7 +22,10 @@ exports.handler = async function(event) {
         if (!account) return json(404, { error: "Account does not exist.", code: "account_not_found", details: error.body || null });
       } catch (_lookupError) {}
     }
-    await sendSystemAlert({ eventType: "supabase_auth_login_failed", title: "Supabase Auth login failed", detail: "A login attempt failed Supabase Auth confirmation.", accountEmail, context: { status: error.status || null, details: error.body || error.message } });
+    /* A 400 is Supabase saying the email/password didn't match - the player
+       typed it wrong, nothing is broken, so it gets no alert. Anything else
+       (Supabase down, bad keys, rate limiting) is a real fault worth an email. */
+    if (error.status !== 400) await sendSystemAlert({ eventType: "supabase_auth_login_failed", title: "Supabase Auth login failed", detail: "A login attempt failed Supabase Auth confirmation.", accountEmail, context: { status: error.status || null, details: error.body || error.message } });
     const message = error.status === 400
       ? "Incorrect password. If this is right after a password change, clear local auth state and sign in again."
       : (error.message || "Could not sign in with Supabase Auth");
