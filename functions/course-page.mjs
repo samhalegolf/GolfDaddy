@@ -13,7 +13,9 @@
  *   course_maps.page_public       an admin switched it on (default off - a half-finished map
  *                                 must never go public by accident)
  *   course_maps.published         the geometry GPS Play uses is live
- *   course_visuals.published_version > 0   there is a Clarity map to show
+ *   and something to show: a published Clarity visual (course_visuals.published_version > 0)
+ *   OR a Garmin package (course_garmin_maps) - a course outside licensed imagery has no bake,
+ *   but its objects still draw a good watch map, and that is what its page is for
  * Anything else is a plain 404 - not a redirect to the landing, because a 404 is exactly what
  * a crawler should record for a course that is not ready.
  *
@@ -34,6 +36,7 @@ import store from "../clarity-caddy-app-store.js";
 const MAPS_TABLE = "course_maps";
 const VISUALS_TABLE = "course_visuals";
 const WATCH_TABLE = "course_watch_maps";
+const GARMIN_TABLE = "course_garmin_maps";
 
 /* The watch section runs on the watch preview's own scripts (watch-preview.html lists the
    same set, same labels - dev/course-page.test.js keeps the two lists equal). The labels are
@@ -100,10 +103,13 @@ export async function loadCoursePage(courseId, deps = {}) {
   const map = Array.isArray(rows) ? rows[0] : null;
   if (!map) return null;
 
-  const visuals = await fetchRows(VISUALS_TABLE + "?select=published_version,bake_number,updated_at&course_id=eq."
-    + encodeURIComponent(courseId) + "&limit=1").catch(() => []);
-  const visual = Array.isArray(visuals) ? visuals[0] : null;
-  if (!visual || !(Number(visual.published_version) > 0)) return null;
+  const [visuals, garmins] = await Promise.all([
+    fetchRows(VISUALS_TABLE + "?select=published_version,bake_number,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => []),
+    fetchRows(GARMIN_TABLE + "?select=garmin_package_version&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => [])
+  ]);
+  const visual = Array.isArray(visuals) && visuals[0] && Number(visuals[0].published_version) > 0 ? visuals[0] : null;
+  const garmin = Array.isArray(garmins) && garmins[0] && Number(garmins[0].garmin_package_version) > 0 ? garmins[0] : null;
+  if (!visual && !garmin) return null;
 
   const [cardRows, images, watchRows] = await Promise.all([
     fetchFacilityRows(fetchRows, map.facility_key || map.course_id),

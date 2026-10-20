@@ -40,6 +40,7 @@ function stub(rows) {
     if (query.startsWith("course_visuals?")) return rows.visuals;
     if (query.startsWith("course_scorecards?")) return rows.cards;
     if (query.startsWith("course_watch_maps?")) return rows.watch || [];
+    if (query.startsWith("course_garmin_maps?")) return rows.garmin || [];
     throw new Error("unexpected query " + query);
   };
 }
@@ -245,11 +246,20 @@ test("no card: the page still renders, without a hole table", async () => {
   assert.ok(!/<table/.test(html) && /<h1>/.test(html));
 });
 
-test("not switched on, or no published visual: nothing to render", async () => {
+test("not switched on, or nothing to show: nothing to render", async () => {
   const { loadCoursePage } = await import("../functions/course-page.mjs");
   assert.strictEqual(await loadCoursePage("x", deps({ maps: [], visuals: [], cards: [] })), null);
   assert.strictEqual(await loadCoursePage("x", deps({ maps: [MAP], visuals: [{ published_version: 0 }], cards: [] })), null);
-  assert.strictEqual(await loadCoursePage("x", deps({ maps: [MAP], visuals: [], cards: [] })), null);
+  assert.strictEqual(await loadCoursePage("x", deps({ maps: [MAP], visuals: [], cards: [], garmin: [{ garmin_package_version: 0 }] })), null);
+});
+
+test("no Clarity visual but a Garmin package: the page renders on the watch map alone", async () => {
+  const { loadCoursePage, renderCoursePage } = await import("../functions/course-page.mjs");
+  const data = await loadCoursePage("maungakiekie-golf-club", deps({ maps: [MAP], visuals: [], cards: [CARD], garmin: [{ garmin_package_version: 1760000000000 }] }));
+  assert.ok(data, "a course outside licensed imagery still gets its page");
+  assert.strictEqual(data.visual, null);
+  const html = renderCoursePage(data, "https://example.test");
+  assert.ok(html.includes('id="preview" class="card isWide"') && /<h1>/.test(html));
 });
 
 test("picking the card: own name first, the facility's only card second, a named sibling third", async () => {
