@@ -94,12 +94,9 @@ async function login() {
   const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext();
   const page = await context.newPage();
-  /* ?login=1 so the landing page does not eat the visit - gd-landing-redirect-v1.js sends a
-     signed-out visitor to welcome.html, which has no sign-in form of its own. */
-  await page.goto(`${BASE_URL}/?login=1`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${BASE_URL}/`, { waitUntil: 'domcontentloaded' });
 
-  /* ?login=1 only stops gd-landing-redirect-v1.js eating the visit - it does NOT open a sign-in
-     form, and the home screen has no visible way in at all. The route is Player Profile tile ->
+  /* The home screen has no visible way in at all. The route is Player Profile tile ->
      the guest panel's "Sign In" -> the login form (#gd67AuthEmail / #gd67AuthPassword). Walked
      here so the window opens ON the form; leaving somebody to find it themselves is how the
      first two attempts at this timed out having shown nothing but the home screen.
@@ -451,7 +448,7 @@ async function planCourses(courseIds) {
   /* /app/ rather than the site root, because this needs ClarityApp.playSurface - the app's own
      projectToSurface - to answer whether a standing point is inside a hole's published raster.
      That is the difference between "long enough, probably" and knowing. */
-  await page.goto(`${BASE_URL}/app/index.html?login=1`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${BASE_URL}/app/index.html`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => !!(window.ClarityApp && window.ClarityApp.playSurface), null, { timeout: 30_000 });
 
   const courses = [];
@@ -609,7 +606,7 @@ async function setPlanValues(courseId, assignments) {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ storageState: await authIfPresent() });
   const page = await context.newPage();
-  await page.goto(`${BASE_URL}/app/index.html?login=1`, { waitUntil: 'domcontentloaded' });
+  await page.goto(`${BASE_URL}/app/index.html`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => !!(window.ClarityApp && window.ClarityApp.playSurface), null, { timeout: 30_000 });
   const got = await page.evaluate(async (id) => {
     const res = await fetch('/api/course-package?courseId=' + encodeURIComponent(id), { headers: { Accept: 'application/json' }, cache: 'no-store' });

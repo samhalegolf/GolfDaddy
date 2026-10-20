@@ -56,5 +56,5 @@ assert.strictEqual(preview.guest, true);
 assert.strictEqual(Object.prototype.hasOwnProperty.call(preview, 'shots'), false);
 assert.strictEqual(Object.prototype.hasOwnProperty.call(preview, 'capture'), false);
 window.GolfDaddyPracticeBubblePreview.createAccount();
-assert.strictEqual(window.location.href, '/?login=1');
+assert.strictEqual(window.location.href, '/');
 console.log('guest-practice-preview.test.js passed');

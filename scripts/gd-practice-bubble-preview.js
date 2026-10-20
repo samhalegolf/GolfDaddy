@@ -38,10 +38,10 @@
   function clear() { safe(function () { sessionStorage.removeItem(STORAGE_KEY); }); }
   function createAccount() {
     safe(function () { sessionStorage.setItem(SIGNUP_KEY, "1"); });
-    window.location.href = "/?login=1";
+    window.location.href = "/";
     return false;
   }
-  function viewPlans() { window.location.href = "/?login=1&membership=1"; return false; }
+  function viewPlans() { window.location.href = "/?membership=1"; return false; }
   function openRequestedSignup() {
     var requested = safe(function () { return sessionStorage.getItem(SIGNUP_KEY) === "1"; }, false);
     if (!requested || typeof window.gd67OpenAuth !== "function") return false;

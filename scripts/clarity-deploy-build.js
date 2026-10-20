@@ -69,8 +69,8 @@ const publicPaths = [
   // Play Console requires a web-accessible account deletion URL for any app
   // that allows account creation.
   "delete-account.html",
-  // The public landing page. Signed-out web visitors are sent here by
-  // gd-landing-redirect-v1.js; its images live under assets/landing/, which
+  // The public landing page. Ungated web visitors are sent here by
+  // netlify/edge-functions/web-app-gate.js; its images live under assets/landing/, which
   // rides along with the assets entry above. Web-only - see NON_APP_FILES.
   "welcome.html",
   // The public watch preview linked from the landing page: the Studio's watch faces on a

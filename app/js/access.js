@@ -152,13 +152,13 @@
       action.onclick = function () {
         hideNotice();
         if (typeof app.showRoute === "function") app.showRoute("signin");
-        else window.location.href = "/?login=1";
+        else window.location.href = "/";
       };
     } else if (kind === "guest-signup-required") {
       i18n.set(label, "access.freeAccountCourseMaps");
       i18n.set(action, "auth.modeCreate");
       action.classList.remove("hiddenState");
-      action.onclick = function () { window.location.href = "/?login=1"; };
+      action.onclick = function () { window.location.href = "/"; };
     } else if (kind === "account-verification-unavailable") {
       i18n.set(label, "auth.errUnavailable");
       i18n.set(action, "pay.refresh");
