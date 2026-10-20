@@ -377,11 +377,11 @@ export function renderCoursePage(data, origin) {
     + '<meta property="og:title" content="' + esc(name + " on Clarity Caddy") + '"><meta property="og:description" content="' + esc(description) + '">'
     + '<meta property="og:url" content="' + esc(url) + '">'
     + (images.og ? '<meta property="og:image" content="' + esc(images.og) + '"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta name="twitter:card" content="summary_large_image">' : '<meta name="twitter:card" content="summary">')
-    + '<link rel="icon" href="/assets/brand/clarity-app-icon.png"><link rel="apple-touch-icon" href="/assets/brand/clarity-app-icon.png">'
+    + '<link rel="icon" href="/assets/brand/clarity-app-icon.png?v=7516d3a5"><link rel="apple-touch-icon" href="/assets/brand/clarity-app-icon.png?v=7516d3a5">'
     + "<style>" + CSS + "</style>"
     + jsonLd(map, name, url, origin)
     + "</head><body><main class=\"page\">"
-    + '<a class="brand" href="/welcome"><img src="/assets/brand/clarity-app-icon.png" alt=""><span>Clarity Caddy</span></a>'
+    + '<a class="brand" href="/welcome"><img src="/assets/brand/clarity-app-icon.png?v=7516d3a5" alt=""><span>Clarity Caddy</span></a>'
     + '<section class="hero"><div>'
     + '<p class="eyebrow">' + esc(place || "Mapped course") + "</p>"
     + "<h1>" + esc(name) + " on your watch and phone.</h1>"
@@ -403,7 +403,7 @@ export function renderCoursePage(data, origin) {
 
 function notFound() {
   const html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Course not found | Clarity Caddy</title><style>' + CSS + "</style></head>"
-    + '<body><main class="page"><a class="brand" href="/welcome"><img src="/assets/brand/clarity-app-icon.png" alt=""><span>Clarity Caddy</span></a><h1>This course isn’t on Clarity yet.</h1><p class="lede">Clarity Caddy maps courses from aerial imagery for Garmin, Apple Watch and phone.</p>' + storeBadges() + "</main></body></html>";
+    + '<body><main class="page"><a class="brand" href="/welcome"><img src="/assets/brand/clarity-app-icon.png?v=7516d3a5" alt=""><span>Clarity Caddy</span></a><h1>This course isn’t on Clarity yet.</h1><p class="lede">Clarity Caddy maps courses from aerial imagery for Garmin, Apple Watch and phone.</p>' + storeBadges() + "</main></body></html>";
   return new Response(html, { status: 404, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300", "X-Robots-Tag": "noindex" } });
 }
 
