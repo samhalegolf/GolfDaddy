@@ -34,16 +34,19 @@ export function renderSitemap(origin, courses) {
     + "\n</urlset>\n";
 }
 
-/* Only pages that actually render: switched on, published, AND with a published visual - the
-   same three conditions functions/course-page.mjs checks. A switched-on course with no visual
-   is a 404, and a sitemap full of 404s is what teaches a crawler to distrust it. */
+/* Only pages that actually render: switched on, published, AND something to show - a
+   published visual or a Garmin package - the same conditions functions/course-page.mjs
+   loadCoursePage checks. A switched-on course with neither is a 404, and a sitemap full of
+   404s is what teaches a crawler to distrust it. */
 export async function publicCourses(fetchRows = supabaseFetch) {
-  const [rows, visuals] = await Promise.all([
+  const [rows, visuals, garmins] = await Promise.all([
     fetchRows("course_maps?select=course_id,published_at,updated_at&page_public=eq.true&published=eq.true&order=course_id.asc&limit=5000"),
-    fetchRows("course_visuals?select=course_id&published_version=gt.0&limit=5000")
+    fetchRows("course_visuals?select=course_id&published_version=gt.0&limit=5000"),
+    fetchRows("course_garmin_maps?select=course_id&garmin_package_version=gt.0&limit=5000")
   ]);
-  const visual = new Set((Array.isArray(visuals) ? visuals : []).map((v) => v && v.course_id));
-  return (Array.isArray(rows) ? rows : []).filter((r) => r && r.course_id && visual.has(r.course_id));
+  const ids = (list) => new Set((Array.isArray(list) ? list : []).map((v) => v && v.course_id));
+  const visual = ids(visuals), garmin = ids(garmins);
+  return (Array.isArray(rows) ? rows : []).filter((r) => r && r.course_id && (visual.has(r.course_id) || garmin.has(r.course_id)));
 }
 
 export default async function sitemap(req) {

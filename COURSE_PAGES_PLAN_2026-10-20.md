@@ -150,7 +150,8 @@ them; nothing else has to change.
    they land in the same support inbox with the course in the subject. `course_maps_list` and
    the search results carry `page_public` / `hasPage` (migration applied).
 5. **Sitemap, robots, JSON-LD, welcome links** — DONE 2026-10-20. `functions/sitemap.mjs` at
-   `/sitemap.xml` (the static public pages plus every `page_public` course, cached an hour);
+   `/sitemap.xml` (the static public pages plus every `page_public` course that renders - a
+   published visual or a Garmin package, the page function's own rule - cached an hour);
    `robots.txt` (app/studio/demo disallowed, `/courses/` allowed, points at the sitemap);
    JSON-LD was in from step 1; `welcome.html` links four featured course pages under a
    translated "See it on a real course" line. Still by hand: after the deploy, add

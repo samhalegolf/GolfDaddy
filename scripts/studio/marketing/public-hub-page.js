@@ -267,7 +267,7 @@
         draft.hub, courses.filter(function (c) { return c.inHub; }).length, false));
       rulesEl.appendChild(ruleCard("Auto publish",
         "Courses that pass this get their public page switched on when publishing runs. " +
-        "The page itself still needs a published map and a published visual, whatever this says.",
+        "The page itself still needs a published map and something to show - a published visual or a Garmin package - whatever this says.",
         draft.autoPublish, courses.filter(function (c) { return c.autoMatch; }).length, true));
       markDirty();
     }
@@ -304,7 +304,7 @@
       var notLive = data.courses.filter(function (c) { return c.pagePublic && !c.live; });
       if (notLive.length) {
         pubEl.appendChild(el("p", "gdMktErr", notLive.length + " page" + (notLive.length === 1 ? " is" : "s are") +
-          " switched on but not showing (no published map or visual yet) - they answer 404 until that changes."));
+          " switched on but not showing (no published map, visual or Garmin package yet) - they answer 404 until that changes."));
       }
 
       if (plan.notMatching.length) {

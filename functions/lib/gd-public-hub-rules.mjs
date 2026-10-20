@@ -10,8 +10,9 @@
  * live before the hub existed (functions/course-page.mjs): the map is published and the
  * visual has a published version. Headers are not required by default, matching that.
  *
- * The page function still checks published map + published visual itself, whatever these
- * say, so a loosened rule can switch a page on but cannot make an unfinished course render. */
+ * The page function still checks for itself that the map is published and there is something
+ * to show - a published visual or a Garmin package - whatever these say, so a loosened rule
+ * can switch a page on but cannot make an unfinished course render. `live` below is that rule. */
 
 export const COUNTS = [
   { key: "minHoles", field: "holeCount", label: "holes" },
@@ -82,7 +83,8 @@ export function ruleMisses(rule, course) {
 /* Every course, with what the rules make of it:
  *   inHub          passes the hub rule
  *   autoMatch      passes the autoPublish rule
- *   live           the page actually renders (page_public + published map + published visual)
+ *   live           the page actually renders (page_public + published map + a published visual
+ *                  or a Garmin package - functions/course-page.mjs loadCoursePage)
  *   held           taken down by hand
  *   hubMisses / autoMisses   why not, for the Studio to show */
 export function evaluate(rules, courses) {
@@ -94,7 +96,7 @@ export function evaluate(rules, courses) {
       inHub: hubMisses.length === 0,
       autoMatch: autoMisses.length === 0,
       held: held.has(course.courseId),
-      live: !!(course.pagePublic && course.published && course.visualPublished),
+      live: !!(course.pagePublic && course.published && (course.visualPublished || course.garminPackaged)),
       hubMisses,
       autoMisses
     });
