@@ -1037,3 +1037,17 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
 #gdStudioShellRoot .gdStudioSourceTestFrame { position: relative; }
 #gdStudioShellRoot .gdStudioSourceTestFrame svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 #gdStudioShellRoot .gdStudioSourceTestImages figcaption { font-size: 12px; opacity: 0.75; margin-top: 4px; }
+
+/* Marketing > Public Facing Hub */
+#gdStudioShellRoot .gdHubRules { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; }
+#gdStudioShellRoot .gdHubLabel { font-size: 12px; font-weight: 600; margin: 10px 0 6px; }
+#gdStudioShellRoot .gdHubChips { display: flex; flex-wrap: wrap; gap: 6px; }
+#gdStudioShellRoot .gdHubChip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--gdStudioBorder, rgba(255,255,255,.14)); cursor: pointer; }
+#gdStudioShellRoot .gdHubChip input { margin: 0; }
+#gdStudioShellRoot .gdHubChip.isOn { border-color: var(--gdStudioAccent); color: var(--gdStudioAccent); }
+#gdStudioShellRoot .gdHubChecks { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; }
+#gdStudioShellRoot .gdHubFilter { width: auto; font-size: 12px; }
+#gdStudioShellRoot .gdHubTableWrap { overflow-x: auto; }
+#gdStudioShellRoot .gdHubTable td { vertical-align: top; }
+#gdStudioShellRoot .gdHubActions { white-space: nowrap; }
+#gdStudioShellRoot .gdHubActions button { margin-right: 4px; }

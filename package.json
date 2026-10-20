@@ -124,7 +124,7 @@
     "test:garmin-preview": "node dev/garmin-watch-preview.test.js",
     "test:apple-preview": "node dev/apple-watch-preview.test.js",
     "test:garmin:parity": "node garmin/tools/run-parity.js",
-    "test:course-page": "node dev/course-page.test.js && node dev/course-page-switch.test.js"
+    "test:course-page": "node dev/course-page.test.js && node dev/public-hub.test.js && node dev/marketing-snapshot-core.test.js"
   },
   "codex": {
     "entry": "index.html",

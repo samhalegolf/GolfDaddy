@@ -297,6 +297,32 @@ test("a hole with neither route nor tee has no standing point rather than an inv
   assert.strictEqual(core.standingPoint(rec, 130), null);
 });
 
+test("a route stored out of order is walked in playing order — the stand stays on the line", () => {
+  /* A dogleg with its two bends stored backwards, the way objects_json key order can leave them.
+     Walked as stored, the line runs tee -> far bend -> near bend -> green and the 130m point
+     lands on the backwards segment, off the line the hole plays. */
+  const near = at(80, 150), far = at(80, 330);
+  const shuffled = core.holeRecords({ holes: [hole({ holeNumber: 1, par: 5, lengthM: 480, route: [at(0, 0), far, near, at(0, 480)] })] })[0];
+  const ordered = core.holeRecords({ holes: [hole({ holeNumber: 1, par: 5, lengthM: 480, route: [near, far] })] })[0];
+  assert.strictEqual(core.routeInOrder(shuffled), false);
+  assert.strictEqual(core.routeInOrder(ordered), true);
+  const a = core.standingPoint(shuffled, 130), b = core.standingPoint(ordered, 130);
+  assert.ok(core.metresBetween(a, b) < 0.5, "shuffled and ordered routes stood the player in different places");
+  assert.ok(Math.abs(core.metresBetween(a, shuffled.green) - 130) < 1);
+});
+
+test("the tee shot skips a hole whose stored route is out of order", () => {
+  const pkg = { holes: [
+    /* The better hole on paper, but its bends are stored backwards. */
+    hole({ holeNumber: 3, par: 5, lengthM: 500, route: [at(90, 360), at(90, 160)],
+      surfaces: surfaces({ bunkers: [at(90, 160), at(90, 360)], water: [at(60, 250)], fairways: [at(90, 250)] }) }),
+    hole({ holeNumber: 4, par: 4, lengthM: 380, surfaces: surfaces({ fairways: [at(0, 190)] }) })
+  ] };
+  const picked = core.pickHoles(pkg);
+  assert.strictEqual(picked.teeHole, 4);
+  assert.ok(picked.notes.some((n) => /out of order/.test(n)));
+});
+
 /* ---- units ---------------------------------------------------------------- */
 
 test("yards where golf is sold in yards, metres elsewhere", () => {

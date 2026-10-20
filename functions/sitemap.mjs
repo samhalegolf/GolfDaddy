@@ -1,7 +1,7 @@
 /* GET /sitemap.xml - the public pages, for crawlers.
  *
  * The landing, the watch preview's public neighbours (privacy, terms, support) and every
- * public course page (course_maps.page_public - see functions/course-page.mjs). This is the
+ * live public course page (see functions/course-page.mjs and publicCourses below). This is the
  * only place the public course pages are listed together, and it is for crawlers: no page
  * links here, and nothing on the site renders it, because the site deliberately has no
  * course directory. Cached an hour at the CDN; a course switched on shows up within that. */
@@ -34,9 +34,16 @@ export function renderSitemap(origin, courses) {
     + "\n</urlset>\n";
 }
 
+/* Only pages that actually render: switched on, published, AND with a published visual - the
+   same three conditions functions/course-page.mjs checks. A switched-on course with no visual
+   is a 404, and a sitemap full of 404s is what teaches a crawler to distrust it. */
 export async function publicCourses(fetchRows = supabaseFetch) {
-  const rows = await fetchRows("course_maps?select=course_id,published_at,updated_at&page_public=eq.true&published=eq.true&order=course_id.asc&limit=1000");
-  return (Array.isArray(rows) ? rows : []).filter((r) => r && r.course_id);
+  const [rows, visuals] = await Promise.all([
+    fetchRows("course_maps?select=course_id,published_at,updated_at&page_public=eq.true&published=eq.true&order=course_id.asc&limit=5000"),
+    fetchRows("course_visuals?select=course_id&published_version=gt.0&limit=5000")
+  ]);
+  const visual = new Set((Array.isArray(visuals) ? visuals : []).map((v) => v && v.course_id));
+  return (Array.isArray(rows) ? rows : []).filter((r) => r && r.course_id && visual.has(r.course_id));
 }
 
 export default async function sitemap(req) {

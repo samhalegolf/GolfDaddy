@@ -218,7 +218,12 @@ test("course search says which results have a public page", async () => {
 test("being found: sitemap of public courses, robots, and a way in from the landing", async () => {
   const sm = await import("../functions/sitemap.mjs");
   assert.strictEqual(sm.config.path, "/sitemap.xml");
-  const courses = await sm.publicCourses(async (q) => { assert.ok(/page_public=eq\.true/.test(q) && /published=eq\.true/.test(q), q); return [{ course_id: "tara-iti", updated_at: "2026-10-14T06:28:55.241Z" }, { course_id: "" }]; });
+  const courses = await sm.publicCourses(async (q) => {
+    if (q.startsWith("course_visuals")) { assert.ok(/published_version=gt\.0/.test(q), q); return [{ course_id: "tara-iti" }]; }
+    assert.ok(/page_public=eq\.true/.test(q) && /published=eq\.true/.test(q), q);
+    /* no-visual is switched on but has no published visual - its page is a 404, so not listed */
+    return [{ course_id: "tara-iti", updated_at: "2026-10-14T06:28:55.241Z" }, { course_id: "no-visual" }, { course_id: "" }];
+  });
   assert.deepStrictEqual(courses.map((c) => c.course_id), ["tara-iti"]);
   const xml = sm.renderSitemap("https://caddy.test", courses);
   assert.ok(xml.includes("<loc>https://caddy.test/courses/tara-iti</loc><lastmod>2026-10-14</lastmod>"), xml);

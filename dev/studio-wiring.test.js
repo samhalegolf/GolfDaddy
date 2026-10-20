@@ -61,6 +61,7 @@ const STUDIO_SCRIPTS = [
   "scripts/studio/gps-play/shot-planning/shot-planning-page.js",
   "scripts/studio/gps-play/record-hub/record-hub-page.js",
   "scripts/studio/marketing/snapshot-machine-page.js",
+  "scripts/studio/marketing/public-hub-page.js",
   /* Outside scripts/studio/ because marketing/run-snapshots.mjs require()s it from node too —
      the Studio page and the Playwright runner have to choose the same holes. It is still
      studio-only on the web surface, so it belongs under the same split contract. */
