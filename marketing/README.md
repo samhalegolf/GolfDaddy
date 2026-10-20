@@ -31,8 +31,7 @@ published course to anyone, and the play screen's whole shot view is free. The
 only difference is the player badge, which reads GUEST instead of your name.
 
 `marketing:login` opens a real browser, walks itself to the sign-in form (Player
-Profile → Sign In; the home screen has no visible way in, and `?login=1` only
-stops the landing page eating the visit), and watches for you to sign in — there
+Profile → Sign In; the home screen has no visible way in), and watches for you to sign in — there
 is nothing to press. `MARKETING_LOGIN_MINUTES` extends the 20-minute window. The
 saved `marketing/.auth.json` holds a live session — it is gitignored, and
 deleting it signs the runner out.

@@ -93,8 +93,6 @@ test("token_hash survives every layer between the tap and the password form", ()
     "the native deep-link handler drops the token, so the app opens and does nothing");
   assert.ok(/params\.has\("token_hash"\)/.test(read("scripts", "inline", "gd-auth-reset-route-bootstrap.js")),
     "the pre-paint bootstrap does not treat a token_hash link as a reset route");
-  assert.ok(/"token_hash"/.test(read("scripts", "inline", "gd-landing-redirect-v1.js")),
-    "a setup link would be redirected to the landing page");
   const shell = read("scripts", "inline", "gd-auth-account-shell.js");
   assert.ok(/params\.has\('token_hash'\)/.test(shell), "the shell does not recognise a token_hash route");
   assert.ok(/url\.searchParams\.delete\('token_hash'\)/.test(shell),
