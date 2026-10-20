@@ -249,5 +249,11 @@ export function courseFitMessage(verdict) {
       : own + " has no numbered holes in OpenStreetMap";
     return "This ground is tagged " + (d.outlineName || "another club") + " in OpenStreetMap, and " + held + ". Pin the one you are playing.";
   }
+  if (verdict.reason === "pin-off-golf") {
+    /* The course they picked had nothing to map at its pin, but golf is close by. */
+    const away = d.nearestM >= 1000 ? (Math.round(d.nearestM / 100) / 10) + "km" : d.nearestM + "m";
+    return "There's no golf course at this spot - the nearest greens are " + away + " away"
+      + (d.outlineName ? ", at " + d.outlineName : "") + ". Pin the course you are playing.";
+  }
   return "Pin the course you are playing.";
 }

@@ -173,6 +173,32 @@ test("a stale bypass cannot silence a DIFFERENT course", () => {
   assert.strictEqual(needsPin({ courseId: "x", gdCourseFitTrusted: false, gdCourseFitReason: "holes-scattered" }), true);
 });
 
+test("a failed run whose greens are all far from the pin asks for a pin (Miyoshi, 2026-10-19)", async () => {
+  const { pinOffGolfClaim, PIN_OFF_GOLF_M } = await import(path.join(ROOT, "functions", "lib", "gd-automapper-core.mjs"));
+  const { courseFitMessage } = await import(FIT);
+  const pin = { lat: 35.1533, lng: 137.0965 };
+  const green = (id, lat, lng) => ({ type: "way", id, tags: { golf: "green" },
+    geometry: [{ lat, lon: lng }, { lat: lat + 0.0002, lon: lng }, { lat: lat + 0.0002, lon: lng + 0.0002 }, { lat, lon: lng }] });
+  const outline = (id, name, s, w, n, e) => ({ type: "way", id, tags: { leisure: "golf_course", name },
+    geometry: [{ lat: s, lon: w }, { lat: n, lon: w }, { lat: n, lon: e }, { lat: s, lon: e }, { lat: s, lon: w }] });
+  /* Miyoshi's greens ~0.9-1km south of a range pin, in their own outline. */
+  const away = { elements: [
+    outline(1, "名古屋商科大学ゴルフ練習場", 35.152, 137.095, 35.1545, 137.098),
+    outline(2, "三好カントリー倶楽部", 35.135, 137.09, 35.147, 137.106),
+    green(10, 35.1445, 137.0985), green(11, 35.1424, 137.0981), green(12, 35.1455, 137.1028), green(13, 35.1419, 137.0938)
+  ] };
+  const claim = pinOffGolfClaim(away, pin);
+  assert.ok(claim, "greens all far off: the pin is not on the golf");
+  assert.ok(claim.nearestM > PIN_OFF_GOLF_M, "nearest " + claim.nearestM + "m");
+  assert.strictEqual(claim.greens, 4);
+  assert.strictEqual(claim.outlineName, "三好カントリー倶楽部", "names whose greens they are, never the pin's own outline");
+  const message = courseFitMessage({ trusted: false, reason: "pin-off-golf", scope: "ground", detail: claim });
+  assert.ok(/no golf course at this spot/.test(message) && /三好カントリー倶楽部/.test(message) && /Pin the course/.test(message), message);
+  /* A green at the pin, or too few greens to say, is not evidence. */
+  assert.strictEqual(pinOffGolfClaim({ elements: away.elements.concat([green(14, 35.1531, 137.0966)]) }, pin), null);
+  assert.strictEqual(pinOffGolfClaim({ elements: [green(10, 35.1445, 137.0985), green(11, 35.1424, 137.0981)] }, pin), null);
+});
+
 test("manual GPS never asks", () => {
   assert.strictEqual(loadGate()({ manual: true, gdCourseFitTrusted: false }), false);
 });
