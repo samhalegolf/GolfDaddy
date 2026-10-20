@@ -648,10 +648,45 @@ function gdAdminCourseDbActionRail(selected){
     <button type="button" class="${active("snapshots")}" onclick="return gdAdminCourseDbShowSnapshots(${id})">Snapshots</button>
     <button type="button" class="${active("testbakes")}" onclick="return gdAdminCourseDbShowTestBakes(${id})">Test Bakes</button>
     <button type="button" class="${active("terrain")}" onclick="return gdAdminCourseDbShowTerrain(${id})">Terrain</button>
+    ${gdAdminCoursePageSwitch(selected)}
     <button type="button" class="danger" onclick="return gdAdminCourseDbDelete(${id})">Delete</button>
     ${gdAdminCourseMaintenanceMenu(selected)}
     ${gdAdminCourseVisualUpdateButton(selected&&selected.id||"","primary")}
   </div>`;
+}
+/* The public course page (/courses/<courseId>, functions/course-page.mjs): one switch, off by
+   default, read from the cloud row so it says what the database says and never a local guess. */
+function gdAdminCoursePageSwitch(selected){
+  const courseId=selected&&selected.id||"";
+  const cloud=gdAdminCourseDbCloud&&gdAdminCourseDbCloud.courses&&gdAdminCourseDbCloud.courses[String(courseId)];
+  if(!cloud)return "";
+  const on=cloud.pagePublic===true;
+  const id=gdAdminJsArg(courseId);
+  return `<button type="button" class="${on?"active":""}" onclick="return gdAdminCourseDbTogglePage(${id})" title="${on?"Public at /courses/"+gdEscapeHTML(courseId)+" - click to take it down":"Publish a public page at /courses/"+gdEscapeHTML(courseId)}">Course page: ${on?"on":"off"}</button>`;
+}
+async function gdAdminCourseDbTogglePage(courseId){
+  const cloud=gdAdminCourseDbCloud&&gdAdminCourseDbCloud.courses&&gdAdminCourseDbCloud.courses[String(courseId)];
+  if(!cloud)return false;
+  if(!gdAdminCourseDbIsAdmin()){gdAdminCourseVisualToast("Admin only — sign in as an admin to change the course page");return false;}
+  const next=cloud.pagePublic!==true;
+  const token=await gdAdminCourseDbAccessToken();
+  if(!token){gdAdminCourseVisualToast("No signed-in Supabase session — sign in again");return false;}
+  try{
+    const res=await fetch("/api/course-maps",{
+      method:"POST",
+      headers:{"Content-Type":"application/json",Accept:"application/json",Authorization:"Bearer "+token},
+      body:JSON.stringify({action:"page",courseId:courseId,pagePublic:next,actor:gdAdminCourseDbActor()})
+    });
+    let data=null;
+    try{data=await res.json();}catch(e){}
+    if(!res.ok)throw new Error((data&&data.error)||("HTTP "+res.status));
+    cloud.pagePublic=data&&data.pagePublic===true;
+    gdAdminCourseVisualToast(cloud.pagePublic?`/courses/${courseId} is public (the CDN copy can lag up to a day)`:`/courses/${courseId} taken down`);
+  }catch(error){
+    gdAdminCourseVisualToast(`Course page switch failed: ${error&&error.message||error}`);
+  }
+  gdRenderAdminCourseDatabase();
+  return false;
 }
 /* The four maintenance modes, as variants of the old "Rebuild local" button rather than four
    more equal pills on the rail. They are NOT aliases for one pipeline - each is a deliberate

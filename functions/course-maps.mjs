@@ -133,6 +133,13 @@ export default async function courseMaps(req) {
     return deleteCourseMap(payload);
   }
 
+  /* The public course page switch (functions/course-page.mjs reads course_maps.page_public).
+     One boolean on the row, nothing else touched - never the geometry. */
+  if (action === "page") {
+    if (!adminActor) return json(403, { error: "Admin only", code: "admin_session_required" });
+    return setPagePublic(payload);
+  }
+
   /* Admin only. Players' phones used to post "Community scan" uploads here without signing
      in - in practice the server's own course package echoed straight back on every course
      open, rewriting the row each time. The app stopped sending them (2026-10-07), and an
@@ -419,6 +426,26 @@ async function deleteCourseMap(payload) {
   }));
 }
 
+async function setPagePublic(payload) {
+  const courseId = deleteCourseId(payload);
+  if (!courseId) return json(400, { error: "courseId is required" });
+  if (typeof (payload && payload.pagePublic) !== "boolean") return json(400, { error: "pagePublic must be true or false" });
+  if (!hasSupabase()) return json(503, { error: "Supabase is not configured", courseId, storage: "supabase" });
+  let rows;
+  try {
+    rows = await supabaseFetch(TABLE + "?course_id=eq." + encodeURIComponent(courseId) + "&select=course_id,page_public", {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify({ page_public: payload.pagePublic })
+    });
+  } catch (error) {
+    return json(error.status || 503, { error: storageMessage(error), courseId, storage: "supabase" });
+  }
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row) return json(404, { error: "No such course", courseId });
+  return json(200, { ok: true, action: "page", courseId, pagePublic: row.page_public === true });
+}
+
 const LIST_VIEW = "course_maps_list";
 /* Identity, freshness and counts. No geometry - that is the entire point. The
    counts are stored on the row by the course_maps_sync_counts trigger whenever
@@ -427,7 +454,7 @@ const LIST_VIEW = "course_maps_list";
 const LIST_COLUMNS = "id,course_id,course_name,course_lat,course_lng,finder_lat,finder_lng," +
   "region,country,country_code,facility_key,facility_name,course_aliases,published,published_at," +
   "created_at,updated_at,hole_count,object_count,tee_count,green_count,fairway_count," +
-  "fairway_area_count,bunker_count,water_count,hazard_count,tree_count";
+  "fairway_area_count,bunker_count,water_count,hazard_count,tree_count,page_public";
 
 /* Phones built before 14 Oct 2026 (the Android APK from commit 9f31f4a and
    earlier) open the course picker with a bare ?scope=play and keep a course
@@ -483,6 +510,8 @@ function listRowToCourse(row) {
     waterCount: integerOrZero(row.water_count),
     hazardCount: integerOrZero(row.hazard_count),
     treeCount: integerOrZero(row.tree_count),
+    /* Whether /courses/<courseId> is live (functions/course-page.mjs); Studio's switch. */
+    pagePublic: row.page_public === true,
     scope: "list"
   };
   return course.id && course.courseId && course.courseName ? course : null;

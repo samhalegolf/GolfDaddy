@@ -147,10 +147,11 @@ them; nothing else has to change.
    JSON-LD was in from step 1; `welcome.html` links four featured course pages under a
    translated "See it on a real course" line. Still by hand: after the deploy, add
    `https://caddy.claritygolf.app/sitemap.xml` in Google Search Console.
-6. **Studio toggle** for `page_public` so publishing a page is one click.
-7. Tests in `dev/` in the existing style: the function renders for a public course and 404s for a
-   private one; the gate passes `/courses/*`; the sitemap lists only public courses; the
-   template references only files the deploy copies.
+6. **Studio toggle** — DONE 2026-10-20. "Course page: on/off" on the course row's action rail
+   (Studio › Course Database), posting `{action:"page", courseId, pagePublic}` to
+   `/api/course-maps` (admin only; writes only `page_public`). The list row carries `pagePublic`.
+7. **Tests** — DONE as each step landed: `npm run test:course-page` runs `dev/course-page.test.js`
+   (20) and `dev/course-page-switch.test.js` (5).
 
 ## Decisions (2026-10-20)
 
