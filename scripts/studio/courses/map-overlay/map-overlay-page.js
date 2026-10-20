@@ -561,6 +561,7 @@
       "</span>" +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="apply" disabled title="Put this overlay\'s bunkers, water, hazards, waste, woods and fairways on the course\'s holes, and take off any binned here. No rescan - greens, tees, hole lines, numbers and visuals are untouched. Draft or ready, it reads what is saved.">Apply shapes</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="run" disabled title="Clear the course\'s geometry and resolve it again with this overlay - the only way a green, tee, hole line, hole number or play order reaches the course">Run mapper with overlay</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="pin-move" disabled title="The course pin is where the mapper looks for the course - it searches about 1.4 km round it. Click this, then click the middle of the course, to move the pin there and map the course again">Move course pin</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="unnumber" disabled title="Take every hole number off the overlay - shapes and links stay - so the mapper numbers them fresh from the scorecard">Clear hole numbers</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="clear" disabled>Delete all shapes</button>' +
       "</div>" +
@@ -688,7 +689,7 @@
       "</div>";
 
     var el = {};
-    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "ai-panel", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "mode-fast", "fast-order", "fast-single", "fast-green-tee", "fast-tee-green", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-auto", "method-along", "method-grow", "method-colour", "tree-auto-label", "tree-band", "tree-heights", "tree-auto", "hazard-auto-label", "hazard-corridor", "hazard-auto", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "tree-bar", "tree-text", "tree-less", "tree-more", "tree-publish", "tree-rerun", "tree-close", "undo", "trees", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "apply", "run", "status"].forEach(function (name) {
+    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "ai-panel", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "mode-fast", "fast-order", "fast-single", "fast-green-tee", "fast-tee-green", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-auto", "method-along", "method-grow", "method-colour", "tree-auto-label", "tree-band", "tree-heights", "tree-auto", "hazard-auto-label", "hazard-corridor", "hazard-auto", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "tree-bar", "tree-text", "tree-less", "tree-more", "tree-publish", "tree-rerun", "tree-close", "undo", "trees", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "apply", "run", "pin-move", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -2390,6 +2391,7 @@
     function handleMapClick(latlng) {
       if (Date.now() - dragEndedAt < 300) return;
       if (!session.course) { setStatus("Pick a course first."); return; }
+      if (pinMoving) { placeCoursePin(latlng); return; }
       /* Empty ground under the Link tool does nothing: the pick waits for Enter or Esc. */
       if (tool === "connect" || tool === "number" || tool === "order") return;
       if (tool === "move") { if (selectedId) select(""); return; }
@@ -4667,6 +4669,8 @@
       el.unnumber.disabled = !canEdit() || !session.features.some(function (f) { return f.hole; });
       el.apply.disabled = !has || session.dirty;
       el.run.disabled = !has || session.dirty;
+      el["pin-move"].disabled = !pinMoving && (!has || session.dirty);
+      el["pin-move"].textContent = pinMoving ? "Cancel pin move" : "Move course pin";
       if (session.dirty) { el.apply.title = el.run.title = "Wait for the overlay to save - the jobs read what is saved"; }
       else {
         el.apply.title = "Put this overlay's bunkers, water, hazards, waste, woods and fairways on the course's holes, and take off any binned here. No rescan - greens, tees, hole lines, numbers and visuals are untouched. Draft or ready, it reads what is saved.";
@@ -4838,6 +4842,66 @@
       });
     }
 
+    /* ---- course pin ----
+       The pin is the course's centre (course_maps.course_lat/lng): the Overpass query the
+       mapper runs is a circle round it, so a pin on the wrong ground maps the wrong ground, or
+       only the part of the course inside the circle. Move course pin, a click on the middle of
+       the course, and a confirm send one remap carrying the new pin: the server moves it in the
+       same write that clears the geometry, and the run maps round it. */
+    var pinMoving = false, coursePin = null;
+    function coursePinIcon(moving) {
+      return L.divIcon({ className: "gdStudioOverlayCoursePin" + (moving ? " isMoving" : ""), iconSize: [18, 18], iconAnchor: [9, 9] });
+    }
+    function drawCoursePin(at) {
+      var point = at ? [at.lat, at.lng] : courseLatLng(session.course);
+      if (!point) { if (coursePin) { try { coursePin.remove(); } catch (e) {} coursePin = null; } return; }
+      if (!coursePin) {
+        coursePin = L.marker(point, { icon: coursePinIcon(!!at), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(mapObj);
+        return;
+      }
+      coursePin.setLatLng(point);
+      coursePin.setIcon(coursePinIcon(!!at));
+    }
+    function startPinMove() {
+      if (!session.course || busy || session.dirty) return;
+      pinMoving = true;
+      el.stage.classList.add("isPinMoving");
+      setStatus("Click the middle of the course to move its pin there. Esc to cancel.");
+      updateActions();
+    }
+    function stopPinMove(message) {
+      pinMoving = false;
+      el.stage.classList.remove("isPinMoving");
+      drawCoursePin();
+      if (message) setStatus(message);
+      updateActions();
+    }
+    function placeCoursePin(latlng) {
+      var id = courseIdOf(session.course);
+      if (!id) return;
+      var at = { lat: Number(latlng.lat.toFixed(6)), lng: Number(latlng.lng.toFixed(6)) };
+      drawCoursePin(at);
+      var name = session.course.name || session.course.courseName || id;
+      var old = courseLatLng(session.course);
+      var moved = old ? Math.round(shapes.distanceM({ lat: old[0], lng: old[1] }, at)) : null;
+      if (!window.confirm("Move " + name + "'s pin here (" + at.lat.toFixed(5) + ", " + at.lng.toFixed(5) + ")" + (moved != null ? ", " + moved + " m from where it was" : "") + ", and map the course again?" +
+        "\n\nThe mapper looks for the course in a circle about 1.4 km round the pin. This clears the course's existing geometry and resolves it again round the new pin." + RUN_FOOTNOTE)) {
+        stopPinMove("Pin left where it was.");
+        return;
+      }
+      pinMoving = false;
+      el.stage.classList.remove("isPinMoving");
+      queueJob(id, "remap", "pin move", function (data) {
+        return data && data.deduped ? "Pin moved. A mapper run was already in progress - remap again once it finishes to map round the new pin." : "Pin moved and mapper run queued. Watch it in Course Database → this course → Debug (Mapping Diagnostics).";
+      }, { courseLat: at.lat, courseLng: at.lng }, function () {
+        session.course.lat = at.lat; session.course.lng = at.lng;
+        if (session.course.latitude != null) session.course.latitude = at.lat;
+        if (session.course.longitude != null) session.course.longitude = at.lng;
+        el.course.title = at.lat.toFixed(5) + ", " + at.lng.toFixed(5);
+        remember();
+      });
+    }
+
     /* Apply shapes: the surface pass alone (collect_extra_objects), on the holes the course
        already has. Nothing is cleared, nothing is resolved, no frame is re-shot. The job reads
        the overlay draft or ready, so there is no sign-off step; it reads what is SAVED, which is
@@ -4860,25 +4924,26 @@
       });
     }
 
-    function queueJob(id, kind, label, done) {
+    function queueJob(id, kind, label, done, extra, onQueued) {
       busy = true; updateActions();
       setStatus("Queueing " + label + "…");
       accessToken().then(function (token) {
         return fetch(JOBS_API, {
           method: "POST",
           headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + token },
-          body: JSON.stringify({ courseId: id, kind: kind })
+          body: JSON.stringify(Object.assign({ courseId: id, kind: kind }, extra || {}))
         });
       }).then(function (res) {
         return res.json().catch(function () { return null; }).then(function (data) {
           if (res.status === 403) throw new Error("Admin only");
           if (!res.ok) throw new Error((data && (data.detail || data.error)) || ("HTTP " + res.status));
+          if (onQueued) onQueued(data);
           setStatus(done(data));
         });
       }).catch(function (error) {
         if (destroyed) return;
         setStatus("Could not queue " + label + ": " + (error && error.message || error), true);
-      }).then(function () { busy = false; if (!destroyed) { updateActions(); drawFeatures(); } });
+      }).then(function () { busy = false; if (!destroyed) { updateActions(); drawFeatures(); drawCoursePin(); } });
     }
 
     /* ---- imagery capture ----
@@ -5460,6 +5525,7 @@
       el.course.textContent = String(course && (course.name || course.courseName) || "Course");
       el.course.title = point ? point[0].toFixed(5) + ", " + point[1].toFixed(5) : "No coordinates";
       remember();
+      drawCoursePin();
       if (!point) { setStatus("This course has no coordinates - set its location first.", true); return; }
       if (!restoring) {
         mapObj.setView(point, 16);
@@ -5737,6 +5803,7 @@
         return;
       }
       if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "Escape" && pinMoving) { event.preventDefault(); stopPinMove("Pin left where it was."); return; }
       if (event.key === "Escape" && !el.menu.hidden) { event.preventDefault(); setMenu(false); return; }
       if (event.key === "Escape" && fullscreen && !draft.length && !selectedId && tool === "move") { event.preventDefault(); setFullscreen(false); return; }
       if (tool === "connect" && linkPick.length && session.course && canEdit()) {
@@ -5910,6 +5977,7 @@
     el["osm-mode"].addEventListener("change", function () { setOsmMode(el["osm-mode"].value); });
     el.apply.addEventListener("click", applyShapes);
     el.run.addEventListener("click", runMapper);
+    el["pin-move"].addEventListener("click", function () { if (pinMoving) stopPinMove("Pin left where it was."); else startPinMove(); });
 
     setMode(session.mode === "pins" && session.fast ? "fast" : session.mode);
     renderWandSize();
