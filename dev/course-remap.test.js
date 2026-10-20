@@ -109,4 +109,29 @@ assert.ok([200,202].includes(res.status), 'expected accept, got '+res.status);
 assert.equal(state.jobs.length, 1, 'job queued from the stored centre alone');
 console.log('6. a stored centre is enough with no coordinates in the request');
 
-console.log('\ncourse-remap passed: 17 checks');
+// 7. Studio's "Move course pin": a remap carrying coordinates moves the pin in the same write
+//    that clears the geometry, and keeps the course's name. Miyoshi Country Club is the case -
+//    pinned 1.2 km off on a driving range, so the 1400 m query reached only 15 of its holes.
+state.maps.length = 0; state.jobs.length = 0; state.patched.length = 0;
+state.maps.push({course_id:'miyoshi-country-club',course_name:'三好カントリー倶楽部',published:true,geometry_version:'v2',
+                 objects_json:{a:1},holes_json:{'1':{}},course_lat:35.1533,course_lng:137.0965});
+res = await post({courseId:'miyoshi-country-club', kind:'remap', courseLat:35.14, courseLng:137.0985, courseName:'miyoshi-country-club'});
+assert.ok([200,202].includes(res.status), 'expected accept, got '+res.status);
+assert.equal(state.maps[0].course_lat, 35.14, 'pin moved (lat)');
+assert.equal(state.maps[0].course_lng, 137.0985, 'pin moved (lng)');
+assert.deepEqual(state.maps[0].objects_json, {}, 'geometry cleared with it');
+assert.equal(state.patched.length, 1, 'one write: pin and clear together');
+assert.equal(state.maps[0].course_name, '三好カントリー倶楽部', 'name untouched');
+assert.equal(state.jobs.length, 1, 'a mapping job was enqueued');
+console.log('7. remap with coordinates moved the pin, cleared geometry, kept the name');
+
+// 8. A half or garbled pin is no pin: the course stays where it was.
+for (const bad of [{courseLat:35.2}, {courseLat:'x', courseLng:137}, {courseLat:95, courseLng:137}]) {
+  state.maps[0].objects_json = {a:1}; state.jobs.length = 0;
+  res = await post(Object.assign({courseId:'miyoshi-country-club', kind:'remap'}, bad));
+  assert.ok([200,202].includes(res.status), 'expected accept, got '+res.status);
+  assert.equal(state.maps[0].course_lat, 35.14, 'location kept for '+JSON.stringify(bad));
+}
+console.log('8. a half or garbled pin leaves the location alone');
+
+console.log('\ncourse-remap passed: 26 checks');
