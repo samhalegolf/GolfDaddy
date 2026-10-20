@@ -30,9 +30,10 @@ A signed-out run shoots perfectly good frames — `/api/course-package` serves a
 published course to anyone, and the play screen's whole shot view is free. The
 only difference is the player badge, which reads GUEST instead of your name.
 
-`marketing:login` opens a real browser, walks itself to the sign-in form (Player
-Profile → Sign In; the home screen has no visible way in), and watches for you to sign in — there
-is nothing to press. `MARKETING_LOGIN_MINUTES` extends the 20-minute window. The
+`marketing:login` opens a real browser at `/studio` — the only way to sign in on
+the web; a signed-out browser at `/` is sent to the landing page — and watches
+for you to sign in on the Studio's sign-in card (after the site access key, if
+the browser does not hold it yet). There is nothing to press. `MARKETING_LOGIN_MINUTES` extends the 20-minute window. The
 saved `marketing/.auth.json` holds a live session — it is gitignored, and
 deleting it signs the runner out.
 

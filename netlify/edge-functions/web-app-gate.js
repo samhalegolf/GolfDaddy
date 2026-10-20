@@ -10,6 +10,11 @@
  * an auth-email link on a phone with the app installed opens the app before
  * any request is made. A link opened anywhere else lands on the welcome page.
  *
+ * The cookie opens the door; it does not sign anyone in. A browser that holds it
+ * but has no account is sent on to welcome.html by the app itself
+ * (scripts/inline/gd-landing-redirect-v1.js, app surface only), so /studio -
+ * which signs in in place - is the one way into the web app signed in.
+ *
  * Unlocking: open /studio (it shows the sign-in in place) or /web-access, enter CLARITY_WEB_ACCESS_KEY (falls back to
  * CLARITY_ADMIN_AUTH_TOKEN). That sets an HttpOnly cookie holding an HMAC of
  * the key, never the key itself, so rotating the key locks every browser out.
