@@ -1043,6 +1043,14 @@
     "mapNotify.incompleteDetailNoList": "{mapped} din {expected} gropi sunt cartografiate. Vom termina restul.",
     "mapNotify.incompleteOnList": "Ești pe listă - îți trimitem un e-mail când harta completă este gata.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Înainte să cauți",
+    "searchEmail.detail": "Lasă-ne adresa de email – o folosim doar ca să te anunțăm dacă harta unui teren este actualizată.",
+    "searchEmail.placeholder": "Adresa ta de email",
+    "searchEmail.continue": "Continuă",
+    "searchEmail.notNow": "Nu acum",
+    "searchEmail.couldNotSave": "Emailul nu a putut fi salvat",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Profil jucător",
     "profilePage.intro": "Profilurile stau la baza lateralității, distanțelor din sac și calibrării datelor loviturilor. Permisiunile contului se află în Setări administrator.",

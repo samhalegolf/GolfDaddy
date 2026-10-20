@@ -1043,6 +1043,14 @@
     "mapNotify.incompleteDetailNoList": "Zmapováno {mapped} z {expected} jamek. Zbytek dokončíme.",
     "mapNotify.incompleteOnList": "Jste na seznamu - napíšeme vám, až bude celá mapa hotová.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Než začnete hledat",
+    "searchEmail.detail": "Zanechte nám e-mail – použijeme ho jen k tomu, abychom vám dali vědět, když se mapa hřiště aktualizuje.",
+    "searchEmail.placeholder": "Vaše e-mailová adresa",
+    "searchEmail.continue": "Pokračovat",
+    "searchEmail.notNow": "Teď ne",
+    "searchEmail.couldNotSave": "E-mail se nepodařilo uložit",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Profil hráče",
     "profilePage.intro": "Profily řídí pravák / levák, vzdálenosti v bagu a kalibraci dat ran. Oprávnění účtu jsou v nastavení administrátora.",

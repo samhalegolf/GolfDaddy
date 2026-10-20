@@ -1024,6 +1024,14 @@
     "mapNotify.incompleteDetailNoList": "{mapped} of {expected} holes are mapped. We'll finish the rest.",
     "mapNotify.incompleteOnList": "You're on the list - we'll email you when the full map is ready.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Before you search",
+    "searchEmail.detail": "Leave your email and we'll only use it to let you know if a course map is updated.",
+    "searchEmail.placeholder": "Your email address",
+    "searchEmail.continue": "Continue",
+    "searchEmail.notNow": "Not now",
+    "searchEmail.couldNotSave": "Could not save your email",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Player Profile",
     "profilePage.intro": "Profiles power handedness, bag distances and shot data calibration. Account permissions live in Admin Settings.",

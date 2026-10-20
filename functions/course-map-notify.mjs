@@ -44,9 +44,9 @@ const supabaseFetch = createSupabaseFetch({ base: supabaseBase, key: supabaseKey
    which course this is. */
 function slug(value) { return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90); }
 function text(value, limit) { const input = String(value || "").trim(); return input.length > limit ? input.slice(0, limit) : input; }
-function cleanEmail(value) { const input = text(value, 240).toLowerCase(); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input) ? input : ""; }
+export function cleanEmail(value) { const input = text(value, 240).toLowerCase(); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input) ? input : ""; }
 
-async function verifiedUser(req) {
+export async function verifiedUser(req) {
   const header = String((req && req.headers && typeof req.headers.get === "function" && req.headers.get("authorization")) || "");
   const token = header.toLowerCase().startsWith("bearer ") ? header.slice(7).trim() : "";
   if (!token) return null;

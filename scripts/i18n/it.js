@@ -1018,6 +1018,14 @@
     "mapNotify.incompleteDetailNoList": "{mapped} buche su {expected} sono mappate. Completeremo il resto.",
     "mapNotify.incompleteOnList": "Sei in lista - ti scriveremo quando la mappa completa sarà pronta.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Prima di cercare",
+    "searchEmail.detail": "Lasciaci la tua email: la useremo solo per avvisarti se la mappa di un campo viene aggiornata.",
+    "searchEmail.placeholder": "Il tuo indirizzo email",
+    "searchEmail.continue": "Continua",
+    "searchEmail.notNow": "Non ora",
+    "searchEmail.couldNotSave": "Impossibile salvare la tua email",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Profilo giocatore",
     "profilePage.intro": "I profili determinano se sei destro o mancino, le distanze della sacca e la calibrazione dei dati dei colpi. I permessi dell'account si trovano in Impostazioni amministratore.",

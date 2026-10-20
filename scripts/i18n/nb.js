@@ -1018,6 +1018,14 @@
     "mapNotify.incompleteDetailNoList": "{mapped} av {expected} hull er kartlagt. Vi fullfører resten.",
     "mapNotify.incompleteOnList": "Du står på listen - vi sender deg en e-post når hele kartet er klart.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Før du søker",
+    "searchEmail.detail": "Legg igjen e-posten din – vi bruker den bare til å si fra hvis et banekart blir oppdatert.",
+    "searchEmail.placeholder": "E-postadressen din",
+    "searchEmail.continue": "Fortsett",
+    "searchEmail.notNow": "Ikke nå",
+    "searchEmail.couldNotSave": "Kunne ikke lagre e-posten din",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Spillerprofil",
     "profilePage.intro": "Profiler styrer høyre-/venstrehendthet, køllelengder og kalibrering av slagdata. Kontotillatelser ligger i Administratorinnstillinger.",

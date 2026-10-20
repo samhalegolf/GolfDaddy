@@ -1018,6 +1018,14 @@
     "mapNotify.incompleteDetailNoList": "{mapped} rada {expected}-st on kaardistatud. Teeme ülejäänud valmis.",
     "mapNotify.incompleteOnList": "Oled nimekirjas - saadame e-kirja, kui täielik kaart on valmis.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Enne otsimist",
+    "searchEmail.detail": "Jäta oma e-post – kasutame seda ainult selleks, et anda teada, kui väljaku kaart uueneb.",
+    "searchEmail.placeholder": "Sinu e-posti aadress",
+    "searchEmail.continue": "Jätka",
+    "searchEmail.notNow": "Mitte praegu",
+    "searchEmail.couldNotSave": "E-posti ei õnnestunud salvestada",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Mängija profiil",
     "profilePage.intro": "Profiil juhib käelisust, koti kaugusi ja löögiandmete kalibreerimist. Konto õigused asuvad administraatori seadetes.",

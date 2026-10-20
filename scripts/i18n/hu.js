@@ -1018,6 +1018,14 @@
     "mapNotify.incompleteDetailNoList": "{expected} lyukból {mapped} van feltérképezve. A többit befejezzük.",
     "mapNotify.incompleteOnList": "Rajta vagy a listán - e-mailt küldünk, amint a teljes térkép elkészül.",
 
+    /* gd-course-search-email.js */
+    "searchEmail.title": "Keresés előtt",
+    "searchEmail.detail": "Add meg az e-mail-címed – csak arra használjuk, hogy szóljunk, ha egy pálya térképe frissül.",
+    "searchEmail.placeholder": "Az e-mail-címed",
+    "searchEmail.continue": "Tovább",
+    "searchEmail.notNow": "Most nem",
+    "searchEmail.couldNotSave": "Nem sikerült menteni az e-mail-címed",
+
     /* Main app panels (index.html) */
     "profilePage.title": "Játékosprofil",
     "profilePage.intro": "A profil adja a kezességet, a táskatávolságokat és az ütésadatok kalibrálását. A fiókjogosultságok az admin beállításokban vannak.",
