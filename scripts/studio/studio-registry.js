@@ -213,6 +213,21 @@
         { name: "buildMapperDebugText", purpose: "Builds the text the Routine is fired with: prompt, facts, captures, output contract, diagnostics.", codePath: "functions/lib/gd-mapper-failure-kinds.mjs" }
       ],
       status: "implemented", needsVerification: false },
+    { id: "mapping-queue", label: "Mapping Queue", parent: "courses",
+      function: "One place to see what the mapper is doing: jobs running now (with Nudge on a stalled one), waiting jobs in the order the worker will take them - player jobs first, then background work (nearby sweep, trees, scorecards) - the last 24 hours of finished and failed runs with their errors, and the courses people asked to be emailed about when the map is ready. Read from GET /api/course-mapper-jobs?queue=1, admin only, refreshed every 10 seconds.",
+      owner: "scripts/studio/courses/mapping-queue/mapping-queue-page.js", runtime: { app: false, studio: true, server: true },
+      code: [
+        { role: "Studio page", path: "scripts/studio/courses/mapping-queue/mapping-queue-page.js" },
+        { role: "Queue reading (pure ordering + reads)", path: "functions/lib/gd-mapper-queue.mjs" },
+        { role: "GET ?queue=1 (admin only) and POST kind nudge", path: "functions/course-mapper-jobs.mjs" }
+      ],
+      inputs: ["course_mapper_jobs", "course_map_notify_requests", "course_maps names"], outputs: ["Nudge on a stalled run"],
+      owns: ["How the queue is shown"], doesNotOwn: ["Which job runs next (course-mapper-worker-background.mjs claimNextJob)", "Per-course job history (Mapping Diagnostics)"],
+      connections: [{ target: "mapping-diagnostics", direction: "see-also", label: "Per-course job history" }],
+      keyFunctions: [
+        { name: "buildMapperQueue", purpose: "Orders waiting jobs exactly as the worker claims them and groups the people waiting on a map.", codePath: "functions/lib/gd-mapper-queue.mjs" }
+      ],
+      status: "implemented", needsVerification: false },
     { id: "region-scan", label: "Regional Bulk Scan", parent: "courses",
       function: "Scans every course in an area at once. The centre is picked with the real course picker (pick-only mode), a distance sets how far out to look, and every course in that radius is listed (the page asks Overpass itself, from the browser - asked from a function it timed out) - those we already hold are counted but cannot be ticked, the rest start ticked. Scanning queues the ticked courses as background mapping jobs (the nearby-prefetch kind), so the worker maps them one at a time in idle moments, behind any player.",
       owner: "scripts/studio/courses/region-scan/region-scan-page.js", runtime: { app: false, studio: true, server: true },
@@ -894,7 +909,7 @@
 
   var NAV_TREE = [
     { id: "overview" },
-    { id: "courses", children: ["course-database", "course-mapping", "region-scan", "map-viewport", "map-overlay", "course-usage", "course-visuals", "publishing"] },
+    { id: "courses", children: ["course-database", "course-mapping", "mapping-queue", "region-scan", "map-viewport", "map-overlay", "course-usage", "course-visuals", "publishing"] },
     { id: "shot-system", children: ["photo-scan", "practice-data", "practice-email", "bubble-geometry", "pattern-finder", "my-bubble", "shot-system-course-data", "conditions", "recommendations"] },
     { id: "gps-play", children: ["gps-course-selection", "gps-round-setup", "gps-hole-lifecycle", "gps-map-camera", "gps-garmin-preview", "gps-apple-preview", "gps-record-hub", "gps-shot-planning", "gps-shot-capture", "gps-scorecard", "gps-course-data-capture", "gps-sync-recovery", "gps-demo-mode"] },
     { id: "players-coaches" },

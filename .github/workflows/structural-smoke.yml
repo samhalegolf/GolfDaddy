@@ -38,6 +38,7 @@ jobs:
         run: |
           node dev/surface-split.test.js
           node dev/studio-wiring.test.js
+          node dev/mapper-queue.test.mjs
           node dev/studio-map-viewport.test.js
           node dev/marketing-snapshot-core.test.js
           node dev/marketing-hole-intel.test.js
