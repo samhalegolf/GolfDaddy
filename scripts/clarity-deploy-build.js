@@ -76,6 +76,9 @@ const publicPaths = [
   // The public watch preview linked from the landing page: the Studio's watch faces on a
   // real course behind a sign-up request. Web-only, like welcome.html - see NON_APP_FILES.
   "watch-preview.html",
+  // Crawler directions: the public course pages (functions/course-page.mjs) and the landing
+  // are indexable, the app is not. The sitemap it points at is a function (functions/sitemap.mjs).
+  "robots.txt",
   // Deep-link verification files. Android reads assetlinks.json and iOS reads
   // apple-app-site-association from this path over https; if they are not
   // deployed, links open the browser instead of the app and the failure is

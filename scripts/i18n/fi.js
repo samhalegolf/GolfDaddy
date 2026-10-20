@@ -1865,6 +1865,7 @@
     "welcome.watchFree": "Pelaaminen kellolla on ilmaista. Apple Watch -sovellus tulee iPhone-sovelluksen mukana (watchOS 10 tai uudempi). Garmin tarvitsee Clarity Caddy -sovelluksen Connect IQ -kaupasta ja toimii iPhonen tai Androidin kanssa.",
     "welcome.wristNav": "Apple Watch ja Garmin",
     "welcome.watchPreviewLink": "Esikatsele kellossasi",
+    "welcome.courseLinksTitle": "Katso se oikealla kentällä",
 
     /* Practice Bubble preview banner (scripts/gd-practice-bubble-preview.js) */
     "practicePreview.title": "Bubble-esikatselu",

@@ -1941,6 +1941,7 @@
     "welcome.watchFree": "Hra s hodinkami je zadarmo. Aplikácia pre Apple Watch je súčasťou aplikácie pre iPhone (watchOS 10 alebo novší). Garmin potrebuje aplikáciu Clarity Caddy z obchodu Connect IQ a funguje s iPhonom aj Androidom.",
     "welcome.wristNav": "Apple Watch a Garmin",
     "welcome.watchPreviewLink": "Náhľad na vašich hodinkách",
+    "welcome.courseLinksTitle": "Pozrite si to na skutočnom ihrisku",
 
     /* Practice Bubble preview banner (scripts/gd-practice-bubble-preview.js) */
     "practicePreview.title": "Náhľad Bubble",

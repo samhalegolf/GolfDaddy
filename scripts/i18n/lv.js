@@ -1941,6 +1941,7 @@
     "welcome.watchFree": "Spēle ar pulksteni ir bez maksas. Apple Watch lietotne nāk kopā ar iPhone lietotni (watchOS 10 vai jaunāka). Garmin pulkstenim nepieciešama Clarity Caddy lietotne no Connect IQ veikala, un tas darbojas ar iPhone vai Android.",
     "welcome.wristNav": "Apple Watch un Garmin",
     "welcome.watchPreviewLink": "Priekšskatījums jūsu pulkstenī",
+    "welcome.courseLinksTitle": "Skatiet to īstā laukumā",
 
     /* Practice Bubble preview banner (scripts/gd-practice-bubble-preview.js) */
     "practicePreview.title": "Bubble priekšskatījums",

@@ -1865,6 +1865,7 @@
     "welcome.watchFree": "Kellaga mängimine on tasuta. Apple Watchi rakendus tuleb koos iPhone'i rakendusega (watchOS 10 või uuem). Garmin vajab Clarity Caddy rakendust Connect IQ poest ja töötab nii iPhone'i kui Androidiga.",
     "welcome.wristNav": "Apple Watch ja Garmin",
     "welcome.watchPreviewLink": "Vaata seda oma kellal",
+    "welcome.courseLinksTitle": "Vaata seda päris väljakul",
 
     /* Practice Bubble preview banner (scripts/gd-practice-bubble-preview.js) */
     "practicePreview.title": "Bubble'i eelvaade",

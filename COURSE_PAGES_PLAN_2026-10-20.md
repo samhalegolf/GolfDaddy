@@ -128,10 +128,25 @@ them; nothing else has to change.
    applied). The page lists the folder and uses what is there; no frames, no pictures. Still
    to do by hand: run the uploader for the first batch (needs SUPABASE_URL and the service key
    in the shell) - see marketing/README.md.
-3. **Device tabs** — mount the Garmin/Apple renderers from the watch preview on the page,
-   course-locked, position buttons kept.
-4. **Picker section** — reuse the search; mapped → page link, unmapped → request form.
-5. **Sitemap, robots, JSON-LD, welcome links; submit to Search Console.**
+3. **Device tabs** — DONE 2026-10-20. The page carries the watch preview's own section (same
+   ids, same scripts) and `scripts/clarity-watch-preview.js` runs course-locked when `#preview`
+   has `data-course-id`: no gate, no search, a package still being made is polled every 20 s for
+   up to 12 minutes with a "Making the … map" line. The Apple bake is asked for by the page
+   function on render when the course has no package and nothing is running
+   (`lib/gd-apple-bake-wake.mjs`, authenticated with `CLARITY_SERVICE_SECRET`; the worker honours
+   that only for `page_public` courses). Garmin needs nothing: its GET wakes its own builder.
+4. **Picker section** — DONE 2026-10-20. `scripts/clarity-course-page.js`: the app's search;
+   a result with a public page → "See this course"; an unmapped one → "Map this course"; every
+   result → "Request an upgrade". Both requests are the watch preview's own sign-up
+   (`/api/watch-preview-request`, now carrying `request` = map | upgrade and the course), so
+   they land in the same support inbox with the course in the subject. `course_maps_list` and
+   the search results carry `page_public` / `hasPage` (migration applied).
+5. **Sitemap, robots, JSON-LD, welcome links** — DONE 2026-10-20. `functions/sitemap.mjs` at
+   `/sitemap.xml` (the static public pages plus every `page_public` course, cached an hour);
+   `robots.txt` (app/studio/demo disallowed, `/courses/` allowed, points at the sitemap);
+   JSON-LD was in from step 1; `welcome.html` links four featured course pages under a
+   translated "See it on a real course" line. Still by hand: after the deploy, add
+   `https://caddy.claritygolf.app/sitemap.xml` in Google Search Console.
 6. **Studio toggle** for `page_public` so publishing a page is one click.
 7. Tests in `dev/` in the existing style: the function renders for a public course and 404s for a
    private one; the gate passes `/courses/*`; the sitemap lists only public courses; the

@@ -1,0 +1,15 @@
+# Clarity Caddy. The app itself (/, /app, /studio, /demo) is not for crawlers;
+# the landing, the legal pages and the public course pages are.
+User-agent: *
+Disallow: /app/
+Disallow: /studio/
+Disallow: /demo/
+Disallow: /index.html
+Disallow: /watch-preview.html
+Allow: /courses/
+Allow: /welcome
+Allow: /privacy
+Allow: /terms
+Allow: /support
+
+Sitemap: https://caddy.claritygolf.app/sitemap.xml

@@ -54,6 +54,9 @@ import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import { overlayOwnerId } from "./lib/gd-overlay-owner.mjs";
 import { liveTrees, TREES_TABLE } from "./lib/gd-course-trees-core.mjs";
 import { wakeGarminBuild } from "./lib/gd-garmin-build-wake.mjs";
+/* The in-progress rule is shared with the course page's Apple bake wake (same window as
+   PRUNE_GRACE_MS: no bake that could still be running is ever treated as finished). */
+import { bakeInProgress } from "./lib/gd-apple-bake-wake.mjs";
 const MAPS_TABLE = "course_maps";
 const OVERLAYS_TABLE = "course_map_overlays";
 const WATCH_TABLE = "course_watch_maps";
@@ -1146,10 +1149,6 @@ async function loadCourseObjectsRevision(courseId) {
   } catch (error) { return null; }
 }
 
-function bakeInProgress(progress, now) {
-  const updatedAt = Date.parse(progress && progress.updatedAt);
-  return Number.isFinite(updatedAt) && now - updatedAt < PRUNE_GRACE_MS;
-}
 
 /* Packages baked before palettes existed have none; null tells Studio "base palette". */
 async function loadPaletteRecord(courseId, version) {

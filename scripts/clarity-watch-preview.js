@@ -18,7 +18,11 @@
  *
  * The gate: one request (name, email, which watch) to POST /api/watch-preview-request. Once
  * it is accepted the page remembers that in localStorage and shows the preview from then on.
- * It guards a demo, not an account - nothing else reads the flag. */
+ * It guards a demo, not an account - nothing else reads the flag.
+ *
+ * The same script also runs the watch section of a public course page (functions/course-page.mjs),
+ * where #preview carries data-course-id and data-course-name: no gate, no search, the course is
+ * fixed, and a watch whose package is still being made is polled until it lands. */
 (function (root) {
   "use strict";
 
@@ -81,20 +85,29 @@
   function readAccess() { try { var raw = localStorage.getItem(ACCESS_KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; } }
   function writeAccess(record) { try { localStorage.setItem(ACCESS_KEY, JSON.stringify(record)); } catch (e) {} }
 
-  var state = { watch: "garmin", course: null, preset: "tee", mount: null, session: null, options: null, searching: null };
+  /* A package still being made is asked for again this often, for this long. */
+  var BUILD_POLL_MS = 20000;
+  var BUILD_POLL_LIMIT_MS = 12 * 60 * 1000;
+
+  var state = { watch: "garmin", course: null, fixed: false, preset: "tee", mount: null, session: null, options: null, searching: null, poll: null, pollingSince: 0 };
   var el = {};
 
   function boot() {
     ["gate", "gateForm", "gateName", "gateEmail", "gateNote", "gateStatus", "preview", "watchTabs", "units",
       "searchForm", "searchInput", "searchStatus", "results", "courseLine", "holePrev", "hole", "holeNext", "presets",
       "bezel", "canvas", "buttons", "readout"].forEach(function (id) { el[id] = $(id); });
-    if (!el.gate || !el.preview) return;
+    if (!el.preview) return;
+    var fixedId = el.preview.getAttribute("data-course-id");
+    if (fixedId) {
+      state.fixed = true;
+      state.course = { key: fixedId, name: el.preview.getAttribute("data-course-name") || fixedId };
+    } else if (!el.gate) return;
     var P = root.GDWatchPreviewPage;
     if (!P || !P.watchOptions("garmin") || !P.watchOptions("apple")) {
       el.readout.textContent = "The watch faces did not load on this page.";
     }
-    el.gateForm.addEventListener("submit", submitGate);
-    el.searchForm.addEventListener("submit", function (e) { e.preventDefault(); search(el.searchInput.value); });
+    if (el.gateForm) el.gateForm.addEventListener("submit", submitGate);
+    if (el.searchForm) el.searchForm.addEventListener("submit", function (e) { e.preventDefault(); search(el.searchInput.value); });
     el.watchTabs.addEventListener("click", function (e) {
       var btn = e.target.closest("[data-watch]");
       if (btn) useWatch(btn.getAttribute("data-watch"));
@@ -107,7 +120,8 @@
       var btn = e.target.closest("[data-preset]");
       if (btn) { state.preset = btn.getAttribute("data-preset"); placePlayer(); }
     });
-    if (readAccess()) openPreview(); else el.gate.hidden = false;
+    if (state.fixed) { el.preview.hidden = false; useWatch(state.watch); }
+    else if (readAccess()) openPreview(); else el.gate.hidden = false;
   }
 
   // ---- the gate
@@ -136,7 +150,7 @@
     var access = readAccess();
     if (access && (access.watch === "apple" || access.watch === "garmin")) state.watch = access.watch;
     useWatch(state.watch);
-    el.searchInput.focus();
+    if (el.searchInput) el.searchInput.focus();
   }
 
   // ---- the watch
@@ -146,6 +160,7 @@
     var options = P && P.watchOptions(key);
     if (!options) return;
     if (state.mount) { state.mount.destroy(); state.mount = null; }
+    stopPolling();
     state.watch = key;
     state.options = options;
     el.watchTabs.querySelectorAll("[data-watch]").forEach(function (b) { b.classList.toggle("isActive", b.getAttribute("data-watch") === key); });
@@ -201,11 +216,20 @@
     P.loadWatchPackage(course.key, state.options.packages).then(function (loaded) {
       if (mount !== state.mount) return;
       mount.useCourse(course.key, course.name, loaded);
+      var watchName = state.watch === "apple" ? "Apple Watch" : "Garmin";
       if (!loaded.holes.length) {
-        el.courseLine.textContent = course.name + " has no " + (state.watch === "apple" ? "Apple Watch" : "Garmin") + " map yet.";
+        /* On a course page the map is being made right now (the page asked for it when it
+           was opened, and the Garmin GET wakes its own builder), so keep asking. */
+        if (state.fixed && (loaded.status === "building" || loaded.status === "generating" || loaded.status === "queued" || loaded.status === "none") && keepPolling()) {
+          el.courseLine.textContent = "Making the " + watchName + " map for " + course.name + " - usually a few minutes.";
+          state.poll = setTimeout(function () { if (state.course === course && state.mount === mount) loadCourse(course); }, BUILD_POLL_MS);
+        } else {
+          el.courseLine.textContent = course.name + " has no " + watchName + " map yet.";
+        }
         readout();
         return;
       }
+      stopPolling();
       el.courseLine.textContent = course.name + " · " + loaded.holes.length + " holes";
       el.hole.innerHTML = loaded.holes.map(function (h) { return '<option value="' + h.holeNumber + '">Hole ' + h.holeNumber + "</option>"; }).join("");
       el.hole.value = String(session.holeNumber);
@@ -213,6 +237,16 @@
     }).catch(function (error) {
       if (mount === state.mount) el.courseLine.textContent = "Could not load " + course.name + " - " + (error && error.message || error);
     });
+  }
+
+  function keepPolling() {
+    if (!state.pollingSince) state.pollingSince = Date.now();
+    return Date.now() - state.pollingSince < BUILD_POLL_LIMIT_MS;
+  }
+  function stopPolling() {
+    if (state.poll) clearTimeout(state.poll);
+    state.poll = null;
+    state.pollingSince = 0;
   }
 
   function setHole(n) {

@@ -15,6 +15,7 @@
    reachable by anyone, and "admin only" has to be true at the place the work happens. */
 
 import { generateWatchPackage, verifiedUser, slug, supabaseFetch, hasSupabase, clearProgress, MAPS_TABLE } from "./course-watch-maps.mjs";
+import { SERVICE_SECRET_HEADER, secretMatches } from "./lib/gd-apple-bake-wake.mjs";
 
 export default async function courseWatchMapsBackground(req) {
   if (!hasSupabase()) return new Response("supabase not configured", { status: 503 });
@@ -23,8 +24,12 @@ export default async function courseWatchMapsBackground(req) {
   const courseId = slug(payload && (payload.courseId || payload.course_id));
   if (!courseId) return new Response("courseId required", { status: 400 });
 
+  /* Two callers: an admin (Studio, via course-watch-maps.mjs) for any course, or a public
+     course page (lib/gd-apple-bake-wake.mjs) carrying the service secret, for a course whose
+     page is public and nothing else. */
   const user = await verifiedUser(req);
-  if (!user || !user.isAdmin) {
+  const fromPage = !user && secretMatches(String(req.headers.get(SERVICE_SECRET_HEADER) || ""), process.env.CLARITY_SERVICE_SECRET || "");
+  if (!fromPage && !(user && user.isAdmin)) {
     /* The handler already wrote "queued" on the caller's behalf; leaving it would show a bar
        that never ends for a request that was never allowed to start. */
     await clearProgress(courseId);
@@ -32,13 +37,14 @@ export default async function courseWatchMapsBackground(req) {
   }
 
   try {
-    const maps = await supabaseFetch(MAPS_TABLE + "?select=course_id,objects_json,holes_json,objects_revision,published_at,updated_at&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1");
+    const maps = await supabaseFetch(MAPS_TABLE + "?select=course_id,objects_json,holes_json,objects_revision,published_at,updated_at,page_public&course_id=eq." + encodeURIComponent(courseId) + "&published=eq.true&limit=1");
     const map = Array.isArray(maps) ? maps[0] : null;
     if (!map || !map.objects_json || !Object.keys(map.objects_json).length) {
       await clearProgress(courseId);
       return new Response("course has no published geometry", { status: 404 });
     }
-    const row = await generateWatchPackage({ courseId, map, actorEmail: user.email });
+    if (fromPage && map.page_public !== true) return new Response("not a public course page", { status: 403 });
+    const row = await generateWatchPackage({ courseId, map, actorEmail: user ? user.email : "course-page" });
     console.log("[watch-maps-background] " + courseId + " " + (row && row.status) + " " + (row && row.holes ? row.holes.length : 0) + " holes");
   } catch (error) {
     /* generateWatchPackage clears its own progress on the failures it knows about; this is

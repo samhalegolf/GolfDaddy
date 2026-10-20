@@ -1865,6 +1865,7 @@
     "welcome.watchFree": "Das Spielen mit der Uhr ist kostenlos. Die Apple Watch App kommt mit der iPhone-App (watchOS 10 oder neuer). Eine Garmin braucht die Clarity Caddy App aus dem Connect IQ Store und funktioniert mit iPhone oder Android.",
     "welcome.wristNav": "Apple Watch & Garmin",
     "welcome.watchPreviewLink": "Vorschau auf deiner Uhr",
+    "welcome.courseLinksTitle": "Sieh es auf einem echten Platz",
 
     /* Practice Bubble preview banner (scripts/gd-practice-bubble-preview.js) */
     "practicePreview.title": "Bubble-Vorschau",

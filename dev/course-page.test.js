@@ -39,6 +39,7 @@ function stub(rows) {
     if (query.startsWith("course_maps?")) return query.includes("page_public=eq.true") ? rows.maps : [];
     if (query.startsWith("course_visuals?")) return rows.visuals;
     if (query.startsWith("course_scorecards?")) return rows.cards;
+    if (query.startsWith("course_watch_maps?")) return rows.watch || [];
     throw new Error("unexpected query " + query);
   };
 }
@@ -112,6 +113,114 @@ test("the runner's asset module: config, card markup and upload paths", async ()
   assert.strictEqual(calls[0].init.headers["x-upsert"], "true");
   const bucketSql = read("supabase", "migrations", "20261020_create_course_pages_bucket.sql");
   assert.ok(/'course-pages', 'course-pages', true/.test(bucketSql), "the bucket must be public");
+});
+
+test("the watch section is course-locked and loads exactly the watch preview's scripts", async () => {
+  const { loadCoursePage, renderCoursePage, WATCH_SCRIPTS } = await import("../functions/course-page.mjs");
+  const data = await loadCoursePage("maungakiekie-golf-club", deps({ maps: [MAP], visuals: [{ published_version: 1 }], cards: [CARD] }));
+  const html = renderCoursePage(data, "https://example.test");
+  assert.ok(html.includes('id="preview" class="card isWide" data-course-id="maungakiekie-golf-club" data-course-name="Maungakiekie Golf Club"'), "no course-locked preview");
+  ["watchTabs", "units", "courseLine", "holePrev", "hole", "holeNext", "presets", "bezel", "canvas", "buttons", "readout"].forEach((id) => assert.ok(html.includes('id="' + id + '"'), "missing #" + id));
+  assert.ok(!/id="gate"|id="searchForm"/.test(html), "no gate and no search on a course page");
+  const preview = read("watch-preview.html");
+  const theirs = [...preview.matchAll(/<script src="([^"]+)"/g)].map((m) => "/" + m[1]);
+  assert.deepStrictEqual(WATCH_SCRIPTS, theirs, "the course page and watch-preview.html must load the same scripts with the same labels");
+  WATCH_SCRIPTS.forEach((src) => {
+    assert.ok(html.includes('<script src="' + src + '"></script>'), "page does not load " + src);
+    const file = src.slice(1).split("?")[0];
+    assert.ok(fs.existsSync(path.join(ROOT, file)), file + " does not exist");
+  });
+  const script = read("scripts", "clarity-watch-preview.js");
+  assert.ok(/getAttribute\("data-course-id"\)/.test(script), "the preview script does not read the course lock");
+  assert.ok(/Making the " \+ watchName \+ " map/.test(script), "no building state while a package is made");
+});
+
+test("the Apple bake is asked for only when there is no package and nothing is running", async () => {
+  const w = await import("../functions/lib/gd-apple-bake-wake.mjs");
+  const now = Date.parse("2026-10-20T05:00:00Z");
+  assert.strictEqual(w.appleBakeNeeded(null, now), true);
+  assert.strictEqual(w.appleBakeNeeded({ ready_hole_count: 18 }, now), false);
+  assert.strictEqual(w.appleBakeNeeded({ ready_hole_count: 0, progress: { updatedAt: "2026-10-20T04:55:00Z" } }, now), false, "a bake that moved five minutes ago is running");
+  assert.strictEqual(w.appleBakeNeeded({ ready_hole_count: 0, progress: { updatedAt: "2026-10-20T04:00:00Z" } }, now), true, "a bake an hour old died");
+  assert.strictEqual(w.secretMatches("abc", "abc"), true);
+  assert.strictEqual(w.secretMatches("abd", "abc"), false);
+  assert.strictEqual(w.secretMatches("", ""), false);
+  const calls = [];
+  const ok = await w.wakeAppleBake("https://example.test", "tara-iti", "s3cret", async (url, init) => { calls.push({ url, init }); return { status: 202, ok: true }; });
+  assert.strictEqual(ok, true);
+  assert.strictEqual(calls[0].url, "https://example.test/.netlify/functions/course-watch-maps-background");
+  assert.strictEqual(calls[0].init.headers["x-clarity-service-secret"], "s3cret");
+  assert.strictEqual(await w.wakeAppleBake("https://example.test", "tara-iti", "", async () => { throw new Error("must not be called"); }), false, "no secret, no wake");
+  assert.strictEqual(await w.wakeAppleBake("https://example.test", "tara-iti", "s", async () => { throw new Error("down"); }), false, "a failed wake never throws");
+  const worker = read("functions", "course-watch-maps-background.mjs");
+  assert.ok(/secretMatches\(String\(req\.headers\.get\(SERVICE_SECRET_HEADER\)/.test(worker), "the worker does not accept the page's secret");
+  assert.ok(/if \(fromPage && map\.page_public !== true\) return new Response\("not a public course page", \{ status: 403 \}\)/.test(worker), "the secret must only bake public-page courses");
+});
+
+test("the picker: search-shaped, every result can ask for an upgrade, nothing lists courses", async () => {
+  const { loadCoursePage, renderCoursePage, PAGE_SCRIPTS } = await import("../functions/course-page.mjs");
+  const data = await loadCoursePage("maungakiekie-golf-club", deps({ maps: [MAP], visuals: [{ published_version: 1 }], cards: [CARD] }));
+  const html = renderCoursePage(data, "https://example.test");
+  ["findForm", "findInput", "findResults", "requestForm", "requestName", "requestEmail", "requestNote", "requestCancel"].forEach((id) => assert.ok(html.includes('id="' + id + '"'), "missing #" + id));
+  PAGE_SCRIPTS.forEach((src) => {
+    assert.ok(html.includes('<script src="' + src + '"></script>'), "page does not load " + src);
+    assert.ok(fs.existsSync(path.join(ROOT, src.slice(1).split("?")[0])), src + " does not exist");
+  });
+  assert.ok(!/href="\/courses\/?"/.test(html), "no link to a course index");
+  const picker = read("scripts", "clarity-course-page.js");
+  assert.ok(/if \(mapped && r\.hasPage\) actions\.push\('<a class="cpAction isPrimary" href="\/courses\/'/.test(picker), "a result with a page links to it");
+  assert.ok(/if \(!mapped\) actions\.push\(requestButton\("map"/.test(picker), "an unmapped course offers Map this course");
+  assert.ok(/actions\.push\(requestButton\("upgrade", id, r\.name, false\)\);/.test(picker), "every result offers Request an upgrade");
+  assert.ok(/fetch\("\/api\/watch-preview-request"/.test(picker) && /request: request\.kind, courseId: request\.courseId, courseName: request\.courseName/.test(picker), "the request is the watch preview's own, with the course on it");
+});
+
+test("the request endpoint takes map and upgrade requests about a course, same ticket, clear subject", async () => {
+  const fn = await import("../functions/watch-preview-request.mjs");
+  const up = fn.buildTicket({ name: "Sam", email: "sam@example.com", request: "upgrade", courseId: "tara-iti", courseName: "Tara Iti", note: "bunkers are off on 7" }, {});
+  assert.strictEqual(up.ticket.happened, "Course request from Sam: upgrade this course's map - Tara Iti");
+  assert.strictEqual(up.ticket.context.request, "upgrade");
+  assert.strictEqual(up.ticket.context.courseId, "tara-iti");
+  assert.strictEqual(up.ticket.source, "clarity-caddy-watch-preview-request", "same ticket source as the watch preview");
+  const mail = fn.renderEmail(up.ticket, "row-9");
+  assert.ok(mail.subject.startsWith("Clarity Caddy course request (upgrade) · Tara Iti · Sam"), mail.subject);
+  assert.ok(mail.text.includes("Course: Tara Iti (tara-iti)") && mail.html.includes("bunkers are off on 7"));
+  const map = fn.buildTicket({ name: "Sam", email: "sam@example.com", request: "map", courseName: "Nowhere Links" }, {});
+  assert.ok(map.ticket.happened.includes("map this course - Nowhere Links"));
+  assert.strictEqual(fn.buildTicket({ name: "Sam", email: "sam@example.com", request: "map" }, {}).code, "course_required");
+  assert.strictEqual(fn.buildTicket({ name: "Sam", email: "sam@example.com", request: "demolish", courseName: "X" }, {}).ticket.context.request, "", "an unknown request kind is a plain sign-up");
+  const plain = fn.buildTicket({ name: "Sam", email: "sam@example.com", watch: "apple" }, {});
+  assert.ok(plain.ticket.happened.startsWith("Watch preview sign-up request from Sam"), "the watch preview's own request is unchanged");
+  assert.ok(fn.renderEmail(plain.ticket, null).subject.startsWith("Clarity Caddy watch preview request · Sam"));
+});
+
+test("course search says which results have a public page", async () => {
+  const core = await import("../functions/lib/gd-course-search-core.mjs");
+  const rows = core.listingsFromClarity([
+    { id: 1, course_id: "tara-iti", course_name: "Tara Iti", course_lat: -36.2, course_lng: 174.6, hole_count: 18, page_public: true },
+    { id: 2, course_id: "parkes", course_name: "Parkes Golf Club", course_lat: -33, course_lng: 148, hole_count: 18, page_public: false }
+  ]);
+  assert.strictEqual(core.publicResult(rows[0]).hasPage, true);
+  assert.strictEqual(core.publicResult(rows[1]).hasPage, false);
+  assert.ok(/hole_count,page_public"/.test(read("functions", "course-search.mjs")), "the search does not select page_public");
+  assert.ok(/m\.page_public\s+FROM public\.course_maps m/.test(read("supabase", "migrations", "20261020_course_maps_list_page_public.sql")));
+});
+
+test("being found: sitemap of public courses, robots, and a way in from the landing", async () => {
+  const sm = await import("../functions/sitemap.mjs");
+  assert.strictEqual(sm.config.path, "/sitemap.xml");
+  const courses = await sm.publicCourses(async (q) => { assert.ok(/page_public=eq\.true/.test(q) && /published=eq\.true/.test(q), q); return [{ course_id: "tara-iti", updated_at: "2026-10-14T06:28:55.241Z" }, { course_id: "" }]; });
+  assert.deepStrictEqual(courses.map((c) => c.course_id), ["tara-iti"]);
+  const xml = sm.renderSitemap("https://caddy.test", courses);
+  assert.ok(xml.includes("<loc>https://caddy.test/courses/tara-iti</loc><lastmod>2026-10-14</lastmod>"), xml);
+  assert.ok(xml.includes("<loc>https://caddy.test/welcome</loc>") && !/\/app|\/studio/.test(xml));
+  const robots = read("robots.txt");
+  assert.ok(/Allow: \/courses\//.test(robots) && /Disallow: \/studio\//.test(robots) && /Sitemap: https:\/\/caddy\.claritygolf\.app\/sitemap\.xml/.test(robots));
+  assert.ok(/"robots\.txt"/.test(read("scripts", "clarity-deploy-build.js")), "robots.txt is not deployed");
+  const welcome = read("welcome.html");
+  const links = [...welcome.matchAll(/href="\/courses\/([a-z0-9-]+)"/g)].map((m) => m[1]);
+  assert.ok(links.length >= 3 && links.length <= 5, "a handful of featured course links, not a directory: " + links.length);
+  assert.ok(/data-i18n="welcome\.courseLinksTitle"/.test(welcome));
+  fs.readdirSync(path.join(ROOT, "scripts/i18n")).filter((f) => f.endsWith(".js")).forEach((f) => assert.ok(read("scripts/i18n", f).includes('"welcome.courseLinksTitle"'), f + " lacks the heading"));
 });
 
 test("no card: the page still renders, without a hole table", async () => {

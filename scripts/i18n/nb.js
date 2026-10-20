@@ -1865,6 +1865,7 @@
     "welcome.watchFree": "Spill med klokke er gratis. Apple Watch-appen følger med iPhone-appen (watchOS 10 eller nyere). En Garmin trenger Clarity Caddy-appen fra Connect IQ-butikken og fungerer med iPhone eller Android.",
     "welcome.wristNav": "Apple Watch og Garmin",
     "welcome.watchPreviewLink": "Se det på klokka di",
+    "welcome.courseLinksTitle": "Se den på en ekte bane",
 
     /* Practice Bubble preview banner (scripts/gd-practice-bubble-preview.js) */
     "practicePreview.title": "Bubble-forhåndsvisning",

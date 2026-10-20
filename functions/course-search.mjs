@@ -40,7 +40,7 @@ const { pickProvider, stripTags } = require("./lib/gd-web-search.js");
 const { safeRemoteUrl, resolvesToPublicAddress } = require("./lib/safe-remote-url.js");
 
 const LIST_VIEW = "course_maps_list";
-const CLARITY_COLUMNS = "id,course_id,course_name,course_lat,course_lng,finder_lat,finder_lng,region,country,country_code,facility_key,facility_name,course_aliases,hole_count";
+const CLARITY_COLUMNS = "id,course_id,course_name,course_lat,course_lng,finder_lat,finder_lng,region,country,country_code,facility_key,facility_name,course_aliases,hole_count,page_public";
 const NOMINATIM_URL = "https://nominatim.openstreetmap.org/search";
 const MAPBOX_FORWARD_URL = "https://api.mapbox.com/search/searchbox/v1/forward";
 const USER_AGENT = "ClarityCaddyCourseSearch/1 (golf course discovery; contact samhalegolf@gmail.com)";

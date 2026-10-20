@@ -95,6 +95,8 @@ export function listingsFromClarity(rows) {
         courseId: String((row && row.course_id) || ""),
         holeCount,
         hasMap: holeCount > 0,
+        /* A public course page exists for it (/courses/<courseId>, functions/course-page.mjs). */
+        hasPage: !!(row && row.page_public === true),
         aliases: Array.isArray(row && row.course_aliases) ? row.course_aliases : [],
         facilityKey: String((row && row.facility_key) || ""),
         facilityName: String((row && row.facility_name) || "")
@@ -626,6 +628,7 @@ export function publicResult(c) {
     confidence: c.confidence,
     courseId: c.clarity ? c.clarity.courseId : null,
     hasMap: !!(c.clarity && c.clarity.hasMap),
+    hasPage: !!(c.clarity && c.clarity.hasPage),
     holeCount: c.clarity ? c.clarity.holeCount || null : null,
     facilityKey: c.clarity ? c.clarity.facilityKey || "" : "",
     facilityName: c.clarity ? c.clarity.facilityName || "" : "",

@@ -9,10 +9,16 @@
  *
  * Nothing is unlocked server-side: the page remembers that a request was sent and shows the
  * preview from then on. The gate is a request to be contacted, not a credential - what it
- * guards is a demo. */
+ * guards is a demo.
+ *
+ * The public course pages (functions/course-page.mjs) send the same request from their
+ * "Looking for your course?" picker, with `request` saying what for - "map" (a course that is
+ * not mapped yet) or "upgrade" (a better map of one that is) - and the course it is about.
+ * Same ticket, same inbox; the subject says which. */
 
 const SOURCE = "clarity-caddy-watch-preview-request";
 const WATCHES = { garmin: "Garmin", apple: "Apple Watch" };
+const REQUESTS = { map: "map this course", upgrade: "upgrade this course's map" };
 
 function env(name) { return process.env[name] || ""; }
 function text(value, limit) { const input = String(value || "").trim(); return input.length > limit ? input.slice(0, limit) : input; }
@@ -39,17 +45,28 @@ export function buildTicket(payload, meta) {
   const watchKey = text(payload && payload.watch, 20).toLowerCase();
   const watch = WATCHES[watchKey] || "";
   const note = text(payload && payload.note, 1200);
+  const requestKey = text(payload && payload.request, 20).toLowerCase();
+  const request = REQUESTS[requestKey] ? requestKey : "";
+  const courseName = text(payload && payload.courseName, 160);
+  const courseId = text(payload && payload.courseId, 160);
   if (!name) return { error: "Enter your name", code: "name_required" };
   if (!email) return { error: "Enter a valid email address", code: "invalid_email" };
+  if (request && !courseName) return { error: "Say which course", code: "course_required" };
+  const happened = request
+    ? "Course request from " + name + ": " + REQUESTS[request] + " - " + courseName
+    : "Watch preview sign-up request from " + name + (watch ? " (" + watch + ")" : "");
   return {
     ticket: {
-      happened: "Watch preview sign-up request from " + name + (watch ? " (" + watch + ")" : ""),
+      happened,
       expected: note,
       contact: email,
       context: {
         name,
         email,
         watch: watchKey && WATCHES[watchKey] ? watchKey : "",
+        request,
+        courseName,
+        courseId,
         userAgent: text(meta && meta.userAgent, 400),
         referer: text(meta && meta.referer, 400),
         locale: text(payload && payload.locale, 20)
@@ -83,10 +100,13 @@ async function storeTicket(ticket, fetchFn) {
 export function renderEmail(ticket, ticketId) {
   const c = ticket.context || {};
   const watch = WATCHES[c.watch] || "not said";
-  const subject = "Clarity Caddy watch preview request · " + c.name + (ticketId ? " · " + ticketId : "");
-  const rows = [["Name", c.name], ["Email", ticket.contact], ["Watch", watch], ["Note", ticket.expected || "none"], ["Sent", ticket.created_at], ["From page", c.referer || ""], ["Ticket", ticketId || "email-only"]];
-  const textBody = ["Clarity Caddy watch preview request", ""].concat(rows.map((r) => r[0] + ": " + r[1])).join("\n");
-  const html = "<h2>Clarity Caddy watch preview request</h2><table>" + rows.map((r) => "<tr><th align=\"left\">" + escapeHTML(r[0]) + "</th><td>" + escapeHTML(r[1]) + "</td></tr>").join("") + "</table>";
+  const kind = c.request ? "Clarity Caddy course request (" + c.request + ")" : "Clarity Caddy watch preview request";
+  const subject = kind + " · " + (c.request ? c.courseName + " · " : "") + c.name + (ticketId ? " · " + ticketId : "");
+  const rows = [["Name", c.name], ["Email", ticket.contact]]
+    .concat(c.request ? [["Request", REQUESTS[c.request]], ["Course", c.courseName + (c.courseId ? " (" + c.courseId + ")" : "")]] : [["Watch", watch]])
+    .concat([["Note", ticket.expected || "none"], ["Sent", ticket.created_at], ["From page", c.referer || ""], ["Ticket", ticketId || "email-only"]]);
+  const textBody = [kind, ""].concat(rows.map((r) => r[0] + ": " + r[1])).join("\n");
+  const html = "<h2>" + escapeHTML(kind) + "</h2><table>" + rows.map((r) => "<tr><th align=\"left\">" + escapeHTML(r[0]) + "</th><td>" + escapeHTML(r[1]) + "</td></tr>").join("") + "</table>";
   return { subject, text: textBody, html };
 }
 

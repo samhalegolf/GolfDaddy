@@ -2017,6 +2017,7 @@
     "welcome.watchFree": "Igranje z uro je brezplačno. Aplikacija za Apple Watch pride z aplikacijo za iPhone (watchOS 10 ali novejši). Garmin potrebuje aplikacijo Clarity Caddy iz trgovine Connect IQ in deluje z iPhonom ali Androidom.",
     "welcome.wristNav": "Apple Watch in Garmin",
     "welcome.watchPreviewLink": "Predogled na vaši uri",
+    "welcome.courseLinksTitle": "Oglejte si na pravem igrišču",
 
     /* Practice Bubble preview banner (scripts/gd-practice-bubble-preview.js) */
     "practicePreview.title": "Predogled Bubble",

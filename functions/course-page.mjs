@@ -28,10 +28,32 @@ import { createSupabaseStorage } from "./lib/gd-supabase-storage.mjs";
 import { fetchFacilityRows } from "./lib/gd-facility-scorecards.mjs";
 import { scorecardCourseKey, cardNameMatchesCourse } from "./lib/gd-scorecard-resolve.mjs";
 import { splitCourseName } from "./lib/gd-automapper-core.mjs";
+import { appleBakeNeeded, wakeAppleBake } from "./lib/gd-apple-bake-wake.mjs";
 import store from "../clarity-caddy-app-store.js";
 
 const MAPS_TABLE = "course_maps";
 const VISUALS_TABLE = "course_visuals";
+const WATCH_TABLE = "course_watch_maps";
+
+/* The watch section runs on the watch preview's own scripts (watch-preview.html lists the
+   same set, same labels - dev/course-page.test.js keeps the two lists equal). The labels are
+   the hand-bumped ones from the source, not content hashes: a function-rendered page cannot
+   be stamped by the deploy build, and scripts/ is cached for an hour, so a changed file is
+   at most an hour behind. */
+export const WATCH_SCRIPTS = [
+  "/assets/vendor/leaflet/leaflet.js",
+  "/scripts/inline/gd-leaflet-alias.js?v=split03",
+  "/scripts/gd-bubble-signals-core.js?v=bubble-signals-core-001",
+  "/scripts/studio/gps-play/watch-preview/watch-common.js?v=watch-preview-002",
+  "/scripts/studio/gps-play/watch-preview/watch-preview-page.js?v=watch-preview-004",
+  "/scripts/studio/gps-play/garmin-preview/garmin-watch-render.js?v=watch-preview-002",
+  "/scripts/studio/gps-play/garmin-preview/garmin-preview-page.js?v=watch-preview-005",
+  "/scripts/studio/gps-play/apple-preview/apple-watch-render.js?v=watch-preview-004",
+  "/scripts/studio/gps-play/apple-preview/apple-preview-page.js?v=watch-preview-005",
+  "/scripts/clarity-watch-preview.js?v=watch-preview-public-002"
+];
+/* The picker at the foot of the page, this page's own. */
+export const PAGE_SCRIPTS = ["/scripts/clarity-course-page.js?v=course-page-001"];
 const MAP_FIELDS = "course_id,course_name,course_lat,course_lng,region,country,country_code,hole_count,facility_key,"
   + "object_count,bunker_count,water_count,tree_count,published_at,updated_at";
 
@@ -83,12 +105,14 @@ export async function loadCoursePage(courseId, deps = {}) {
   const visual = Array.isArray(visuals) ? visuals[0] : null;
   if (!visual || !(Number(visual.published_version) > 0)) return null;
 
-  const [cardRows, images] = await Promise.all([
+  const [cardRows, images, watchRows] = await Promise.all([
     fetchFacilityRows(fetchRows, map.facility_key || map.course_id),
-    loadImages(courseId, deps.imageStore || imageStore)
+    loadImages(courseId, deps.imageStore || imageStore),
+    fetchRows(WATCH_TABLE + "?select=status,ready_hole_count,progress&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => [])
   ]);
   const card = pickCard(cardRows, map.course_name);
-  return { map, visual, card, images };
+  const watch = Array.isArray(watchRows) ? watchRows[0] || null : null;
+  return { map, visual, card, images, appleBakeNeeded: appleBakeNeeded(watch) };
 }
 
 /* Whatever the runner has uploaded for this course; a course with no frames yet has none, and
@@ -180,6 +204,55 @@ th:first-child,td:first-child{text-align:left}
 th{font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:rgba(255,255,255,.55);font-weight:800}
 tr:last-child td{border-bottom:0}
 tfoot td{font-weight:800;color:#20d96b;border-top:1px solid rgba(255,255,255,.18)}
+.card.isWide{max-width:none}
+.wpGrid{display:grid;grid-template-columns:minmax(260px,1fr) minmax(300px,520px);gap:26px;align-items:start}
+.wpBar{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.wpBar label{font-size:13px;color:rgba(255,255,255,.6);display:inline-flex;align-items:center;gap:8px}
+.wpSelect{font:inherit;font-size:14px;color:#fff;background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.22);border-radius:12px;padding:8px 10px}
+.wpTabs button,.gdStudioDiagramBtn,.wpPreset,.wpStep{background:none;border:1px solid rgba(255,255,255,.26);color:rgba(255,255,255,.8);border-radius:999px;padding:9px 16px;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
+.wpTabs button:hover,.gdStudioDiagramBtn:hover,.wpPreset:hover,.wpStep:hover{color:#20d96b;border-color:rgba(32,217,107,.6)}
+.wpTabs button.isActive,.wpPreset.isActive{background:#20d96b;color:#000;border-color:#20d96b}
+.wpTabs{display:inline-flex}
+.wpTabs button:first-child{border-top-right-radius:0;border-bottom-right-radius:0}
+.wpTabs button:last-child{border-top-left-radius:0;border-bottom-left-radius:0;border-left:none}
+.wpStatus{margin:12px 0 0;min-height:1.4em;font-size:14px;color:rgba(255,255,255,.72)}
+.wpPresets{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.wpHoleRow{display:flex;align-items:center;gap:8px;margin-top:18px}
+.wpStep{padding:9px 14px}
+.wpWatch{display:flex;flex-direction:column;align-items:center}
+.wpBezel{display:inline-block;max-width:100%;padding:14px;border-radius:28px;background:#1b1f1d;box-shadow:inset 0 0 0 2px #2a302d,0 8px 24px rgba(0,0,0,.45);margin:6px 0 10px;box-sizing:border-box}
+.wpBezel.isRound{border-radius:50%}
+.wpBezel.isRect{padding:10px;border-radius:calc(var(--gdWatchCorner,40px) + 10px);background:#141614}
+.wpBezel.isMip{background:#101311}
+.wpBezel canvas{display:block;background:#000;border-radius:10px;touch-action:none;cursor:crosshair;max-width:100% !important;height:auto !important}
+.wpBezel.isRound canvas{border-radius:50%}
+.wpBezel.isRect canvas{border-radius:var(--gdWatchCorner,40px)}
+.wpButtons{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin-top:4px}
+.wpButtons .gdStudioDiagramBtn{min-width:64px}
+.wpReadout{margin:14px 0 0;padding:12px 14px;width:100%;box-sizing:border-box;border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(0,0,0,.4);color:rgba(255,255,255,.72);font:13px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word;min-height:3.2em}
+.wpHelp{margin:18px 0 0;font-size:13px;color:rgba(255,255,255,.5);line-height:1.5}
+@media (max-width:860px){.wpGrid{grid-template-columns:1fr}}
+.cpFind{display:flex;gap:10px}
+.cpFind input{flex:1;min-width:0;font:inherit;font-size:16px;color:#fff;background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.22);border-radius:12px;padding:12px 14px}
+.cpPrimary{min-height:46px;padding:0 22px;border-radius:999px;border:0;background:#20d96b;color:#000;font:inherit;font-size:15px;font-weight:800;cursor:pointer}
+.cpPrimary:disabled{opacity:.5;cursor:default}
+.cpResults{display:flex;flex-direction:column;gap:10px;margin-top:14px}
+.cpResult{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;padding:14px 16px;border-radius:16px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.03)}
+.cpResult strong{display:block}
+.cpResult span{display:block;font-size:13px;color:rgba(255,255,255,.55)}
+.cpResult em{display:block;font-size:12px;color:#20d96b;font-style:normal;margin-top:2px}
+.cpActions{display:flex;flex-wrap:wrap;gap:8px}
+.cpAction{display:inline-flex;align-items:center;background:none;border:1px solid rgba(255,255,255,.26);color:rgba(255,255,255,.85);border-radius:999px;padding:9px 16px;font:inherit;font-size:14px;font-weight:700;cursor:pointer;text-decoration:none}
+.cpAction:hover{color:#20d96b;border-color:rgba(32,217,107,.6)}
+.cpAction.isPrimary{background:#20d96b;color:#000;border-color:#20d96b}
+.cpAction.isPrimary:hover{color:#000;filter:brightness(1.07)}
+.cpRequest{margin-top:18px;padding:18px 20px;border-radius:18px;border:1px solid rgba(32,217,107,.34);background:rgba(0,0,0,.3)}
+.cpRequest h3{margin:0 0 6px;font-size:18px}
+.cpField{display:flex;flex-direction:column;gap:6px;margin-top:14px;font-size:14px;color:rgba(255,255,255,.72)}
+.cpField input,.cpField textarea{font:inherit;font-size:16px;color:#fff;background:rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.22);border-radius:12px;padding:12px 14px}
+.cpField textarea{min-height:64px;resize:vertical}
+.cpRow{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:16px}
+.cpCancel{background:none;border:0;color:rgba(255,255,255,.6);font:inherit;cursor:pointer;text-decoration:underline}
 .foot{margin-top:70px;padding-top:24px;border-top:1px solid rgba(255,255,255,.1);display:flex;flex-wrap:wrap;gap:18px;color:rgba(255,255,255,.55);font-size:14px}
 @media (max-width:600px){.page{width:calc(100% - 32px)}th,td{padding:9px 6px;font-size:15px}}
 `;
@@ -197,6 +270,41 @@ function phoneFrames(frames, name) {
   return '<h2 id="phone">On your phone</h2>'
     + '<p class="sub">Straight from the app, on this course.</p>'
     + '<div class="frames">' + frames.map((f) => '<figure><img src="' + esc(f.src) + '" alt="' + esc(name + ": " + f.caption) + '" width="585" height="1266" loading="lazy"><figcaption>' + esc(f.caption) + "</figcaption></figure>").join("") + "</div>";
+}
+
+/* The Garmin and Apple Watch faces, drawn by the watch preview's own renderers and locked to
+   this course (scripts/clarity-watch-preview.js reads data-course-id). Same ids as
+   watch-preview.html, because the same script drives both. */
+function watchSection(map, name) {
+  return '<h2 id="watch">On your watch</h2>'
+    + '<p class="sub">The Garmin and Apple Watch faces, drawn exactly as the watch draws them, on ' + esc(name) + '. Stand on the tee or on the approach and see the distances, the club and the hole map.</p>'
+    + '<section id="preview" class="card isWide" data-course-id="' + esc(map.course_id) + '" data-course-name="' + esc(name) + '">'
+    + '<div class="wpGrid"><div>'
+    + '<div class="wpBar"><div class="wpTabs" id="watchTabs" role="tablist"><button type="button" data-watch="garmin" role="tab">Garmin</button><button type="button" data-watch="apple" role="tab">Apple Watch</button></div>'
+    + '<label>Units <select id="units" class="wpSelect"><option value="m">metres</option><option value="y">yards</option></select></label></div>'
+    + '<p id="courseLine" class="wpStatus" style="margin-top:18px;color:#fff;font-weight:700"></p>'
+    + '<div class="wpHoleRow"><button type="button" class="wpStep" id="holePrev" aria-label="Previous hole">\u2039</button><select id="hole" class="wpSelect" aria-label="Hole"></select><button type="button" class="wpStep" id="holeNext" aria-label="Next hole">\u203a</button></div>'
+    + '<div class="wpPresets" id="presets"><button type="button" class="wpPreset isActive" data-preset="tee">Tee shot</button><button type="button" class="wpPreset" data-preset="long">Long approach</button><button type="button" class="wpPreset" data-preset="short">Short approach</button></div>'
+    + '<p class="wpHelp">Garmin: SELECT is AIM on the numbers and enters or confirms the aim on the map, MENU swaps the numbers and the map, UP and DOWN change hole. Apple Watch: AIM locks the shot and brings the map up; on the map tap to aim, press and drag to carry it, and the wheel is the Digital Crown.</p>'
+    + '</div><div class="wpWatch"><div class="wpBezel" id="bezel"><canvas id="canvas"></canvas></div><div class="wpButtons" id="buttons"></div><pre class="wpReadout" id="readout"></pre></div></div>'
+    + "</section>"
+    + '<p class="wpHelp">On the course, distances come from the watch\u2019s own GPS. Here you stand on the hole\u2019s mapped play line: the tee, 180 m short of the green, or 90 m short.</p>';
+}
+
+/* "Looking for your course?" - search, not browse (scripts/clarity-course-page.js). */
+function findSection() {
+  return '<h2 id="find">Looking for your course?</h2>'
+    + '<p class="sub">Search for it. If it\u2019s on Clarity you can see it like this one; if it isn\u2019t mapped yet, or you\u2019d like a better map, tell us and we\u2019ll let you know when it\u2019s done.</p>'
+    + '<div class="card">'
+    + '<form id="findForm" class="cpFind"><input id="findInput" type="search" placeholder="Course name" autocomplete="off" aria-label="Course name"><button class="cpPrimary" type="submit">Search</button></form>'
+    + '<p id="findStatus" class="wpStatus"></p><div id="findResults" class="cpResults"></div>'
+    + '<form id="requestForm" class="cpRequest" hidden novalidate><h3 id="requestTitle"></h3><p class="wpStatus" style="margin:0">Leave your name and email and we\u2019ll be in touch when it\u2019s ready.</p>'
+    + '<label class="cpField">Your name<input id="requestName" type="text" name="name" autocomplete="name" required maxlength="120"></label>'
+    + '<label class="cpField">Email<input id="requestEmail" type="email" name="email" autocomplete="email" required maxlength="240"></label>'
+    + '<label class="cpField">Anything you\u2019d like to tell us (optional)<textarea id="requestNote" name="note" maxlength="1200"></textarea></label>'
+    + '<div class="cpRow"><button class="cpPrimary" type="submit">Send request</button><button type="button" class="cpCancel" id="requestCancel">Cancel</button></div>'
+    + '<p id="requestStatus" class="wpStatus" role="status"></p></form>'
+    + "</div>";
 }
 
 function holeTable(holes, yards) {
@@ -272,10 +380,14 @@ export function renderCoursePage(data, origin) {
     + "</div>"
     + (hero ? '<img class="heroShot" src="' + esc(hero.src) + '" alt="' + esc(name + " on Clarity Caddy: " + hero.caption) + '" width="585" height="1266" fetchpriority="high">' : "")
     + "</section>"
+    + watchSection(map, name)
     + phoneFrames(images.frames, name)
     + holeTable(holes, yards)
+    + findSection()
     + '<footer class="foot"><span>&copy; Clarity Caddy</span><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/support">Support</a></footer>'
-    + "</main></body></html>";
+    + "</main>"
+    + WATCH_SCRIPTS.concat(PAGE_SCRIPTS).map((src) => '<script src="' + src + '"></script>').join("")
+    + "</body></html>";
 }
 
 function notFound() {
@@ -296,6 +408,11 @@ export default async function coursePage(req) {
     return new Response("Course page unavailable", { status: 503, headers: { "Cache-Control": "no-store" } });
   }
   if (!data) return notFound();
+
+  /* The Apple Watch package, if this course has none yet: ask the worker now, so by the time
+     the visitor opens that tab (the page polls) it is on its way. Awaited and capped; a lost
+     wake costs nothing but a later visit. */
+  if (data.appleBakeNeeded) await wakeAppleBake(url.origin, courseId, env("CLARITY_SERVICE_SECRET"));
 
   return new Response(renderCoursePage(data, url.origin), {
     status: 200,
