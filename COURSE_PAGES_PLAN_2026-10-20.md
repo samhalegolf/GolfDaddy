@@ -136,10 +136,13 @@ them; nothing else has to change.
 3. **Device tabs** — DONE 2026-10-20. The page carries the watch preview's own section (same
    ids, same scripts) and `scripts/clarity-watch-preview.js` runs course-locked when `#preview`
    has `data-course-id`: no gate, no search, a package still being made is polled every 20 s for
-   up to 12 minutes with a "Making the … map" line. The Apple bake is asked for by the page
-   function on render when the course has no package and nothing is running
+   up to 12 minutes with a "Making the … map" line. The Apple bake is asked for by the visitor's
+   first click or key on the page (`scripts/clarity-course-page.js` → `POST /api/course-page-wake`,
+   `functions/course-page-wake.mjs`), when the course has no package and nothing is running
    (`lib/gd-apple-bake-wake.mjs`, authenticated with `CLARITY_SERVICE_SECRET`; the worker honours
-   that only for `page_public` courses). Garmin needs nothing: its GET wakes its own builder.
+   that only for `page_public` courses). It used to fire on render, but a render is mostly a
+   crawler and a CDN-cached page never renders; a click is a person. Garmin needs nothing: its
+   GET wakes its own builder.
 4. **Picker section** — DONE 2026-10-20. `scripts/clarity-course-page.js`: the app's search;
    a result with a public page → "See this course"; an unmapped one → "Map this course"; every
    result → "Request an upgrade". Both requests are the watch preview's own sign-up

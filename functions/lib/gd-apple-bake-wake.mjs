@@ -1,12 +1,12 @@
-/* The Apple Watch package for a public course page, made when the page is first opened.
+/* The Apple Watch package for a public course page, made when a visitor first clicks on it.
  *
  * The Apple Watch map is the image bake (course_watch_maps; minutes per course, run by
  * functions/course-watch-maps-background.mjs). Studio starts it by hand with an admin's
- * bearer. A course page cannot wait for an admin, so the page function asks the same worker
- * itself, authenticated with CLARITY_SERVICE_SECRET - the server-to-server secret the Booking
- * integration already uses - and the worker only honours that for a course whose page is
- * public. The page is cached at the CDN for a day, so this fires at most about once a day per
- * course until the package exists, and the next render finds it.
+ * bearer. A course page cannot wait for an admin, so functions/course-page-wake.mjs (POST
+ * /api/course-page-wake, sent by scripts/clarity-course-page.js on the page's first click or
+ * key) asks the same worker, authenticated with CLARITY_SERVICE_SECRET - the server-to-server
+ * secret the Booking integration already uses - and the worker only honours that for a course
+ * whose page is public. A click is a person; a render was mostly a crawler.
  *
  * The Garmin package needs none of this: its GET wakes its own builder (gd-garmin-build-wake). */
 
