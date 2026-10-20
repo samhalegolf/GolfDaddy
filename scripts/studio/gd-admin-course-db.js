@@ -662,7 +662,8 @@ function gdAdminCoursePageSwitch(selected){
   if(!cloud)return "";
   const on=cloud.pagePublic===true;
   const id=gdAdminJsArg(courseId);
-  return `<button type="button" class="${on?"active":""}" onclick="return gdAdminCourseDbTogglePage(${id})" title="${on?"Public at /courses/"+gdEscapeHTML(courseId)+" - click to take it down":"Publish a public page at /courses/"+gdEscapeHTML(courseId)}">Course page: ${on?"on":"off"}</button>`;
+  return `<button type="button" class="${on?"active":""}" onclick="return gdAdminCourseDbTogglePage(${id})" title="${on?"Public at /courses/"+gdEscapeHTML(courseId)+" - click to take it down":"Publish a public page at /courses/"+gdEscapeHTML(courseId)}">Course page: ${on?"on":"off"}</button>`
+    +(on?`<a href="/courses/${encodeURIComponent(courseId)}" target="_blank" rel="noopener" class="gdAdminCoursePageLink" title="Open the public page in a new tab">Open &#8599;</a>`:"");
 }
 async function gdAdminCourseDbTogglePage(courseId){
   const cloud=gdAdminCourseDbCloud&&gdAdminCourseDbCloud.courses&&gdAdminCourseDbCloud.courses[String(courseId)];

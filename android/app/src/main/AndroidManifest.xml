@@ -41,7 +41,17 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="https" android:host="caddy.claritygolf.app" />
+                <!--
+                Only the root shell, not the whole host. Android has no way to
+                exclude a path, and the public course pages (/courses/<id>,
+                functions/course-page.mjs) must open in the browser even with the
+                app installed - a shared link that lands in the app is a dead link.
+                Every deep link the app reads is on "/" (gd-native-deep-links.js
+                only looks at the root shell's query), so nothing in use is lost;
+                a NEW link type on another path has to be added here.
+                -->
+                <data android:scheme="https" android:host="caddy.claritygolf.app" android:path="/" />
+                <data android:scheme="https" android:host="caddy.claritygolf.app" android:path="/index.html" />
             </intent-filter>
 
         </activity>

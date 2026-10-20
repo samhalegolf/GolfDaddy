@@ -5,8 +5,13 @@
         "appIDs": ["9JL7847XQL.com.claritygolf.caddy"],
         "components": [
           {
+            "/": "/courses/*",
+            "exclude": true,
+            "comment": "The public course pages (functions/course-page.mjs) are web pages for anyone, including someone with the app installed: a shared link must open in the browser, never swallowed by the app."
+          },
+          {
             "/": "/*",
-            "comment": "Every path on this host opens the app. The links that matter are the password-reset and account-setup URLs the auth emails send (/?claritySetPassword=1 and friends), which gd-native-deep-links.js reads off the delivered URL; matching the whole host rather than enumerating those keeps a new link type from silently falling back to Safari."
+            "comment": "Every other path on this host opens the app. The links that matter are the password-reset and account-setup URLs the auth emails send (/?claritySetPassword=1 and friends), which gd-native-deep-links.js reads off the delivered URL; matching the whole host rather than enumerating those keeps a new link type from silently falling back to Safari."
           }
         ]
       }

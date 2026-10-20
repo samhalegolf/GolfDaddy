@@ -68,7 +68,16 @@ const ok = (name) => { passed += 1; console.log("  ok  " + name); };
   assert.ok(/\$\{gdAdminCoursePageSwitch\(selected\)\}/.test(studio), "the rail does not draw the switch");
   assert.ok(/cloud\.pagePublic===true/.test(studio) && /action:"page",courseId:courseId,pagePublic:next/.test(studio), "the switch does not post the page action");
   assert.ok(!/gdAdminEsc\(/.test(studio), "gdAdminEsc does not exist");
+  assert.ok(/gdAdminCoursePageLink" title="Open the public page in a new tab"/.test(studio), "no Open link beside the switch");
   ok("the Studio rail carries the switch and posts the page action");
+
+  const aasa = JSON.parse(read(".well-known", "apple-app-site-association"));
+  const components = aasa.applinks.details[0].components;
+  assert.deepStrictEqual(components.map((c) => [c["/"], !!c.exclude]), [["/courses/*", true], ["/*", false]], "iOS must leave /courses/* to the browser and keep claiming the rest");
+  const manifest = read("android", "app", "src", "main", "AndroidManifest.xml");
+  assert.ok(!/android:host="caddy\.claritygolf\.app" \/>/.test(manifest), "Android still claims the whole host");
+  assert.ok(/android:host="caddy\.claritygolf\.app" android:path="\/" \/>/.test(manifest), "Android must still claim the root shell the auth links use");
+  ok("a course page link opens in the browser on a phone with the app installed");
 
   console.log(passed + " checks passed");
 })().catch((error) => { console.error(error); process.exit(1); });
