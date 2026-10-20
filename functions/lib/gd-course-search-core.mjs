@@ -336,7 +336,18 @@ export function scoreCandidate(candidate, ground, scorecard) {
   const groundPositive = !!(ground && (ground.holes >= 3 || ground.features >= 3 || ground.outdoorHa >= 15 || ground.coursePolygon));
   if (ground && ground.commercial && !groundPositive && !polygonHere && !clarityMap) add(-30, "commercial ground, no golf or outdoor evidence");
 
-  const confidence = clarityMap || score >= CONFIRMED_AT ? CONFIDENCE.CONFIRMED
+  /* A listing whose own name says it is a range, a simulator, mini golf or a shop, and says
+     nothing of a course, is that thing - whatever golf sits beside it. 名古屋商科大学ゴルフ練習場
+     ("... golf practice range") is drawn in OSM as a golf_course outline next to Miyoshi CC's
+     36 holes, scored as a confirmed course on that ground, and a guest picked it and mapped
+     nothing. The ground belongs to the course next door, which is listed in its own right.
+     "Royal Golf Club Driving Range" names its course, so it still scores on the ground. */
+  const nameSaysNotCourse = !clarityMap && !signals.golfName
+    && nonCourseSignals(candidate.name).some((n) => n.kind !== "academy");
+  if (nameSaysNotCourse) reasons.push("name says it is not a course");
+
+  const confidence = nameSaysNotCourse ? CONFIDENCE.POSSIBLE
+    : clarityMap || score >= CONFIRMED_AT ? CONFIDENCE.CONFIRMED
     : score >= LIKELY_AT ? CONFIDENCE.LIKELY : CONFIDENCE.POSSIBLE;
   /* Ambiguous: nothing says "not a course", but nothing cheap says "course"
      strongly enough either. These are what the scorecard check is for. */

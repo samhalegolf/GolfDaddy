@@ -28,7 +28,7 @@ import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { wakeGarminBuild } from "./lib/gd-garmin-build-wake.mjs";
 import { courseFitVerdict, courseFitMessage, courseCoverageComplete, scorecardIdentityMismatch } from "./lib/gd-course-fit-core.mjs";
 import { reverseGeocodePlace } from "./lib/gd-course-place.mjs";
-import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, ownCourseFootprints, widerRetryAdopts, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, foreignGroundClaim, loopIsContiguous, provisionalLoopName, osmScopeReachM, compassPointFrom, slug, normalizeCourseName, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, intersectOsmFrames, SIBLING_SWEEP_M, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, HAND_DRAWN_SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
+import { osmQueryScope, osmGuideQuery, resolveCourseGeometry, resolveGuidesIntoObjects, parseOsmGuideBundle, guideBelongsToCourse, fillMissingHoleByElimination, resolverFillGuides, classifyCourseRelationship, courseFootprintFrame, ownCourseFootprints, widerRetryAdopts, osmCourseHoleCountTag, detectHoleNumberCollision, detectUnnumberedMultiLoop, separateLoops, foreignGroundClaim, pinOffGolfClaim, loopIsContiguous, provisionalLoopName, osmScopeReachM, compassPointFrom, slug, normalizeCourseName, scopeContainsFrame, osmScopeFrame, expandOsmFrame, holeFeatureFrame, frameCentre, unionOsmFrames, intersectOsmFrames, SIBLING_SWEEP_M, holeGapFrames, mergeOsmPayloads, distance, splitCourseName, enrichSurfaceObjects, savedCourseQueryFrame, SURFACE_TYPES, HAND_DRAWN_SURFACE_TYPES, SURFACE_MAPPER_VERSION, MAPPER_VERSION } from "./lib/gd-automapper-core.mjs";
 import { hasNumberingIssue, resolveCourseGeometryForAutoMapper, guideFromResolvedHole, resolverHoleCandidates } from "./lib/gd-geometry-resolver-core.mjs";
 import { partitionLoops, walkCost } from "./lib/gd-ground-loops-core.mjs";
 import { courseNameFromCard } from "./lib/gd-facility-organise-core.mjs";
@@ -3367,6 +3367,14 @@ async function runMapperJob(job, origin) {
   }
   if (!geometry.holesResolved) {
     const reason = resolverStatus ? "geometry resolver status: " + resolverStatus.status + (resolverStatus.hadScorecard ? "" : " (no shared scorecard found)") : "no OSM hole geometry within range";
+    /* Nothing numbered, and every green found is well away from the pin: the pin is on
+       something that is not the golf (a range, a road), so the player is asked to pin the
+       course rather than told there is no map. See pinOffGolfClaim. */
+    const offGolf = !diagnostics.fit && pinOffGolfClaim(payload, course.center);
+    if (offGolf) {
+      diagnostics.fit = { trusted: false, reason: "pin-off-golf", scope: "ground", detail: offGolf };
+      diagnostics.fit.message = courseFitMessage(diagnostics.fit);
+    }
     /* The queried centre rides in the sentence itself: "no hole geometry HERE" is only
        actionable when the row says where "here" was - north-shore's centre sat in Michigan
        and nothing surfaced it. */
