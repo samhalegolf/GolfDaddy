@@ -30,6 +30,25 @@ test("the page loads only scripts that exist, and that the deploy copies", () =>
   ["tee", "long", "short"].forEach((p) => assert.ok(html.includes('data-preset="' + p + '"'), "no " + p + " position button"));
 });
 
+/* The preview's scripts run on three pages at three depths: / (watch-preview.html), /studio/
+   and a public course page at /courses/<id> (functions/course-page.mjs). What they fetch at
+   runtime has to be root-absolute: a relative "app/js/..." resolved under /courses/ 404s, the
+   Bubble Engine never loads, and AIM silently locks the shot instead of opening the map. */
+test("the preview's runtime fetches are root-absolute, so they work under /courses/<id>", () => {
+  const page = read("scripts/studio/gps-play/watch-preview/watch-preview-page.js");
+  const garmin = read("scripts/studio/gps-play/garmin-preview/garmin-preview-page.js");
+  assert.ok(page.includes('fetch("/app/js/distance.js")') && page.includes('fetch("/app/js/bubble-engine.js")'), "the Bubble Engine is not fetched from the site root");
+  assert.ok(garmin.includes('spriteImage("/garmin/resources-trees/'), "the tree sprites are not fetched from the site root");
+  [page, garmin, read("scripts/studio/gps-play/apple-preview/apple-preview-page.js"), read("scripts/clarity-watch-preview.js")].forEach((src) => {
+    const relative = [...src.matchAll(/(?:fetch|spriteImage)\("(?!\/|https?:)([^"]+)"/g)].map((m) => m[1]);
+    assert.deepStrictEqual(relative, [], "relative runtime fetches: " + relative.join(", "));
+  });
+  const course = read("functions/course-page.mjs");
+  assert.ok(!/<base\b/i.test(course), "the course page must not need a <base> to make the scripts work");
+  const script = read("scripts/clarity-watch-preview.js");
+  assert.ok(/state\.mount\.problem/.test(script), "the public readout does not show the face's problem line");
+});
+
 test("the landing page links to the preview, translated", () => {
   const welcome = read("welcome.html");
   assert.ok(/href="watch-preview\.html"[^>]*data-i18n="welcome\.watchPreviewLink"/.test(welcome), "welcome.html has no translated link to the preview");

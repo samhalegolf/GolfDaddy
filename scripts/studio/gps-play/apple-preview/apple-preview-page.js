@@ -32,7 +32,7 @@
       spriteBitmap: function (onLoad) {
         return function (type) {
           var name = R.TREE_NAMES[type];
-          return window.GDWatchPreviewPage.spriteImage("ios/App/ClarityCaddyWatch/Assets.xcassets/" + name + ".imageset/" + name + ".png", onLoad);
+          return window.GDWatchPreviewPage.spriteImage("/ios/App/ClarityCaddyWatch/Assets.xcassets/" + name + ".imageset/" + name + ".png", onLoad);
         };
       },
       /* The hub's linked drag: another device's aim, held in WatchPlayState as the wrist holds

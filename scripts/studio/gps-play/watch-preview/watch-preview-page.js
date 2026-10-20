@@ -55,9 +55,12 @@
      inside its own `window`, because loading it as a plain script would put its
      gdMappedFairwayLayupTarget seam over the one the Studio's own app surface already provides.
      The real Leaflet, localStorage (the bag firmness preset) and document are handed through. */
+  /* Root-absolute, like the sprites: this page runs at /, at /studio/ and on a public course
+     page at /courses/<id>, where a relative "app/js/..." would resolve under /courses/ and 404 -
+     and without the engine AIM silently locks the shot instead of opening the map. */
   function loadEngine() {
     if (enginePromise) return enginePromise;
-    enginePromise = Promise.all([fetch("app/js/distance.js"), fetch("app/js/bubble-engine.js")])
+    enginePromise = Promise.all([fetch("/app/js/distance.js"), fetch("/app/js/bubble-engine.js")])
       .then(function (responses) {
         if (!responses.every(function (r) { return r.ok; })) throw new Error("engine source unavailable");
         return Promise.all(responses.map(function (r) { return r.text(); }));
@@ -342,7 +345,7 @@
         aimLog = (delta > 0 ? "NEXT_HOLE" : "PREVIOUS_HOLE") + " sent to the phone";
         if (hooks.onStepHole) hooks.onStepHole(next.holeNumber); else setHole(next.holeNumber);
       },
-      requestUpdate: function () { requestUpdate(); },
+      requestUpdate: function () { renderButtons(); requestUpdate(); },
       unlock: function () { session.locked = false; if (face && face.unlock) face.unlock(); aimLog = "UNLOCK sent to the phone"; renderButtons(); }
     };
 
@@ -554,6 +557,8 @@
 
     return {
       face: function () { return face; },
+      /* What stops the face drawing (the engine failed to load, the last frame threw), or "". */
+      problem: function () { return drawError; },
       device: device,
       currentHole: currentHole,
       requestUpdate: requestUpdate,
