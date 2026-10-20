@@ -21,6 +21,7 @@ const SETTINGS_TABLE = "public_hub_settings";
 const SETTINGS_ID = "rules";
 const MAPS_TABLE = "course_maps";
 const VISUALS_TABLE = "course_visuals";
+const GARMIN_TABLE = "course_garmin_maps";
 const MAP_FIELDS = "course_id,course_name,country,country_code,region,hole_count,object_count,bunker_count,water_count,tree_count,published,page_public,course_lat,course_lng";
 /* A header frame is a 585px JPEG (marketing/course-page-assets.mjs WEB_WIDTH); well under this. */
 const HEADER_MAX_BYTES = 1500000;
@@ -57,7 +58,7 @@ export async function headerCounts(store = imageStore) {
   return counts;
 }
 
-export function courseRow(map, visualIds, headers) {
+export function courseRow(map, visualIds, headers, garminIds = new Set()) {
   return {
     courseId: map.course_id,
     name: map.course_name || map.course_id,
@@ -73,19 +74,22 @@ export function courseRow(map, visualIds, headers) {
     treeCount: Number(map.tree_count) || 0,
     published: map.published === true,
     visualPublished: visualIds.has(map.course_id),
+    garminPackaged: garminIds.has(map.course_id),
     pagePublic: map.page_public === true,
     headerCount: headers.get(map.course_id) || 0
   };
 }
 
 async function loadCourses() {
-  const [maps, visuals, headers] = await Promise.all([
+  const [maps, visuals, garmins, headers] = await Promise.all([
     supabaseFetch(MAPS_TABLE + "?select=" + MAP_FIELDS + "&order=course_name.asc&limit=5000"),
     supabaseFetch(VISUALS_TABLE + "?select=course_id&published_version=gt.0&limit=5000"),
+    supabaseFetch(GARMIN_TABLE + "?select=course_id&garmin_package_version=gt.0&limit=5000").catch(() => []),
     headerCounts()
   ]);
-  const visualIds = new Set((Array.isArray(visuals) ? visuals : []).map((v) => v.course_id));
-  return (Array.isArray(maps) ? maps : []).filter((m) => m && m.course_id).map((m) => courseRow(m, visualIds, headers));
+  const ids = (list) => new Set((Array.isArray(list) ? list : []).map((v) => v.course_id));
+  const visualIds = ids(visuals), garminIds = ids(garmins);
+  return (Array.isArray(maps) ? maps : []).filter((m) => m && m.course_id).map((m) => courseRow(m, visualIds, headers, garminIds));
 }
 
 async function setPagePublic(courseIds, on) {

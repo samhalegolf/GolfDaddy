@@ -267,11 +267,13 @@ test("being found: sitemap of public courses, robots, and a way in from the land
   assert.strictEqual(sm.config.path, "/sitemap.xml");
   const courses = await sm.publicCourses(async (q) => {
     if (q.startsWith("course_visuals")) { assert.ok(/published_version=gt\.0/.test(q), q); return [{ course_id: "tara-iti" }]; }
+    if (q.startsWith("course_garmin_maps")) { assert.ok(/garmin_package_version=gt\.0/.test(q), q); return [{ course_id: "garmin-only" }]; }
     assert.ok(/page_public=eq\.true/.test(q) && /published=eq\.true/.test(q), q);
-    /* no-visual is switched on but has no published visual - its page is a 404, so not listed */
-    return [{ course_id: "tara-iti", updated_at: "2026-10-14T06:28:55.241Z" }, { course_id: "no-visual" }, { course_id: "" }];
+    /* nothing-yet is switched on but has neither a visual nor a Garmin package - its page is a
+       404, so not listed; garmin-only renders (watch-first), so it is. The page function's rule. */
+    return [{ course_id: "tara-iti", updated_at: "2026-10-14T06:28:55.241Z" }, { course_id: "garmin-only" }, { course_id: "nothing-yet" }, { course_id: "" }];
   });
-  assert.deepStrictEqual(courses.map((c) => c.course_id), ["tara-iti"]);
+  assert.deepStrictEqual(courses.map((c) => c.course_id), ["tara-iti", "garmin-only"]);
   const xml = sm.renderSitemap("https://caddy.test", courses);
   assert.ok(xml.includes("<loc>https://caddy.test/courses/tara-iti</loc><lastmod>2026-10-14</lastmod>"), xml);
   assert.ok(xml.includes("<loc>https://caddy.test/welcome</loc>") && !/\/app|\/studio/.test(xml));

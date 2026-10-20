@@ -50,13 +50,17 @@ function course(over) {
     course({ courseId: "on", pagePublic: true }),
     course({ courseId: "held" }),
     course({ courseId: "thin", treeCount: 10, pagePublic: true }),
-    course({ courseId: "novis", visualPublished: false, pagePublic: true })
+    course({ courseId: "novis", visualPublished: false, pagePublic: true }),
+    course({ courseId: "garmin-only", visualPublished: false, garminPackaged: true, pagePublic: true }),
+    course({ courseId: "nothing", visualPublished: false, garminPackaged: false, published: true, pagePublic: true, treeCount: 500 })
   ]);
   const plan = R.publishPlan(rules, ev);
   assert.deepStrictEqual(plan.toPublish.map((c) => c.courseId), ["new"]);
-  assert.deepStrictEqual(plan.notMatching.map((c) => c.courseId).sort(), ["novis", "thin"]);
+  assert.deepStrictEqual(plan.notMatching.map((c) => c.courseId).sort(), ["garmin-only", "nothing", "novis", "thin"]);
   assert.strictEqual(ev.find((c) => c.courseId === "novis").live, false);
   assert.strictEqual(ev.find((c) => c.courseId === "on").live, true);
+  assert.strictEqual(ev.find((c) => c.courseId === "garmin-only").live, true, "a Garmin package is enough for the page to render, as the page function says");
+  assert.strictEqual(ev.find((c) => c.courseId === "nothing").live, false, "no visual and no Garmin package is a 404");
   rules.autoPublish.enabled = false;
   assert.deepStrictEqual(R.publishPlan(rules, ev).toPublish, []);
   ok("publishing switches on new matches only: never a held course, never takes one down, nothing when disabled");
@@ -88,6 +92,7 @@ function course(over) {
       return reply([{ rules: stored, updated_at: "2026-10-20T00:00:00Z", updated_by: "samhalegolf@gmail.com" }]);
     }
     if (target.includes("course_visuals")) return reply([{ course_id: "tara-iti" }, { course_id: "parkes" }]);
+    if (target.includes("course_garmin_maps")) { assert.ok(/garmin_package_version=gt\.0/.test(target), target); return reply([{ course_id: "thin" }]); }
     if (target.includes("course_maps")) {
       if (init.method === "PATCH") {
         const ids = decodeURIComponent(target.match(/in\.\(([^)]*)\)/)[1]).split(",").map((s) => s.replace(/"/g, ""));
@@ -110,6 +115,8 @@ function course(over) {
   assert.strictEqual(tara.headerCount, 2);
   assert.strictEqual(tara.live, true);
   assert.strictEqual(got.courses.find((c) => c.courseId === "thin").autoMatch, false);
+  assert.strictEqual(got.courses.find((c) => c.courseId === "thin").garminPackaged, true, "the hub knows which courses have a Garmin package");
+  assert.strictEqual(got.courses.find((c) => c.courseId === "parkes").garminPackaged, false);
   assert.deepStrictEqual(got.publish.toPublish.map((c) => c.courseId), ["parkes"]);
   ok("GET answers every course with its header count, page state and what publishing would do");
 
