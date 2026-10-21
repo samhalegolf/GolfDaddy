@@ -29,6 +29,7 @@
 
 import { deriveCoursePackageState, shapeLitePackage, shapeFullPackage } from "./lib/gd-course-package-shape.mjs";
 import { findDuplicateCourseWithGeometry as findDuplicateCourse } from "./lib/gd-duplicate-course-guard.mjs";
+import { courseCentre } from "./lib/gd-course-centre.mjs";
 import { enqueueMapperJob, mapperActorKey, promoteNearbyJob, NEARBY_AUTOMAP_KIND } from "./course-mapper-jobs.mjs";
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
@@ -206,9 +207,7 @@ export default async function coursePackage(req) {
   const url = new URL(req.url);
   const courseId = slug(url.searchParams.get("courseId") || url.searchParams.get("course_id"));
   if (!courseId) return json(400, { error: "courseId required" });
-  const lat = Number(url.searchParams.get("courseLat"));
-  const lng = Number(url.searchParams.get("courseLng"));
-  const center = Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+  const center = courseCentre(url.searchParams.get("courseLat"), url.searchParams.get("courseLng"));
   const courseName = url.searchParams.get("courseName") || "";
   const userId = await verifiedUserId(req);
   /* Read straight off the query string, unverified by design: this is not a claim about WHO

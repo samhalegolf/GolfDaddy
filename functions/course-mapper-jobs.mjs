@@ -33,6 +33,7 @@
 
 import { MAPPER_VERSION, SURFACE_TYPES, HAND_DRAWN_SURFACE_TYPES } from "./lib/gd-automapper-core.mjs";
 import { findDuplicateCourseWithGeometry } from "./lib/gd-duplicate-course-guard.mjs";
+import { courseCentre } from "./lib/gd-course-centre.mjs";
 import { fetchOverpass } from "./lib/gd-overpass-client.mjs";
 import { boundingBox, coursesFromOverpass, mergeWithLibrary, nearbyCoursesQuery } from "./lib/gd-courses-near-core.mjs";
 
@@ -376,9 +377,9 @@ async function mapperBuildState(courseId) {
    the request, or a row with coordinates already existed. The worker cannot query Overpass
    without one, so this answer decides whether enqueuing is worth anything at all. */
 async function ensureCourseCenter(courseId, payload) {
-  const lat = Number(payload && payload.courseLat);
-  const lng = Number(payload && payload.courseLng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return await hasKnownCentre(courseId);
+  const centre = courseCentre(payload && payload.courseLat, payload && payload.courseLng);
+  if (!centre) return await hasKnownCentre(courseId);
+  const { lat, lng } = centre;
   try {
     await supabaseFetch(MAPS_TABLE + "?on_conflict=id", {
       method: "POST",
@@ -403,7 +404,7 @@ async function hasKnownCentre(courseId) {
   try {
     const rows = await supabaseFetch(MAPS_TABLE + "?select=course_lat,course_lng&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
     const row = Array.isArray(rows) ? rows[0] : null;
-    return !!(row && Number.isFinite(Number(row.course_lat)) && Number.isFinite(Number(row.course_lng)));
+    return !!(row && courseCentre(row.course_lat, row.course_lng));
   } catch (error) {
     /* Unknown beats false here: a transient read failure should not turn into "this course
        can never be mapped". The worker's own check is the real gate. */
@@ -435,10 +436,10 @@ export async function enqueueMapperJob({ courseId, courseLat, courseLng, courseN
      see lib/gd-duplicate-course-guard.mjs's header for the case this was written for. Only
      checked when real coordinates are supplied, the same precondition ensureCourseCenter
      itself requires to do anything. */
-  const lat = Number(courseLat), lng = Number(courseLng);
-  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+  const given = courseCentre(courseLat, courseLng);
+  if (given) {
     const duplicate = await findDuplicateCourseWithGeometry(supabaseFetch, {
-      courseId, courseName, center: { lat, lng }, radiusM: ASSUMED_COURSE_MATCH_RADIUS_M
+      courseId, courseName, center: given, radiusM: ASSUMED_COURSE_MATCH_RADIUS_M
     }).catch(() => null);
     if (duplicate) return { duplicate: true, courseId: duplicate.courseId };
   }
@@ -608,8 +609,9 @@ async function queueBackgroundMapperJobs(courses, requestedBy) {
 export async function enqueueNearbyMapperJobs({ sourceCourseId, limit = NEARBY_PREFETCH_COUNT } = {}) {
   const rows = await supabaseFetch(MAPS_TABLE + "?select=course_lat,course_lng&course_id=eq." + encodeURIComponent(sourceCourseId) + "&limit=1").catch(() => []);
   const source = Array.isArray(rows) ? rows[0] : null;
-  const lat = Number(source && source.course_lat), lng = Number(source && source.course_lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return { queued: [], reason: "source-has-no-centre" };
+  const sourceCentre = courseCentre(source && source.course_lat, source && source.course_lng);
+  if (!sourceCentre) return { queued: [], reason: "source-has-no-centre" };
+  const { lat, lng } = sourceCentre;
 
   const region = await coursesInRegion({ lat, lng, radiusM: NEARBY_PREFETCH_RADIUS_M });
   if (region.unavailable) return { queued: [], reason: "overpass-unavailable" };
@@ -918,10 +920,7 @@ export default async function courseMapperJobs(req) {
 /* The new pin a remap carries, or null: both coordinates, finite and on the globe. A half or
    garbled pin is no pin - the remap then keeps the course where it was. */
 function remapPin(payload) {
-  if (!payload || payload.courseLat == null || payload.courseLng == null) return null;
-  const lat = Number(payload.courseLat), lng = Number(payload.courseLng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
-  return { lat, lng };
+  return payload ? courseCentre(payload.courseLat, payload.courseLng) : null;
 }
 
 /* AWAITED, not fire-and-forget - see course-visual-jobs.mjs's pingWorker for why: serverless

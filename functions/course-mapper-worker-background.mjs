@@ -46,6 +46,7 @@ import { refineSurfaceShape, applyRefinedShape, REFINED_SHAPE_SOURCE } from "./l
 import politeFetch from "./lib/gd-polite-fetch.js";
 import courseSearchIdentity from "./lib/gd-course-search-identity.js";
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
+import { courseCentre } from "./lib/gd-course-centre.mjs";
 import { createSupabaseStorage } from "./lib/gd-supabase-storage.mjs";
 import { classifyMapperFailure, failureKind, buildMapperDebugText } from "./lib/gd-mapper-failure-kinds.mjs";
 import { captureMapperDebugImagery } from "./lib/gd-mapper-debug-captures.mjs";
@@ -423,8 +424,9 @@ async function loadCourseCenter(courseId, opts = {}) {
   const rows = await supabaseFetch(MAPS_TABLE + "?select=course_id,course_name,facility_name,course_lat,course_lng,region,country,country_code,objects_json,holes_json&course_id=eq." + encodeURIComponent(courseId) + "&limit=1");
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) return null;
-  const lat = Number(row.course_lat), lng = Number(row.course_lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const centre = courseCentre(row.course_lat, row.course_lng);
+  if (!centre) return null;
+  const { lat, lng } = centre;
   const course = {
     courseId: row.course_id, courseName: row.course_name, facilityName: row.facility_name || "", center: { lat, lng },
     region: row.region || "", country: row.country || "", countryCode: row.country_code || "",
