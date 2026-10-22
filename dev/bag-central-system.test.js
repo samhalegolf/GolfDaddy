@@ -378,6 +378,16 @@ test("the shell bag has two modes, and only one of them rewrites the bag", () =>
     "and the inverse searches the unguarded curve, which is the monotonic one");
 });
 
+test("a signed-in player's empty bag can be generated", () => {
+  /* ensureProfile() re-seeds an empty bag with the stock set on every call and
+     the sheet hides it, so Generate must ask about the bag the sheet shows -
+     not the seeded one behind it - or it bails on a bag that looks empty. */
+  const support = read("scripts/clarity-support.js");
+  const build = support.slice(support.indexOf("win.gdBagBuild = function"), support.indexOf("win.gdBagToggleGenerator"));
+  assert.ok(build.includes("if(realRows().length) return;"), "the build guard reads the cleared bag");
+  assert.ok(!/collectRows\(profile\(\)\)/.test(support), "nothing asks collectRows of the raw, re-seeded profile");
+});
+
 test("a guest's first bag is shown, not just saved", () => {
   /* A guest profile is seeded as a placeholder (gd-guest-access.js) and the
      shell's collectRows() skips a placeholder's bag on purpose - the stand-in

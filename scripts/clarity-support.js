@@ -349,6 +349,14 @@
     }
     return p;
   }
+  /* The bag as the sheet shows it. ensureProfile() re-seeds an empty bag with
+     the stock set (flagged bagSeededDefault) on every call, and the sheet clears
+     that set before drawing - so any "is there a bag yet" question must clear it
+     too. Asking collectRows of the raw profile saw the stock set behind an
+     empty sheet, and Generate on a signed-in player's empty bag did nothing. */
+  function realRows(){
+    return collectRows(clearUntouchedDefaultBag(profile()));
+  }
   function currentRows(){
     var p = clearUntouchedDefaultBag(profile());
     var rows = collectRows(p);
@@ -791,7 +799,7 @@
      bag's own content, and a bag with clubs in it uses generate mode instead. */
   win.gdBagBuild = function(){
     if(ui.busy) return;
-    if(collectRows(profile()).length) return;
+    if(realRows().length) return;
     ui.busy = true;
     clearTimers();
     var built = quickBag(ui.setupCarry);
@@ -822,7 +830,7 @@
    * and this does nothing. */
   win.gdBagToggleGenerator = function(){
     if(ui.busy) return;
-    if(!collectRows(profile()).length) return;
+    if(!realRows().length) return;
     clearTimers();
     ui.rollOpen = false;
     ui.addOpen = false; ui.addStep = 1; ui.addClub = ''; ui.addCarry = 0;
