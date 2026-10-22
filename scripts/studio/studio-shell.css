@@ -651,6 +651,18 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
 #gdStudioShellRoot .gdStudioOverlayFavAdd:hover,
 #gdStudioShellRoot .gdStudioOverlayFav:hover { background: rgba(231, 243, 236, 0.1); }
 #gdStudioShellRoot .gdStudioOverlayFav.isActive { background: var(--gdStudioAccent); color: var(--gdOverlayInk); }
+#gdStudioShellRoot .gdStudioOverlayFav.isListening { box-shadow: inset 0 0 0 2px #f2d36b; }
+#gdStudioShellRoot .gdStudioOverlayFavKey {
+  min-width: 16px;
+  padding: 1px 4px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.2;
+  text-align: center;
+  opacity: 0.75;
+}
 #gdStudioShellRoot .gdStudioOverlayWidth {
   width: 56px;
   min-height: 30px;

@@ -240,7 +240,7 @@
     /* Trees placed by hand on this course this session: what the tree finder learns from. Not
        remembered past a reload - the imagery and the light it was taken in can change. */
     treeSamples: [],
-    /* The favourites bar: tool, method and mode combinations kept one click (or 1-9) away. */
+    /* The favourites bar: tool, method and mode combinations kept one click (or their own key) away. */
     favourites: []
   };
 
@@ -581,7 +581,7 @@
       "Every tool also has the <em>Colour wand</em>: press on the thing and drag - the further you drag, the more of that colour it takes (Shift-drag adds more, ← → tighter / looser), Enter keeps it. " +
       "<strong>Trees</strong> - <em>Tree</em>: click to drop one tree, ↑ ↓ to size it; <em>Cluster</em>: press and drag to stretch an oval over a group (Shift for a circle); <em>Draw round</em>: press and drag round a wood; <em>Find trees</em>: drag a box and the trees in it that look like the ones you placed by hand this session are dropped for you (← → fewer / more, Enter keeps them, Esc takes them away). " +
       "<strong>Waste</strong> - <em>Draw + grow</em>: draw roughly round it and it is pushed out to the edge of the ground it sits on. " +
-      "<strong>Favourites</strong>: the ☆ under the options keeps the tool in hand, with its method and mode, on the favourites bar - click one (or press 1-9) to pick it up again, right-click it to take it off. " +
+      "<strong>Favourites</strong>: the ☆ under the options keeps the tool in hand, with its method and mode, on the favourites bar - click one (or press its key) to pick it up again. A new one gets the next free number as its key; right-click it, then press any letter or number to give it that key instead (it wins over the tool's own shortcut), Delete to take it off, Esc to leave it. " +
       "Whatever you just placed stays live: <strong>← →</strong> step the wand's sensitivity, <strong>↑ ↓</strong> make it smaller or bigger (a fairway narrower or wider), <strong>Enter</strong> or <strong>Space</strong> keeps it, <strong>Esc</strong> removes it - placing the next one keeps it too. " +
       "<strong>Pins</strong>, the quick pass: a fairway is its start then its end and becomes a fairway straight away; greens, tees, bunkers and water stay pins until <strong>Shape pins</strong>. " +
       "<strong>Fast</strong>, Pins with the hole kept in hand: every pin placed joins it, and <strong>Space</strong> links them as one hole. <em>Single</em>: a click pins the tool in hand and stays on it. <em>Green → Tee</em> and <em>Tee → Green</em>: a click pins and moves the tool on round the cycle - a fairway is its start, then its end - so a hole is four clicks and Space (Q again switches). Come back in Move to shape any pin that needs it. " +
@@ -990,14 +990,28 @@
       if (!placesShapes(tool)) return { mode: "", fast: "", tool: tool, method: "" };
       return { mode: fastPins() ? "fast" : session.mode, fast: fastPins() ? session.fast : "", tool: tool, method: methodOf(tool) || "" };
     }
-    function favouriteKey(fav) { return [fav.mode, fav.fast, fav.tool, fav.method].join(":"); }
+    function favouriteId(fav) { return [fav.mode, fav.fast, fav.tool, fav.method].join(":"); }
     function validFavourite(fav) {
       if (!fav || typeof fav !== "object" || TOOLS.indexOf(fav.tool) < 0) return false;
       if (!placesShapes(fav.tool)) return !fav.mode && !fav.fast && !fav.method;
       if (["shapes", "pins", "fast"].indexOf(fav.mode) < 0) return false;
       if (fav.mode === "fast" ? FAST_ORDERS.indexOf(fav.fast) < 0 : fav.fast) return false;
+      if (fav.key != null && !validFavKey(fav.key)) return false;
       return fav.method ? !!METHODS[fav.tool] && METHODS[fav.tool].indexOf(fav.method) >= 0 : true;
     }
+    /* A favourite's key: a letter or a number, its own - it is picked before any shortcut the
+       key has. */
+    function validFavKey(k) { return typeof k === "string" && /^[a-z0-9]$/.test(k); }
+    function freeFavKey() {
+      for (var n = 1; n <= 9; n++) if (!favouriteByKey(String(n))) return String(n);
+      return "";
+    }
+    function favouriteByKey(k) {
+      for (var i = 0; i < session.favourites.length; i++) if (session.favourites[i].key === k) return i + 1;
+      return 0;
+    }
+    /* The favourite right-clicked, waiting for the key it should have. */
+    var favListening = -1;
     function favouriteLabel(fav) {
       var bits = [TOOL_LABEL[fav.tool]];
       if (fav.method) bits.push(METHOD_LABEL[fav.method]);
@@ -1006,23 +1020,29 @@
       return bits.join(" · ");
     }
     function renderFavourites() {
-      var here = favouriteKey(currentFavourite());
-      var kept = session.favourites.some(function (fav) { return favouriteKey(fav) === here; });
+      var here = favouriteId(currentFavourite());
+      var kept = session.favourites.some(function (fav) { return favouriteId(fav) === here; });
       el["fav-add"].innerHTML = (kept ? ICON.starOn : ICON.star) + (session.favourites.length ? "" : "<span>Favourite</span>");
       el["fav-add"].classList.toggle("isActive", kept);
       el["fav-add"].title = (kept ? "Take " : "Add ") + favouriteLabel(currentFavourite()) + (kept ? " off the favourites" : " to the favourites");
       el["fav-list"].innerHTML = session.favourites.map(function (fav, i) {
-        var label = favouriteLabel(fav);
-        return '<button type="button" class="gdStudioOverlayFav' + (favouriteKey(fav) === here ? " isActive" : "") + '" data-fav="' + i + '" title="' + esc(label + (i < 9 ? " (" + (i + 1) + ")" : "") + " - right-click to remove") + '">' +
-          ICON[fav.tool] + "<span>" + esc(label) + "</span></button>";
+        var label = favouriteLabel(fav), listening = i === favListening;
+        return '<button type="button" class="gdStudioOverlayFav' + (favouriteId(fav) === here ? " isActive" : "") + (listening ? " isListening" : "") + '" data-fav="' + i + '" title="' +
+          esc(label + (fav.key ? " (" + fav.key.toUpperCase() + ")" : "") + " - right-click to set its key or take it off") + '">' +
+          ICON[fav.tool] + "<span>" + esc(listening ? "Press a key · Del removes · Esc" : label) + "</span>" +
+          (fav.key && !listening ? '<kbd class="gdStudioOverlayFavKey">' + esc(fav.key.toUpperCase()) + "</kbd>" : "") + "</button>";
       }).join("");
     }
     function toggleFavourite() {
-      var fav = currentFavourite(), key = favouriteKey(fav);
-      var at = session.favourites.map(favouriteKey).indexOf(key);
+      var fav = currentFavourite(), key = favouriteId(fav);
+      var at = session.favourites.map(favouriteId).indexOf(key);
       if (at >= 0) { session.favourites.splice(at, 1); setStatus(favouriteLabel(fav) + " taken off the favourites."); }
       else if (session.favourites.length >= MAX_FAVOURITES) { setStatus("The favourites bar holds " + MAX_FAVOURITES + " - right-click one to make room.", true); return; }
-      else { session.favourites.push(fav); setStatus(favouriteLabel(fav) + " added to the favourites" + (session.favourites.length <= 9 ? " - key " + session.favourites.length + "." : ".")); }
+      else {
+        fav.key = freeFavKey();
+        session.favourites.push(fav);
+        setStatus(favouriteLabel(fav) + " added to the favourites" + (fav.key ? " - key " + fav.key + "." : ".") + " Right-click it to give it another key.");
+      }
       remember();
       renderFavourites();
     }
@@ -1034,6 +1054,36 @@
       setTool(fav.tool);
       if (fav.method) setMethod(fav.tool, fav.method);
       setStatus(favouriteLabel(fav) + ".");
+    }
+    function listenForFavKey(i) {
+      favListening = favListening === i ? -1 : i;
+      renderFavourites();
+      if (favListening >= 0) setStatus("Press the key for " + favouriteLabel(session.favourites[i]) + " - a letter or number. Delete takes it off the bar, Esc leaves it as it is.");
+    }
+    /* While a favourite waits for its key, the next key press is its - nothing else sees it. */
+    function onFavKey(event) {
+      if (favListening < 0) return;
+      var fav = session.favourites[favListening];
+      if (!fav || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (/^(Shift|Control|Alt|Meta|CapsLock)$/.test(event.key)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      var i = favListening, k = String(event.key || "").toLowerCase();
+      favListening = -1;
+      if (event.key === "Escape") { renderFavourites(); setStatus(favouriteLabel(fav) + " left as it was."); return; }
+      if (event.key === "Delete" || event.key === "Backspace") { removeFavourite(i); return; }
+      if (!validFavKey(k)) { renderFavourites(); setStatus("A favourite's key is a letter or a number.", true); return; }
+      var other = favouriteByKey(k);
+      if (other && other - 1 !== i) delete session.favourites[other - 1].key;
+      fav.key = k;
+      remember();
+      renderFavourites();
+      setStatus(favouriteLabel(fav) + " is on " + k.toUpperCase() + (other && other - 1 !== i ? " - " + favouriteLabel(session.favourites[other - 1]) + " no longer has a key." : "."));
+    }
+    function stopFavListening(event) {
+      if (favListening < 0 || (event && event.target.closest && event.target.closest(".isListening"))) return;
+      favListening = -1;
+      renderFavourites();
     }
     function removeFavourite(i) {
       var fav = session.favourites.splice(i, 1)[0];
@@ -5916,6 +5966,7 @@
       }
       if (event.key === "Escape") { setTool("move"); if (selectedId) select(""); return; }
       var key = String(event.key || "").toLowerCase();
+      if (favouriteByKey(key)) { useFavourite(favouriteByKey(key) - 1); return; }
       if (key === "h") { fitCourse(); return; }
       if (key === "z") { zoomToSelected(); return; }
       /* Q is Fast pins; Q again steps its order: Single, Green → Tee, Tee → Green. */
@@ -5923,7 +5974,6 @@
       if (key === "s" || key === "p") { setMode(key === "p" ? "pins" : "shapes"); return; }
       if (key === "[" || key === "]") { stepWandSize(key === "]" ? 1 : -1); return; }
       if (key === "k" && collarGreen()) { addCollar(); return; }
-      if (/^[1-9]$/.test(key) && session.favourites[Number(key) - 1]) { useFavourite(Number(key) - 1); return; }
       /* The tool's own key again steps through its methods: wand, draw round, line + wand. */
       var own = { f: "fairway", g: "green", t: "tee", b: "bunker", w: "water", e: "trees", x: "hazard", a: "waste" }[key];
       if (own && own === tool && methodOf(own) && canEdit()) { cycleMethod(own); return; }
@@ -5931,7 +5981,9 @@
       if (shortcut && (shortcut === "move" || canEdit())) setTool(shortcut);
     }
     document.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onFavKey, true);
     document.addEventListener("keydown", onAdjustKey, true);
+    document.addEventListener("pointerdown", stopFavListening, true);
 
     el.pick.addEventListener("click", pickCourse);
     el.inbox.addEventListener("click", onInboxClick);
@@ -6012,6 +6064,11 @@
     el["mode-fast"].addEventListener("click", function () { setMode("fast"); });
     FAST_ORDERS.forEach(function (o) { el["fast-" + o].addEventListener("click", function () { setMode("fast", o); }); });
     session.favourites = session.favourites.filter(validFavourite).slice(0, MAX_FAVOURITES);
+    /* One favourite to a key; ones saved before keys could be set keep their old 1-9. */
+    session.favourites.forEach(function (fav, i) {
+      if (fav.key && favouriteByKey(fav.key) - 1 !== i) delete fav.key;
+      if (!("key" in fav) && i < 9 && !favouriteByKey(String(i + 1))) fav.key = String(i + 1);
+    });
     el["fav-add"].addEventListener("click", toggleFavourite);
     el["fav-list"].addEventListener("click", function (event) {
       var b = event.target.closest("[data-fav]");
@@ -6021,7 +6078,7 @@
       var b = event.target.closest("[data-fav]");
       if (!b) return;
       event.preventDefault();
-      removeFavourite(Number(b.getAttribute("data-fav")));
+      listenForFavKey(Number(b.getAttribute("data-fav")));
     });
     el["wand-smaller"].addEventListener("click", function () { stepWandSize(-1); });
     el["wand-bigger"].addEventListener("click", function () { stepWandSize(1); });
@@ -6105,6 +6162,8 @@
       if (saveTimer) clearTimeout(saveTimer);
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("keydown", onAdjustKey, true);
+      document.removeEventListener("keydown", onFavKey, true);
+      document.removeEventListener("pointerdown", stopFavListening, true);
       document.removeEventListener("pointermove", onLassoMove);
       document.removeEventListener("pointerup", onLassoEnd);
       document.removeEventListener("pointercancel", onLassoEnd);

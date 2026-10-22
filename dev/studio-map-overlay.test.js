@@ -405,7 +405,8 @@ test("the favourites bar keeps a tool with its method and mode", () => {
   assert.ok(page.includes('data-gd-overlay="fav-add"') && page.includes('data-gd-overlay="fav-list"'), "the bar has its star and its list");
   assert.ok(page.includes("favourites: session.favourites,"), "favourites are remembered past a reload");
   assert.ok(page.includes("session.favourites = session.favourites.filter(validFavourite)"), "a remembered favourite that no longer makes sense is dropped");
-  assert.ok(page.includes('if (/^[1-9]$/.test(key) && session.favourites[Number(key) - 1])'), "1-9 pick up a favourite");
+  assert.ok(page.includes("if (favouriteByKey(key)) { useFavourite(favouriteByKey(key) - 1); return; }\n      if (key === \"h\")"), "a favourite's own key picks it up, ahead of the built-in shortcuts");
+  assert.ok(page.includes('document.addEventListener("keydown", onFavKey, true);\n    document.addEventListener("keydown", onAdjustKey, true);'), "a favourite waiting for its key hears it before anything else");
 });
 
 test("the shape just placed can be dragged without switching to Move", () => {
