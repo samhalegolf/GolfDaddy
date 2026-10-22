@@ -240,8 +240,6 @@
     "bag.sevenIronQuestion": "How far do you carry your 7‑iron?",
     "bag.sevenIronPlaceholder": "7-iron carry (m)",
     "bag.sevenIronAria": "7-iron carry metres",
-    "bag.signInToKeep": "Sign in to keep your own club distances. The ones shown are the standard set.",
-    "bag.standardSignIn": "These are the standard distances driving your bubble. Sign in to set your own.",
     "bag.standardUntilSet": "Standard distances, until you set your own.",
     "bag.sevenIronFirst": "Enter your 7-iron carry first",
     "bag.generateRestTitle": "Generate the rest of your bag?",

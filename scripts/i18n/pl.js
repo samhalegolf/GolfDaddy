@@ -236,8 +236,6 @@
     "bag.sevenIronQuestion": "Jakie masz carry żelazem 7?",
     "bag.sevenIronPlaceholder": "Carry żelaza 7 (m)",
     "bag.sevenIronAria": "Carry żelaza 7 w metrach",
-    "bag.signInToKeep": "Zaloguj się, aby zapisać własne odległości kijów. Pokazane są odległości standardowe.",
-    "bag.standardSignIn": "To standardowe odległości, na których opiera się twój Bubble. Zaloguj się, aby ustawić własne.",
     "bag.standardUntilSet": "Standardowe odległości, dopóki nie ustawisz własnych.",
     "bag.sevenIronFirst": "Najpierw wpisz carry żelaza 7",
     "bag.generateRestTitle": "Wygenerować resztę torby?",

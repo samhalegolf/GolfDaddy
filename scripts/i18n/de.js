@@ -234,8 +234,6 @@
     "bag.sevenIronQuestion": "Wie weit ist dein Carry mit dem 7er‑Eisen?",
     "bag.sevenIronPlaceholder": "Carry 7er-Eisen (m)",
     "bag.sevenIronAria": "Carry 7er-Eisen in Metern",
-    "bag.signInToKeep": "Melde dich an, um deine eigenen Schlägerdistanzen zu speichern. Angezeigt wird das Standardset.",
-    "bag.standardSignIn": "Das sind die Standarddistanzen hinter deiner Bubble. Melde dich an, um eigene festzulegen.",
     "bag.standardUntilSet": "Standarddistanzen, bis du eigene festlegst.",
     "bag.sevenIronFirst": "Gib zuerst dein Carry mit dem 7er-Eisen ein",
     "bag.generateRestTitle": "Den Rest deines Bags erstellen?",

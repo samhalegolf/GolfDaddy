@@ -236,8 +236,6 @@
     "bag.sevenIronQuestion": "Kolikšen je tvoj carry z železom 7?",
     "bag.sevenIronPlaceholder": "Carry železa 7 (m)",
     "bag.sevenIronAria": "Carry železa 7 v metrih",
-    "bag.signInToKeep": "Prijavi se, da shraniš svoje razdalje palic. Prikazane so standardne vrednosti.",
-    "bag.standardSignIn": "To so standardne razdalje, ki oblikujejo tvoj Bubble. Prijavi se, da nastaviš svoje.",
     "bag.standardUntilSet": "Standardne razdalje, dokler ne nastaviš svojih.",
     "bag.sevenIronFirst": "Najprej vnesi carry železa 7",
     "bag.generateRestTitle": "Ustvarim preostale palice v torbi?",

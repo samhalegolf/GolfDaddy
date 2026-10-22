@@ -234,8 +234,6 @@
     "bag.sevenIronQuestion": "Wat is je carry met ijzer‑7?",
     "bag.sevenIronPlaceholder": "Carry ijzer 7 (m)",
     "bag.sevenIronAria": "Carry ijzer 7 in meters",
-    "bag.signInToKeep": "Log in om je eigen clubafstanden te bewaren. Je ziet nu de standaardset.",
-    "bag.standardSignIn": "Dit zijn de standaardafstanden achter je Bubble. Log in om je eigen afstanden in te stellen.",
     "bag.standardUntilSet": "Standaardafstanden, tot je je eigen instelt.",
     "bag.sevenIronFirst": "Vul eerst je carry met ijzer 7 in",
     "bag.generateRestTitle": "De rest van je tas genereren?",

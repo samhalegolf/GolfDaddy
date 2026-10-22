@@ -234,8 +234,6 @@
     "bag.sevenIronQuestion": "Kuinka pitkä carry sinulla on 7‑raudalla?",
     "bag.sevenIronPlaceholder": "7-raudan carry (m)",
     "bag.sevenIronAria": "7-raudan carry metreinä",
-    "bag.signInToKeep": "Kirjaudu sisään, niin voit tallentaa omat mailamatkasi. Näytetyt ovat vakiomatkat.",
-    "bag.standardSignIn": "Nämä ovat vakiomatkat, joihin Bubble perustuu. Kirjaudu sisään, niin voit asettaa omasi.",
     "bag.standardUntilSet": "Vakiomatkat, kunnes asetat omasi.",
     "bag.sevenIronFirst": "Syötä ensin 7-raudan carry",
     "bag.generateRestTitle": "Täydennetäänkö loput bägistä?",

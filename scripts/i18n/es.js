@@ -234,8 +234,6 @@
     "bag.sevenIronQuestion": "¿Qué carry tienes con el hierro 7?",
     "bag.sevenIronPlaceholder": "Carry hierro 7 (m)",
     "bag.sevenIronAria": "Carry del hierro 7 en metros",
-    "bag.signInToKeep": "Inicia sesión para guardar tus propias distancias. Las que ves son las estándar.",
-    "bag.standardSignIn": "Estas son las distancias estándar que usa tu Bubble. Inicia sesión para definir las tuyas.",
     "bag.standardUntilSet": "Distancias estándar, hasta que definas las tuyas.",
     "bag.sevenIronFirst": "Introduce primero el carry de tu hierro 7",
     "bag.generateRestTitle": "¿Generar el resto de tu bolsa?",

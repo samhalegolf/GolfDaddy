@@ -234,8 +234,6 @@
     "bag.sevenIronQuestion": "Hvor langt carry har du med 7‑jernet?",
     "bag.sevenIronPlaceholder": "Carry 7-jern (m)",
     "bag.sevenIronAria": "Carry i meter med 7-jern",
-    "bag.signInToKeep": "Logg inn for å lagre dine egne køllelengder. De som vises er standardsettet.",
-    "bag.standardSignIn": "Dette er standardlengdene som styrer din Bubble. Logg inn for å sette dine egne.",
     "bag.standardUntilSet": "Standardlengder til du setter dine egne.",
     "bag.sevenIronFirst": "Skriv inn carry med 7-jern først",
     "bag.generateRestTitle": "Fylle ut resten av bagen?",

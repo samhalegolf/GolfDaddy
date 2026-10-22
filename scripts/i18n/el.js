@@ -234,8 +234,6 @@
     "bag.sevenIronQuestion": "Πόσο carry βγάζεις με το σίδερο 7;",
     "bag.sevenIronPlaceholder": "Carry σίδερου 7 (m)",
     "bag.sevenIronAria": "Carry σίδερου 7 σε μέτρα",
-    "bag.signInToKeep": "Συνδέσου για να κρατάς τις δικές σου αποστάσεις μπαστουνιών. Αυτές που φαίνονται είναι οι τυπικές.",
-    "bag.standardSignIn": "Αυτές είναι οι τυπικές αποστάσεις που καθορίζουν το Bubble σου. Συνδέσου για να ορίσεις τις δικές σου.",
     "bag.standardUntilSet": "Τυπικές αποστάσεις, μέχρι να ορίσεις τις δικές σου.",
     "bag.sevenIronFirst": "Γράψε πρώτα το carry του σίδερου 7",
     "bag.generateRestTitle": "Να συμπληρωθεί ο υπόλοιπος σάκος;",

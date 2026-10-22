@@ -234,8 +234,6 @@
     "bag.sevenIronQuestion": "Milyen messzire repül a labda a 7‑es vasaddal?",
     "bag.sevenIronPlaceholder": "7-es vas carry (m)",
     "bag.sevenIronAria": "7-es vas carry méterben",
-    "bag.signInToKeep": "Jelentkezz be, hogy elmenthesd a saját ütőtávolságaidat. A látható értékek az alapértelmezett készlet.",
-    "bag.standardSignIn": "Ezek az alapértelmezett távolságok határozzák meg a Bubble alakját. Jelentkezz be a sajátjaid beállításához.",
     "bag.standardUntilSet": "Alapértelmezett távolságok, amíg be nem állítod a sajátjaidat.",
     "bag.sevenIronFirst": "Először add meg a 7-es vas carry-távolságát",
     "bag.generateRestTitle": "Legeneráljuk a táska többi részét?",

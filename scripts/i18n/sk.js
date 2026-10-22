@@ -235,8 +235,6 @@
     "bag.sevenIronQuestion": "Aké máš carry so železom 7?",
     "bag.sevenIronPlaceholder": "Carry železa 7 (m)",
     "bag.sevenIronAria": "Carry železa 7 v metroch",
-    "bag.signInToKeep": "Prihlás sa a ulož si vlastné vzdialenosti palíc. Zobrazené sú štandardné vzdialenosti.",
-    "bag.standardSignIn": "Toto sú štandardné vzdialenosti, podľa ktorých sa riadi tvoj Bubble. Prihlás sa a nastav si vlastné.",
     "bag.standardUntilSet": "Štandardné vzdialenosti, kým nenastavíš vlastné.",
     "bag.sevenIronFirst": "Najprv zadaj carry železa 7",
     "bag.generateRestTitle": "Doplniť zvyšok bagu?",

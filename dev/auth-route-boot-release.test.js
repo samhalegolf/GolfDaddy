@@ -144,10 +144,9 @@ async function launchBrowser(playwright) {
     const head = painter.slice(idx, idx + 600);
     assert.ok(
       !/app\.access/.test(head),
-      "drawShot must not check access - the bubble is free, the bag behind it is not"
+      "drawShot must not check access - the bubble and the bag are both free"
     );
     const bag = fs.readFileSync(path.join(ROOT, "app", "js", "bag.js"), "utf8");
-    assert.ok(/function canEdit\(\)/.test(bag), "bag.js must gate editing");
     assert.ok(
       !/clarity:bag:v1/.test(bag.slice(bag.indexOf("(function ()"))),
       "the second bag store is retired; bag.js reads the profile bag"

@@ -234,8 +234,6 @@
     "bag.sevenIronQuestion": "Qual é o carry do teu ferro 7?",
     "bag.sevenIronPlaceholder": "Carry do ferro 7 (m)",
     "bag.sevenIronAria": "Carry do ferro 7 em metros",
-    "bag.signInToKeep": "Inicia sessão para guardares as tuas próprias distâncias. As que vês são as distâncias padrão.",
-    "bag.standardSignIn": "Estas são as distâncias padrão que definem a tua Bubble. Inicia sessão para definires as tuas.",
     "bag.standardUntilSet": "Distâncias padrão, até definires as tuas.",
     "bag.sevenIronFirst": "Introduz primeiro o carry do teu ferro 7",
     "bag.generateRestTitle": "Gerar o resto do teu saco?",

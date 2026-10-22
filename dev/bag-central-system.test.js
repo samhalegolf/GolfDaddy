@@ -315,9 +315,9 @@ test("the bag is free, and every door agrees it is", () => {
      bag was editable through one door and read-only through another. Neither
      asks now.
 
-     What the play surface DOES still check is that there is a profile to write
-     into: save() refuses rather than inventing one, so an edit offered without
-     somewhere to put it would be accepted and silently dropped. */
+     Nor does it wait for a profile: a device that has never been through the
+     shell has none, and refusing until then left Generate doing nothing. The
+     first write makes one. */
   const shell = read("scripts/gd-app-core.js");
   assert.ok(!shell.includes('requireAccess("set your own club distances")'),
     "gd-app-core must not gate a bag write on an entitlement");
@@ -327,8 +327,10 @@ test("the bag is free, and every door agrees it is", () => {
   const bag = read("app/js/bag.js");
   assert.ok(!bag.includes("roundFeatures"),
     "the play surface must not gate club edits on round features");
-  assert.ok(/function canEdit\(\)\s*\{\s*return !!activeProfile\(\);/.test(bag),
-    "it asks only whether there is a profile to save the clubs into");
+  assert.ok(!/function canEdit\(/.test(bag) && !/function refuse\(/.test(bag),
+    "there is no edit gate left on the play surface");
+  assert.ok(/function writableProfile\(/.test(bag),
+    "a write with no profile on the device makes one instead of being dropped");
   assert.ok(!/membership lets you set your own/.test(bag),
     "and the notice above the list no longer sells the bag");
 });
@@ -374,6 +376,16 @@ test("the shell bag has two modes, and only one of them rewrites the bag", () =>
   assert.ok(generator.includes("function sevenIronForCarry("), "by inverting its own forward ladder");
   assert.ok(/carryFor\(desc, mid, true\)/.test(generator),
     "and the inverse searches the unguarded curve, which is the monotonic one");
+});
+
+test("a signed-in player's empty bag can be generated", () => {
+  /* ensureProfile() re-seeds an empty bag with the stock set on every call and
+     the sheet hides it, so Generate must ask about the bag the sheet shows -
+     not the seeded one behind it - or it bails on a bag that looks empty. */
+  const support = read("scripts/clarity-support.js");
+  const build = support.slice(support.indexOf("win.gdBagBuild = function"), support.indexOf("win.gdBagToggleGenerator"));
+  assert.ok(build.includes("if(realRows().length) return;"), "the build guard reads the cleared bag");
+  assert.ok(!/collectRows\(profile\(\)\)/.test(support), "nothing asks collectRows of the raw, re-seeded profile");
 });
 
 test("a guest's first bag is shown, not just saved", () => {
