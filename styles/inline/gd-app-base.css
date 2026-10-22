@@ -243,6 +243,35 @@
     .gdAdminUsageNums b{font-size:12px}
     .gdAdminUsageName span,.gdAdminUsageNums span,.gdAdminUsageNote{color:rgba(255,255,255,.55);font-size:10px;font-weight:800}
     .gdAdminUsageNote{margin:6px 0}
+    .gdAdminUsageRow{grid-template-columns:minmax(0,1.3fr) repeat(3,minmax(0,1fr))}
+    .gdAdminUsageCharts{display:grid;gap:10px;margin:10px 0}
+    .gdAdminUsageTrend,.gdAdminUsageShare{padding:9px 10px;border-radius:14px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.08)}
+    .gdAdminUsageShareHead{display:flex;justify-content:space-between;gap:8px;align-items:baseline;font-size:11px;margin-bottom:6px}
+    .gdAdminUsageShareHead span,.gdAdminUsageTrendAxis{color:rgba(255,255,255,.55);font-size:10px;font-weight:800}
+    .gdAdminUsageTrend svg{display:block;width:100%;height:110px}
+    .gdAdminUsageTrend polyline{fill:none;stroke-width:2;vector-effect:non-scaling-stroke;stroke-linejoin:round}
+    .gdAdminUsageTrend polyline.plays{stroke:#d7b06b}
+    .gdAdminUsageTrend polyline.downloads{stroke:#7fb3d5}
+    .gdAdminUsageTrend .gdAdminUsageShareHead i{display:inline-block;width:10px;height:3px;margin:0 4px 2px 8px;vertical-align:middle;border-radius:2px}
+    .gdAdminUsageTrend i.plays{background:#d7b06b}
+    .gdAdminUsageTrend i.downloads{background:#7fb3d5}
+    .gdAdminUsageTrendAxis{display:flex;justify-content:space-between;margin-top:4px}
+    .gdAdminUsageShareBar{display:flex;height:10px;border-radius:999px;overflow:hidden;background:rgba(255,255,255,.06)}
+    .gdAdminUsageShareBar i{display:block;height:100%}
+    .gdAdminUsageShareKey{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:6px;color:rgba(255,255,255,.7);font-size:10px;font-weight:800}
+    .gdAdminUsageShareKey i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+    .gdAdminUsageShare .good{background:#6fbf73}
+    .gdAdminUsageShare .fine{background:#4fa3a5}
+    .gdAdminUsageShare .ok{background:#d7b06b}
+    .gdAdminUsageShare .bad{background:#e07a5f}
+    .gdAdminUsageShare .muted{background:rgba(255,255,255,.25)}
+    .gdAdminUsageSearch{width:100%;box-sizing:border-box;margin:4px 0 8px;padding:8px 12px;border-radius:999px;background:rgba(255,255,255,.06);color:#fff;border:1px solid rgba(255,255,255,.12);font-size:12px}
+    .gdAdminUsageHeading{margin:12px 0 6px;font-size:12px;font-weight:950}
+    .gdAdminUsageProblem{display:grid;gap:2px;padding:9px 10px;border-radius:14px;background:rgba(224,122,95,.08);border:1px solid rgba(224,122,95,.25)}
+    .gdAdminUsageProblem strong{font-size:12px}
+    .gdAdminUsageProblem span{color:rgba(255,255,255,.7);font-size:10px;font-weight:800}
+    .gdAdminUsageLink{justify-self:start;padding:0;background:none;border:0;color:#d7b06b;font-size:10px;font-weight:900;cursor:pointer}
+    .gdAdminUsageTag{justify-self:start;color:#e07a5f !important}
     @media(max-width:620px){.gdAdminUsageRow{grid-template-columns:1fr}}
     .gdAdminDatabaseMetric{min-width:0;padding:8px;border-radius:12px;background:rgba(0,0,0,.18);border:1px solid rgba(255,255,255,.07)}
     .gdAdminDatabaseMetric span{display:block;color:rgba(255,255,255,.52);font-size:9px;font-weight:950;text-transform:uppercase;letter-spacing:.06em}

@@ -501,15 +501,25 @@
       } catch (e) { return null; }
     }
 
+    /* Which wrist the errand served, for the usage count: a Garmin whenever one is
+       chosen (whichever package it got), otherwise an Apple Watch. */
     async function run(courseKey) {
       if (!plugin || typeof plugin.publishWatchMap !== "function" || typeof plugin.publishWatchMapAsset !== "function") {
         return { delivered: false, reason: "no-native-bridge" };
       }
-      var drawn = (await garminConnected()) ? await garminPackage(courseKey) : null;
+      var garmin = await garminConnected();
+      var result = await runFor(courseKey, garmin);
+      if (result) result.watch = garmin ? "garmin" : "apple-watch";
+      return result;
+    }
+
+    async function runFor(courseKey, garmin) {
+      var drawn = garmin ? await garminPackage(courseKey) : null;
       if (drawn) return runDrawn(courseKey, drawn.version, drawn.holes);
       var response = await fetchImpl(apiUrl(REPORT_ENDPOINT + "?courseId=" + encodeURIComponent(courseKey)));
       if (!response || !response.ok) return { delivered: false, reason: "report-unavailable" };
       var report = await response.json();
+      var versionLabel = (report && report.versionLabel) || "";
       var version = String((report && report.watchPackageVersion) || "");
       var holes = (report && Array.isArray(report.holes) ? report.holes : []).map(function (hole) { return manifestHole(hole, false); }).filter(Boolean);
       if (!version || version === "0" || !holes.length) {
@@ -602,7 +612,7 @@
           log("watch map asset failed", hole.holeNumber, error);
         }
       }
-      return { delivered: sent > 0, sent: sent, failed: failed, skipped: holes.length - missing.length, version: version };
+      return { delivered: sent > 0, sent: sent, failed: failed, skipped: holes.length - missing.length, version: version, versionLabel: versionLabel };
     }
 
     /* A Garmin package: the manifest, the skeleton and the outlines are the whole delivery -
@@ -638,13 +648,21 @@
       return { delivered: true, sent: 1, skipped: 0, version: version, drawn: true };
     }
 
-    /* Anonymous usage count (app/js/course-package.js): this course's maps
-       went to a wrist. Absent off the app page, so the Studio surfaces and
-       tests never count anything. */
-    function reportWatchDownload(courseKey) {
+    /* Anonymous usage count (scripts/gd-course-usage-report.js): this course's maps
+       went to a wrist, or could not. Absent off the app page, so the Studio surfaces
+       and tests never count anything. Only real failures count as one - no native
+       bridge, a cooldown or a wrist that already held everything are not. */
+    var DELIVERY_FAILURES = { "report-unavailable": true, "no-package": true, error: true };
+    function reportWatchUsage(courseKey, result) {
       try {
-        var app = typeof window !== "undefined" && window.ClarityApp;
-        if (app && typeof app.reportCourseUsage === "function") app.reportCourseUsage(courseKey, "download", "watch");
+        var usage = typeof window !== "undefined" && window.GDCourseUsage;
+        if (!usage || !result || !result.watch) return;
+        if (result.sent > 0) {
+          usage.report({ courseId: courseKey, event: "download", origin: result.watch, version: result.versionLabel });
+        } else if (DELIVERY_FAILURES[result.reason] || result.failed > 0) {
+          usage.report({ courseId: courseKey, event: "delivery-failed", origin: result.watch,
+            outcome: result.failed > 0 ? "assets-failed" : result.reason });
+        }
       } catch (e) {}
     }
 
@@ -656,7 +674,7 @@
       if (retryAfter[courseKey] > now()) return Promise.resolve({ delivered: false, reason: "cooling-down" });
       var promise = run(courseKey).then(function (result) {
         delete inFlight[courseKey];
-        if (result && result.sent > 0) reportWatchDownload(courseKey);
+        reportWatchUsage(courseKey, result);
         /* Only a package the WRIST says it holds is remembered for good.
            Deliberately not `result.delivered && !result.failed`: that counted
            holes as they left the phone, and a hole handed to the radio is not
@@ -673,6 +691,8 @@
         delete inFlight[courseKey];
         retryAfter[courseKey] = now() + cooldownFor(courseKey);
         log("watch map delivery failed", courseKey, error);
+        /* Thrown before the errand knew which wrist it was serving. */
+        reportWatchUsage(courseKey, { delivered: false, reason: "error", watch: "watch" });
         return { delivered: false, reason: "error" };
       });
       inFlight[courseKey] = promise;

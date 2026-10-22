@@ -454,19 +454,21 @@
 
     {
       id: "course-usage", label: "Course Usage", parent: "courses",
-      function: "Which course maps actually get used, and from where: rounds played and maps downloaded per course, split by origin (iOS, Android, web, watch) and country, last 30 days or all time. Anonymous daily tallies - no account, guest id, IP or user agent is stored, so this answers \"which courses\" and never \"who\". The same card also sits in Admin Settings; this page renders it into its own body rather than moving that one.",
+      function: "Which course maps actually get used, how, and from where: rounds, phone downloads, map updates and watch deliveries per course, split by origin (iOS, Android, web, Apple Watch, Garmin) and country, over 7/30/90 days or all time. Shows how each round opened (from the device, ready, prepared while waiting, or what went wrong), which map it ran on (full, lite, live only) and whether it was the latest version, with a per-day trend and a problem-courses list. Courses with no map are counted too. Anonymous daily tallies - no account, guest id, IP or user agent is stored, so this answers \"which courses\" and never \"who\". The same card also sits in Admin Settings; this page renders it into its own body rather than moving that one.",
       owner: "scripts/studio/gd-admin-course-usage.js",
       runtime: { app: false, studio: true, server: true },
       code: [
         { role: "Studio page wrapper", path: "scripts/studio/courses/course-usage/course-usage-page.js" },
         { role: "Usage card - fetch, fold rows per course, render (owner)", path: "scripts/studio/gd-admin-course-usage.js" },
-        { role: "Usage API - anonymous POST +1, admin-verified GET of the summary", path: "functions/course-usage.mjs" },
-        { role: "Table, +1 function and summary view", path: "supabase/migrations/20261004_create_course_map_usage.sql" }
+        { role: "Usage API - anonymous POST +1, admin-verified GET of the report", path: "functions/course-usage.mjs" },
+        { role: "Client reporter shared by both shells", path: "scripts/gd-course-usage-report.js" },
+        { role: "Table and +1 function", path: "supabase/migrations/20261004_create_course_map_usage.sql" },
+        { role: "Open detail columns, +1 function and report function", path: "supabase/migrations/20261022_course_map_usage_detail.sql" }
       ],
-      inputs: ["course_map_usage_summary (via GET /api/course-usage)"],
+      inputs: ["course_map_usage_report (via GET /api/course-usage)"],
       outputs: ["Display only - nothing is written"],
       owns: ["The usage display"],
-      doesNotOwn: ["The counting itself (app/js/course-package.js and app/js/watch-map-delivery.js POST the +1s)"],
+      doesNotOwn: ["The counting itself (scripts/gd-course-usage-report.js, called from app/js/boot.js, app/js/watch-map-delivery.js and the Course Library update in scripts/gd-course-library-pin-lock.js)"],
       connections: [{ target: "courses", direction: "child-of", label: "" }, { target: "course-database", direction: "see-also", label: "The courses being counted" }],
       keyFunctions: [
         { name: "gdMountAdminCourseUsage", purpose: "Renders the usage card into a given element as well as the Admin Settings one.", codePath: "scripts/studio/gd-admin-course-usage.js" },
