@@ -2461,6 +2461,8 @@
         bytes:body.length
       };
       localStorage.setItem(DOWNLOADED_COURSE_LIBRARY_KEY,JSON.stringify(raw));
+      /* Anonymous usage count (scripts/gd-course-usage-report.js): a newer map replaced this device's copy. */
+      if(window.GDCourseUsage)window.GDCourseUsage.report({courseId:entry.courseId,courseName:entry.courseName,event:'update',mapType:mapType,version:pkg.versionLabel});
       return {ok:true,mapType:mapType};
     }catch(e){return {ok:false,reason:'storage'};}
   }

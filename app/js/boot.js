@@ -583,6 +583,7 @@
   function saveCourseToLibrary(course, pkg) {
     var mapType = mapTypeOf(pkg);
     if (!mapType) return null;
+    reportMapArrival(course, pkg, mapType);
     var saved = app.courseStore.save({
       courseId: course.courseId,
       courseName: course.courseName,
@@ -615,6 +616,46 @@
     return saved;
   }
   var signInAskedFor = {};
+
+  /* Anonymous usage count (scripts/gd-course-usage-report.js): a map just reached
+     this device. Every path that puts one here goes through saveCourseToLibrary, so
+     this is the one place that tells a first download from an update - a course the
+     device did not hold is a download, a different version over the copy it did
+     hold is an update, and the same copy again (a staged update being applied) is
+     neither. */
+  function reportMapArrival(course, pkg, mapType) {
+    var usage = window.GDCourseUsage;
+    if (!usage) return;
+    var held = app.courseStore.load(course.courseId);
+    var identity = function (label, objects) { return (label || "") + "|" + (objects || ""); };
+    if (held && held.mapType === mapType
+        && identity(held.versionLabel, held.objectsVersion) === identity(pkg.versionLabel, pkg.objectsVersion)) return;
+    usage.report({
+      courseId: course.courseId, courseName: course.courseName,
+      event: held ? "update" : "download", mapType: mapType, version: pkg.versionLabel
+    });
+  }
+
+  /* How an open that had to ask the server went, in the words the usage page
+     counts. `waited` is whether the server said "processing" at least once. */
+  function openOutcome(pkg, waited) {
+    if (mapTypeOf(pkg)) return waited ? "prepared" : "ready";
+    if (!pkg) return document.body.dataset.gdCoursePackageOutcome === "timeout" ? "timeout" : "unreachable";
+    if (pkg.status === "failed") return "failed";
+    if (pkg.status === "processing") return "timeout";   // the wait budget ran out first
+    if (pkg.triggerError === "guest-signup-required") return "signup-required";
+    if (pkg.triggerError === "server-busy") return "server-busy";
+    if (pkg.triggerError === "account-verification-unavailable") return "account-error";
+    return "not-mapped";
+  }
+
+  function reportPlay(course, pkg, mapType, outcome, waitMs) {
+    if (!window.GDCourseUsage) return;
+    window.GDCourseUsage.report({
+      courseId: course.courseId, courseName: course.courseName, event: "play",
+      mapType: mapType || "live", outcome: outcome, version: pkg && pkg.versionLabel, waitMs: waitMs
+    });
+  }
 
   function reportCoursePackageIssue(pkg) {
     var issue = pkg && pkg.triggerError ? String(pkg.triggerError) : "";
@@ -941,7 +982,7 @@
          on a network round-trip for a course already on the device. */
       activeMapType = cached.mapType;
       startRound(course, pkg);
-      app.reportCourseUsage(course.courseId, "play");
+      reportPlay(course, pkg, activeMapType, "cached", 0);
       goResumeHole(resumeHole);
       hideLoadingScreen();
       startDemoCourseDataTimerIfNeeded();
@@ -953,12 +994,15 @@
          A terminal answer or a timeout still falls through to the live map
          exactly as a plain null fetch always has. */
       setLoading("loading.downloading", 24);
+      var openStarted = Date.now();
+      var waited = false;
       pkg = await app.awaitCoursePackage({
         courseId: course.courseId,
         courseName: course.courseName,
         courseLat: course.courseLat,
         courseLng: course.courseLng,
         onProgress: function (info) {
+          if (info.status === "processing") waited = true;
           setLoading(info.waitedMs > 30000 ? "loading.preparingSlow" : "loading.preparing",
             Math.min(90, 30 + 60 * (info.waitedMs / info.budgetMs)));
         }
@@ -966,8 +1010,7 @@
       activeMapType = mapTypeOf(pkg);
       /* null package → live map only. Normal, per the handover. */
       startRound(course, pkg);
-      if (activeMapType) app.reportCourseUsage(course.courseId, "download");
-      app.reportCourseUsage(course.courseId, "play");
+      reportPlay(course, pkg, activeMapType, openOutcome(pkg, waited), Date.now() - openStarted);
       goResumeHole(resumeHole);
       hideLoadingScreen();
       startDemoCourseDataTimerIfNeeded();
