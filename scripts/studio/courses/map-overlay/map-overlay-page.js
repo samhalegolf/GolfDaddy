@@ -143,11 +143,13 @@
      or a hand-drawn water hazard this much smaller or bigger, a press. */
   var FAIRWAY_WIDTH_STEP_M = 5;
   var SCALE_STEP = 1.12;
-  /* ↑ ↓ on a green or a fairway: the outline grows or shrinks evenly, stepM a press, up to max
-     presses either way (GDOverlayShapes.reshapeOutline). A fairway's presses first bridge the
-     cut-ins along its edge (closeM) - an overhanging tree, a shadow, the wand stopping short -
-     so its first ↑ only smooths, and each one after adds a metre. */
-  var RESHAPE = { green: { stepM: 0.5, max: 16, closeM: 0 }, fairway: { stepM: 1, max: 12, closeM: 5 } };
+  /* ↑ ↓ on a green or a fairway: the outline grows or shrinks by stepM a press, up to max
+     presses either way. A green is scaled about its middle (scale), so it keeps its shape and
+     only its size changes - about stepM further out on average. A fairway's edge moves out
+     evenly (GDOverlayShapes.reshapeOutline), its presses first bridging the cut-ins along its
+     edge (closeM) - an overhanging tree, a shadow, the wand stopping short - so its first ↑
+     only smooths, and each one after adds a metre. */
+  var RESHAPE = { green: { stepM: 0.5, max: 16, closeM: 0, scale: true }, fairway: { stepM: 1, max: 12, closeM: 5 } };
   /* + Collar: the fringe round a finished green, found by growing out from COLLAR_M past its edge
      up to COLLAR_REACH_M further, then necked out to the hole's fairway at COLLAR_NECK_M wide. */
   var COLLAR_M = 2;
@@ -2204,7 +2206,7 @@
       updateHint();
     }
 
-    /* Up or down on a green or a fairway: the shape as it is, grown or shrunk evenly - never the
+    /* Up or down on a green or a fairway: the shape as it is, grown or shrunk - never the
        wand run again, which drifts a green rounder. Counted from the outline it had when the
        first press came, so up then down is exactly where it started. r is {base, steps}: the
        live shape's (adjust.reshape), or a selected saved one's (selReshape). */
@@ -2215,7 +2217,11 @@
     function applyReshape(f, r, steps) {
       var spec = RESHAPE[f.kind];
       if (!steps) { f.points = r.base.slice(); return true; }
-      var ring = shapes.reshapeOutline([r.base], { growM: reshapeGrowM(f.kind, steps), closeM: spec.closeM });
+      var grow = reshapeGrowM(f.kind, steps), ring;
+      if (spec.scale) {
+        var factor = 1 + grow / shapes.ringRadiusM(r.base);
+        ring = factor > 0.2 ? shapes.scaleAbout(r.base, factor) : null;
+      } else ring = shapes.reshapeOutline([r.base], { growM: grow, closeM: spec.closeM });
       if (!ring) return false;
       f.points = shapes.smoothOutline(ring, f.kind);
       return true;
@@ -2251,7 +2257,7 @@
       if (!steps) return "back to the edge the wand found";
       var grow = reshapeGrowM(kind, steps);
       var smooth = RESHAPE[kind].closeM ? "cut-ins smoothed" : "";
-      var size = grow ? (grow > 0 ? grow + "m bigger" : -grow + "m smaller") + " all round" : "";
+      var size = grow ? (grow > 0 ? grow + "m bigger" : -grow + "m smaller") + (RESHAPE[kind].scale ? "" : " all round") : "";
       return [smooth, size].filter(Boolean).join(", ");
     }
 

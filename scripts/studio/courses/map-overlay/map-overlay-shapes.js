@@ -44,11 +44,10 @@
   var OVAL_POINTS = 24;
   var GREEN_RADIUS_M = 14;
   /* Greens and bunkers are edited by a handful of points, not by every corner the wand found:
-     the outline is a smooth curve through the handles, `steps` corners between each pair. A
-     bunker gets a couple more than a green - they are less round - but nowhere near the wand's
-     raw corners. The counts are fixed per kind so the handles read straight back off a saved
-     outline (ringHandles). */
-  var SMOOTH = { green: { handles: 6, steps: 6 }, bunker: { handles: 8, steps: 4 } };
+     the outline is a smooth curve through the handles, `steps` corners between each pair -
+     nowhere near the wand's raw corners. The counts are fixed per kind so the handles read
+     straight back off a saved outline (ringHandles). */
+  var SMOOTH = { green: { handles: 8, steps: 6 }, bunker: { handles: 8, steps: 4 } };
   /* Fairways, water and waste follow the edge the wand traced, softened (softenOutline): walked
      every SOFT_STEP_M metres (at most SOFT_MAX_STATIONS stations), eased over SOFT_REACH_M
      either way, and thinned to corners SOFT_TOLERANCE_M off the curve. */
