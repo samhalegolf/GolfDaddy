@@ -45,6 +45,7 @@
      elevation beside the frame, or a texture that would not load - all mean the flat frame
      stays, and the flat frame is already a finished picture. */
   var mesh = null;
+  var meshStyle = null;        // the map style the mesh up now was built for
   /* Backing store cap. Frames go to 3072, and a 3072-square canvas is ~37MB of GPU memory per
      hole on a device that also has the texture and the elevation resident. The canvas is
      stretched to the frame's own size by CSS, so this costs sharpness the tilt hides and
@@ -2198,11 +2199,14 @@
     var frameW = Number(out.width) || 0, frameH = Number(out.height) || 0;
     if (!frameW || !frameH) { noMesh(""); return; }
 
-    var loaded = 0, aerialImg = new Image(), elevationImg = new Image();
+    /* Illustrated: the hole drawn from the course map replaces the photo as the mesh's
+       picture. Null (photo style, or nothing mapped here) keeps the photo. */
+    var drawn = illustratedPicture(meta, frameW, frameH);
+    var loaded = 0, needed = drawn ? 1 : 2, aerialImg = new Image(), elevationImg = new Image();
     aerialImg.crossOrigin = elevationImg.crossOrigin = "anonymous";
 
     function ready() {
-      if (++loaded < 2 || token !== transitionToken) return;
+      if (++loaded < needed || token !== transitionToken) return;
       try {
         var scale = Math.min(1, MESH_MAX_PX / Math.max(frameW, frameH));
         canvas.width = Math.max(1, Math.round(frameW * scale));
@@ -2213,7 +2217,7 @@
         var metresY = Number(elevation.metresPerPixel) * Number(elevation.height) || 0;
         if (!metresX || !metresY) { noMesh(""); return; }
         mesh = window.GDTerrainMesh.create(canvas, {
-          aerial: aerialImg,
+          aerial: drawn || aerialImg,
           elevation: elevationImg,
           metres: [metresX, metresY],
           demSize: [Number(elevation.width), Number(elevation.height)],
@@ -2229,6 +2233,11 @@
         /* A live terrain frame is a raw photograph with no relief baked in, so the mesh's own
            light has to do the shading the bake would have done. */
         if (meta.liveTerrain) mesh.state.ambient = LIVE_MESH_AMBIENT;
+        /* The drawn map is flat colour with no relief painted in, so the same holds for it. */
+        if (drawn) mesh.state.ambient = ILLUSTRATED_MESH_AMBIENT;
+        /* The style asked for, not the one drawn: an unmapped hole on Illustrated is still
+           answered, and must not be rebuilt on every settings change. */
+        meshStyle = mapStyle();
         mesh.state.exaggeration = reliefExaggeration();
         applyMeshFrame();
         document.body.classList.add("surface-mesh");
@@ -2265,8 +2274,55 @@
     }
     aerialImg.onload = elevationImg.onload = ready;
     aerialImg.onerror = elevationImg.onerror = failed;
-    aerialImg.src = surfaceUrlValue;
+    if (!drawn) aerialImg.src = surfaceUrlValue;
     elevationImg.src = elevationUrl;
+  }
+
+  function mapStyle() {
+    var s = settings();
+    return s && s.mapStyle ? s.mapStyle() : "photo";
+  }
+
+  /* The illustrated picture for this frame, or null for the photo.
+
+     Painted in the frame's own pixel space - the same mercator origin and zoom the projector
+     uses - so it lines up with the bubble, the dot and the pin exactly as the photo does. Capped
+     at MESH_MAX_PX like the mesh canvas: the texture only has to be as sharp as what draws it.
+     A hole with no green or fairway of its own on the map plays on the photo: a field of rough
+     tells the player less than the picture it would replace. */
+  function illustratedPicture(meta, frameW, frameH) {
+    var lib = window.GDIllustratedSurface;
+    if (mapStyle() !== "illustrated" || !lib || !meta.originPx) return null;
+    var zoom = Number(meta.captureZoom);
+    var elevation = meta.elevation || {};
+    var metresX = Number(elevation.metresPerPixel) * Number(elevation.width) || 0;
+    if (!Number.isInteger(zoom) || !metresX) return null;
+    var surfaces = courseHazardSurfaces();
+    if (!lib.holeIsMapped(surfaces, loadedHole)) return null;
+    try {
+      var scale = Math.min(1, MESH_MAX_PX / Math.max(frameW, frameH));
+      var picture = document.createElement("canvas");
+      picture.width = Math.max(1, Math.round(frameW * scale));
+      picture.height = Math.max(1, Math.round(frameH * scale));
+      var toWorld = surfaceLib.worldPxProjector(zoom);
+      var ox = Number(meta.originPx.x), oy = Number(meta.originPx.y);
+      var pkg = marshal && marshal.pkg ? marshal.pkg() : null;
+      var shapes = lib.paint(picture.getContext("2d"), {
+        width: picture.width,
+        height: picture.height,
+        pxPerMetre: picture.width / metresX,
+        project: function (pt) {
+          var w = toWorld(pt);
+          return { x: (w.x - ox) * scale, y: (w.y - oy) * scale };
+        },
+        surfaces: surfaces,
+        holes: lib.packageHoles(pkg),
+        seed: Number(loadedHole) || 1
+      });
+      return shapes ? picture : null;
+    } catch (e) {
+      return null;
+    }
   }
 
   /* The player's Terrain relief setting. 0 means no mesh at all. */
@@ -2281,7 +2337,8 @@
   function syncMeshRelief() {
     var exaggeration = reliefExaggeration();
     if (!(exaggeration > 0)) { disposeMesh(); return; }
-    if (mesh) { mesh.state.exaggeration = exaggeration; return; }
+    /* A new map style is a new picture on the same ground: rebuilt, not re-lit. */
+    if (mesh && meshStyle === mapStyle()) { mesh.state.exaggeration = exaggeration; return; }
     var img = el("surfaceImage");
     if (!published || !publishedFrameUrl || !img || !img.dataset.playSurface) return;
     var meta;
@@ -2307,6 +2364,7 @@
   var tileSession = null;       // the round's provider tiles (live-hybrid.js), per course
   var mapboxBudget = null;      // the device's daily Mapbox tile allowance (live-hybrid.js)
   var LIVE_MESH_AMBIENT = 0.42;
+  var ILLUSTRATED_MESH_AMBIENT = 0.5;
   var liveTerrainHold = null;   // the transition whose frame is being waited for, screen held
   var liveTerrainGaveUp = null; // the transition that stopped waiting for its frame (coverHole)
   var meshSupportedCache = null;

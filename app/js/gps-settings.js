@@ -13,6 +13,7 @@
      shotUp         - rotate the view so the shot runs up the screen
      frameTightness - how much of the shot the lock stage fills
      relief         - how far the terrain mesh lifts the ground (off to 5x)
+     mapStyle       - photo, or the hole drawn from the course map (gd-illustrated-surface.js)
      windGhost      - draw the wind ghost bubble beside the real one
      slopeBubble    - morph the bubble to the plays-like (slope) distance
 
@@ -41,10 +42,18 @@
   };
   var RELIEF_ORDER = ["off", "natural", "enhanced", "dramatic"];
 
+  /* What the terrain mesh is dressed in. Illustrated rides on the mesh, so it needs relief on;
+     without the mesh the photo is what shows. */
+  var MAP_STYLE = {
+    photo:       { label: "gpsSettings.mapStylePhoto",       sub: "gpsSettings.mapStylePhotoHint" },
+    illustrated: { label: "gpsSettings.mapStyleIllustrated", sub: "gpsSettings.mapStyleIllustratedHint" }
+  };
+  var MAP_STYLE_ORDER = ["photo", "illustrated"];
+
   /* corridor is deliberately not in the panel yet: it is the dispersion
      corridor from the v2 bubble design, off until it has been played with.
      Stored like the rest so turning it on survives a reload. */
-  var DEFAULTS = { units: "m", aimLine: true, shotUp: true, frameTightness: "medium", relief: "enhanced", corridor: false,
+  var DEFAULTS = { units: "m", aimLine: true, shotUp: true, frameTightness: "medium", relief: "enhanced", mapStyle: "photo", corridor: false,
     windGhost: true, slopeBubble: false, hybridView: "composite", greenLinesCoarse: false };
 
   /* Operator-only debug views of the Clarity 3D Mesh picture (live-hybrid.js VIEWS - keep the
@@ -67,6 +76,7 @@
         shotUp: raw.shotUp !== false,
         frameTightness: TIGHTNESS[raw.frameTightness] ? raw.frameTightness : DEFAULTS.frameTightness,
         relief: RELIEF[raw.relief] ? raw.relief : DEFAULTS.relief,
+        mapStyle: MAP_STYLE[raw.mapStyle] ? raw.mapStyle : DEFAULTS.mapStyle,
         hybridView: HYBRID_VIEWS.indexOf(raw.hybridView) !== -1 ? raw.hybridView : DEFAULTS.hybridView,
         greenLinesCoarse: raw.greenLinesCoarse === true,
         corridor: raw.corridor === true,
@@ -100,6 +110,7 @@
     lockTightness: function () { return TIGHTNESS[state.frameTightness].factor; },
     /* 0 means no mesh at all, not a flat mesh. */
     reliefExaggeration: function () { return RELIEF[state.relief].factor; },
+    mapStyle: function () { return state.mapStyle; },
     hybridView: function () { return state.hybridView; },
     hybridViews: function () { return HYBRID_VIEWS.slice(); },
     /* Operator test switch: draw green slope lines even from elevation too coarse to read a
@@ -189,6 +200,13 @@
     }
     var reliefSub = document.getElementById("setReliefSub");
     if (reliefSub) reliefSub.textContent = t(RELIEF[state.relief].sub);
+    var styleBtn = document.getElementById("setMapStyle");
+    if (styleBtn) {
+      styleBtn.textContent = t(MAP_STYLE[state.mapStyle].label);
+      styleBtn.setAttribute("aria-pressed", state.mapStyle === "illustrated" ? "true" : "false");
+    }
+    var styleSub = document.getElementById("setMapStyleSub");
+    if (styleSub) styleSub.textContent = t(MAP_STYLE[state.mapStyle].sub);
     renderMapSource();
   }
 
@@ -251,6 +269,11 @@
     if (reliefBtn) reliefBtn.addEventListener("click", function () {
       var i = RELIEF_ORDER.indexOf(state.relief);
       app.gpsSettings.set("relief", RELIEF_ORDER[(i + 1) % RELIEF_ORDER.length]);
+    });
+    var styleBtn = document.getElementById("setMapStyle");
+    if (styleBtn) styleBtn.addEventListener("click", function () {
+      var i = MAP_STYLE_ORDER.indexOf(state.mapStyle);
+      app.gpsSettings.set("mapStyle", MAP_STYLE_ORDER[(i + 1) % MAP_STYLE_ORDER.length]);
     });
     var hybridViewBtn = document.getElementById("setHybridView");
     if (hybridViewBtn) hybridViewBtn.addEventListener("click", function () {
