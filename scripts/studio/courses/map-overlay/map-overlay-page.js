@@ -143,13 +143,13 @@
      or a hand-drawn water hazard this much smaller or bigger, a press. */
   var FAIRWAY_WIDTH_STEP_M = 5;
   var SCALE_STEP = 1.12;
-  /* ↑ ↓ on a green or a fairway: the outline grows or shrinks by stepM a press, up to max
-     presses either way. A green is scaled about its middle (scale), so it keeps its shape and
-     only its size changes - about stepM further out on average. A fairway's edge moves out
+  /* ↑ ↓ on a green, a bunker or a fairway: the outline grows or shrinks by stepM a press, up to
+     max presses either way. A green or bunker is scaled about its middle (scale), so it keeps its
+     shape and only its size changes - about stepM further out on average. A fairway's edge moves out
      evenly (GDOverlayShapes.reshapeOutline), its presses first bridging the cut-ins along its
      edge (closeM) - an overhanging tree, a shadow, the wand stopping short - so its first ↑
      only smooths, and each one after adds a metre. */
-  var RESHAPE = { green: { stepM: 0.5, max: 16, closeM: 0, scale: true }, fairway: { stepM: 1, max: 12, closeM: 5 } };
+  var RESHAPE = { green: { stepM: 0.5, max: 16, closeM: 0, scale: true }, bunker: { stepM: 0.25, max: 16, closeM: 0, scale: true }, fairway: { stepM: 1, max: 12, closeM: 5 } };
   /* + Collar: the fringe round a finished green, found by growing out from COLLAR_M past its edge
      up to COLLAR_REACH_M further, then necked out to the hole's fairway at COLLAR_NECK_M wide. */
   var COLLAR_M = 2;
@@ -239,7 +239,9 @@
     hazardCorridorM: 0, hazardFinderLevel: 2,
     /* Trees placed by hand on this course this session: what the tree finder learns from. Not
        remembered past a reload - the imagery and the light it was taken in can change. */
-    treeSamples: []
+    treeSamples: [],
+    /* The favourites bar: tool, method and mode combinations kept one click (or their own key) away. */
+    favourites: []
   };
 
   /* ---- persistence ----
@@ -266,7 +268,7 @@
         course: slimCourse(session.course), view: session.view, sourceKey: session.sourceKey,
         showObjects: session.showObjects, mode: session.mode, fast: session.fast, fairwayWidth: session.fairwayWidth,
         wandSize: session.wandSize, method: session.method, lineWandSize: session.lineWandSize, mergeBunkers: session.mergeBunkers, seams: session.seams, fullscreen: !!session.fullscreen,
-        treeRadius: session.treeRadius, treeFinderLevel: session.treeFinderLevel, treeBandM: session.treeBandM, treeHeights: session.treeHeights, hazardCorridorM: session.hazardCorridorM, hazardFinderLevel: session.hazardFinderLevel, numberAuto: session.numberAuto, aiTask: session.aiTask,
+        treeRadius: session.treeRadius, treeFinderLevel: session.treeFinderLevel, treeBandM: session.treeBandM, treeHeights: session.treeHeights, hazardCorridorM: session.hazardCorridorM, hazardFinderLevel: session.hazardFinderLevel, numberAuto: session.numberAuto, aiTask: session.aiTask, favourites: session.favourites,
         unsaved: session.dirty && session.loadedFor ? { courseId: session.loadedFor, features: session.features, playOrders: session.playOrders } : null
       }));
     } catch (e) {}
@@ -297,6 +299,7 @@
       Object.keys(session.lineWandSize).forEach(function (kind) { if (LINE_WAND_SIZES.indexOf(saved.lineWandSize[kind]) >= 0) session.lineWandSize[kind] = saved.lineWandSize[kind]; });
     }
     if (saved.unsaved && Array.isArray(saved.unsaved.features)) session.unsaved = saved.unsaved;
+    if (Array.isArray(saved.favourites)) session.favourites = saved.favourites;
   })();
 
   /* Everything that belongs to one course, dropped when another is picked or opened. */
@@ -453,8 +456,11 @@
     minus: svgIcon('<path d="M5 12h14"/>'),
     undo: svgIcon('<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>'),
     chevron: svgIcon('<path d="M6 9l6 6 6-6"/>'),
-    split: svgIcon('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>')
+    split: svgIcon('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/>'),
+    star: svgIcon('<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>'),
+    starOn: svgIcon('<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z" fill="currentColor"/>')
   };
+  var TOOL_LABEL = { move: "Move", connect: "Link", number: "Number", order: "Play order", fairway: "Fairway", green: "Green", tee: "Tee", bunker: "Bunker", water: "Water", trees: "Trees", hazard: "Hazard", waste: "Waste" };
   function railButton(name, icon, label, title) {
     return '<button type="button" class="gdStudioOverlayRailBtn" data-gd-overlay="' + name + '" title="' + esc(title) + '" aria-label="' + esc(label) + '">' + ICON[icon] + "<span>" + esc(label) + "</span></button>";
   }
@@ -575,6 +581,7 @@
       "Every tool also has the <em>Colour wand</em>: press on the thing and drag - the further you drag, the more of that colour it takes (Shift-drag adds more, ← → tighter / looser), Enter keeps it. " +
       "<strong>Trees</strong> - <em>Tree</em>: click to drop one tree, ↑ ↓ to size it; <em>Cluster</em>: press and drag to stretch an oval over a group (Shift for a circle); <em>Draw round</em>: press and drag round a wood; <em>Find trees</em>: drag a box and the trees in it that look like the ones you placed by hand this session are dropped for you (← → fewer / more, Enter keeps them, Esc takes them away). " +
       "<strong>Waste</strong> - <em>Draw + grow</em>: draw roughly round it and it is pushed out to the edge of the ground it sits on. " +
+      "<strong>Favourites</strong>: the ☆ under the options keeps the tool in hand, with its method and mode, on the favourites bar - click one (or press its key) to pick it up again. A new one gets the next free number as its key; right-click it, then press any letter or number to give it that key instead (it wins over the tool's own shortcut), Delete to take it off, Esc to leave it. " +
       "Whatever you just placed stays live: <strong>← →</strong> step the wand's sensitivity, <strong>↑ ↓</strong> make it smaller or bigger (a fairway narrower or wider), <strong>Enter</strong> or <strong>Space</strong> keeps it, <strong>Esc</strong> removes it - placing the next one keeps it too. " +
       "<strong>Pins</strong>, the quick pass: a fairway is its start then its end and becomes a fairway straight away; greens, tees, bunkers and water stay pins until <strong>Shape pins</strong>. " +
       "<strong>Fast</strong>, Pins with the hole kept in hand: every pin placed joins it, and <strong>Space</strong> links them as one hole. <em>Single</em>: a click pins the tool in hand and stays on it. <em>Green → Tee</em> and <em>Tee → Green</em>: a click pins and moves the tool on round the cycle - a fairway is its start, then its end - so a hole is four clicks and Space (Q again switches). Come back in Move to shape any pin that needs it. " +
@@ -653,6 +660,10 @@
       '<button type="button" class="gdStudioOverlayOptBtn" data-gd-overlay="shape-pins" hidden></button>' +
       '<button type="button" class="gdStudioOverlayOptBtn" data-gd-overlay="collar" title="A collar round this green - the fringe found with the wand, necked out to its fairway (K)" hidden>+ Collar</button>' +
       "</div>" +
+      '<div class="gdStudioOverlayFavs" role="toolbar" aria-label="Favourites">' +
+      '<button type="button" class="gdStudioOverlayFavAdd" data-gd-overlay="fav-add"></button>' +
+      '<span class="gdStudioOverlayFavList" data-gd-overlay="fav-list"></span>' +
+      "</div>" +
       '<div class="gdStudioOverlayOrders" data-gd-overlay="orders" hidden></div>' +
       '<div class="gdStudioOverlayViewRail" role="toolbar" aria-label="View">' +
       viewButton("undo", "undo", "Undo the last change (Ctrl+Z / ⌘Z)") +
@@ -691,7 +702,7 @@
       "</div>";
 
     var el = {};
-    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "ai-panel", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "mode-fast", "fast-order", "fast-single", "fast-green-tee", "fast-tee-green", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-auto", "method-along", "method-grow", "method-colour", "tree-auto-label", "tree-band", "tree-heights", "tree-auto", "hazard-auto-label", "hazard-corridor", "hazard-auto", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "tree-bar", "tree-text", "tree-less", "tree-more", "tree-publish", "tree-rerun", "tree-close", "undo", "trees", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "apply", "run", "pin-move", "status"].forEach(function (name) {
+    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "ai-panel", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "mode-fast", "fast-order", "fast-single", "fast-green-tee", "fast-tee-green", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-auto", "method-along", "method-grow", "method-colour", "tree-auto-label", "tree-band", "tree-heights", "tree-auto", "hazard-auto-label", "hazard-corridor", "hazard-auto", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "fav-add", "fav-list", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "tree-bar", "tree-text", "tree-less", "tree-more", "tree-publish", "tree-rerun", "tree-close", "undo", "trees", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "apply", "run", "pin-move", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -965,6 +976,121 @@
       renderHazardAuto();
       el["wand-size-label"].hidden = !(growWanding() || (shapesMode && WAND_KINDS.indexOf(tool) >= 0 && (!METHODS[tool] || methodOf(tool) === "wand")));
       renderWandSize();
+      renderFavourites();
+    }
+
+    /* ---- favourites ----
+       A favourite is a tool with the method and mode it was in: Bunker on Line + wand, Green as
+       a pin, Fast Green → Tee. Move, Link, Number and Play order work the same in every mode,
+       so theirs carry none. */
+    var MAX_FAVOURITES = 12;
+    var FAST_LABEL = { single: "Fast", "green-tee": "Fast G→T", "tee-green": "Fast T→G" };
+    function placesShapes(name) { return TOOLS.indexOf(name) >= 4; }
+    function currentFavourite() {
+      if (!placesShapes(tool)) return { mode: "", fast: "", tool: tool, method: "" };
+      return { mode: fastPins() ? "fast" : session.mode, fast: fastPins() ? session.fast : "", tool: tool, method: methodOf(tool) || "" };
+    }
+    function favouriteId(fav) { return [fav.mode, fav.fast, fav.tool, fav.method].join(":"); }
+    function validFavourite(fav) {
+      if (!fav || typeof fav !== "object" || TOOLS.indexOf(fav.tool) < 0) return false;
+      if (!placesShapes(fav.tool)) return !fav.mode && !fav.fast && !fav.method;
+      if (["shapes", "pins", "fast"].indexOf(fav.mode) < 0) return false;
+      if (fav.mode === "fast" ? FAST_ORDERS.indexOf(fav.fast) < 0 : fav.fast) return false;
+      if (fav.key != null && !validFavKey(fav.key)) return false;
+      return fav.method ? !!METHODS[fav.tool] && METHODS[fav.tool].indexOf(fav.method) >= 0 : true;
+    }
+    /* A favourite's key: a letter or a number, its own - it is picked before any shortcut the
+       key has. */
+    function validFavKey(k) { return typeof k === "string" && /^[a-z0-9]$/.test(k); }
+    function freeFavKey() {
+      for (var n = 1; n <= 9; n++) if (!favouriteByKey(String(n))) return String(n);
+      return "";
+    }
+    function favouriteByKey(k) {
+      for (var i = 0; i < session.favourites.length; i++) if (session.favourites[i].key === k) return i + 1;
+      return 0;
+    }
+    /* The favourite right-clicked, waiting for the key it should have. */
+    var favListening = -1;
+    function favouriteLabel(fav) {
+      var bits = [TOOL_LABEL[fav.tool]];
+      if (fav.method) bits.push(METHOD_LABEL[fav.method]);
+      else if (fav.mode === "pins") bits.push("Pin");
+      if (fav.mode === "fast") bits.unshift(FAST_LABEL[fav.fast]);
+      return bits.join(" · ");
+    }
+    function renderFavourites() {
+      var here = favouriteId(currentFavourite());
+      var kept = session.favourites.some(function (fav) { return favouriteId(fav) === here; });
+      el["fav-add"].innerHTML = (kept ? ICON.starOn : ICON.star) + (session.favourites.length ? "" : "<span>Favourite</span>");
+      el["fav-add"].classList.toggle("isActive", kept);
+      el["fav-add"].title = (kept ? "Take " : "Add ") + favouriteLabel(currentFavourite()) + (kept ? " off the favourites" : " to the favourites");
+      el["fav-list"].innerHTML = session.favourites.map(function (fav, i) {
+        var label = favouriteLabel(fav), listening = i === favListening;
+        return '<button type="button" class="gdStudioOverlayFav' + (favouriteId(fav) === here ? " isActive" : "") + (listening ? " isListening" : "") + '" data-fav="' + i + '" title="' +
+          esc(label + (fav.key ? " (" + fav.key.toUpperCase() + ")" : "") + " - right-click to set its key or take it off") + '">' +
+          ICON[fav.tool] + "<span>" + esc(listening ? "Press a key · Del removes · Esc" : label) + "</span>" +
+          (fav.key && !listening ? '<kbd class="gdStudioOverlayFavKey">' + esc(fav.key.toUpperCase()) + "</kbd>" : "") + "</button>";
+      }).join("");
+    }
+    function toggleFavourite() {
+      var fav = currentFavourite(), key = favouriteId(fav);
+      var at = session.favourites.map(favouriteId).indexOf(key);
+      if (at >= 0) { session.favourites.splice(at, 1); setStatus(favouriteLabel(fav) + " taken off the favourites."); }
+      else if (session.favourites.length >= MAX_FAVOURITES) { setStatus("The favourites bar holds " + MAX_FAVOURITES + " - right-click one to make room.", true); return; }
+      else {
+        fav.key = freeFavKey();
+        session.favourites.push(fav);
+        setStatus(favouriteLabel(fav) + " added to the favourites" + (fav.key ? " - key " + fav.key + "." : ".") + " Right-click it to give it another key.");
+      }
+      remember();
+      renderFavourites();
+    }
+    function useFavourite(i) {
+      var fav = session.favourites[i];
+      if (!fav) return;
+      if (fav.tool !== "move" && !canEdit()) return;
+      if (fav.mode && (fav.mode !== (fastPins() ? "fast" : session.mode) || fav.fast !== (fastPins() ? session.fast : ""))) setMode(fav.mode, fav.fast);
+      setTool(fav.tool);
+      if (fav.method) setMethod(fav.tool, fav.method);
+      setStatus(favouriteLabel(fav) + ".");
+    }
+    function listenForFavKey(i) {
+      favListening = favListening === i ? -1 : i;
+      renderFavourites();
+      if (favListening >= 0) setStatus("Press the key for " + favouriteLabel(session.favourites[i]) + " - a letter or number. Delete takes it off the bar, Esc leaves it as it is.");
+    }
+    /* While a favourite waits for its key, the next key press is its - nothing else sees it. */
+    function onFavKey(event) {
+      if (favListening < 0) return;
+      var fav = session.favourites[favListening];
+      if (!fav || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (/^(Shift|Control|Alt|Meta|CapsLock)$/.test(event.key)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      var i = favListening, k = String(event.key || "").toLowerCase();
+      favListening = -1;
+      if (event.key === "Escape") { renderFavourites(); setStatus(favouriteLabel(fav) + " left as it was."); return; }
+      if (event.key === "Delete" || event.key === "Backspace") { removeFavourite(i); return; }
+      if (!validFavKey(k)) { renderFavourites(); setStatus("A favourite's key is a letter or a number.", true); return; }
+      var other = favouriteByKey(k);
+      if (other && other - 1 !== i) delete session.favourites[other - 1].key;
+      fav.key = k;
+      remember();
+      renderFavourites();
+      setStatus(favouriteLabel(fav) + " is on " + k.toUpperCase() + (other && other - 1 !== i ? " - " + favouriteLabel(session.favourites[other - 1]) + " no longer has a key." : "."));
+    }
+    function stopFavListening(event) {
+      if (favListening < 0 || (event && event.target.closest && event.target.closest(".isListening"))) return;
+      favListening = -1;
+      renderFavourites();
+    }
+    function removeFavourite(i) {
+      var fav = session.favourites.splice(i, 1)[0];
+      if (!fav) return;
+      remember();
+      renderFavourites();
+      setStatus(favouriteLabel(fav) + " taken off the favourites.");
     }
 
     /* ---- methods: wand, draw round, line + wand, width ---- */
@@ -2206,7 +2332,7 @@
       updateHint();
     }
 
-    /* Up or down on a green or a fairway: the shape as it is, grown or shrunk - never the
+    /* Up or down on a green, bunker or fairway: the shape as it is, grown or shrunk - never the
        wand run again, which drifts a green rounder. Counted from the outline it had when the
        first press came, so up then down is exactly where it started. r is {base, steps}: the
        live shape's (adjust.reshape), or a selected saved one's (selReshape). */
@@ -2217,11 +2343,16 @@
     function applyReshape(f, r, steps) {
       var spec = RESHAPE[f.kind];
       if (!steps) { f.points = r.base.slice(); return true; }
-      var grow = reshapeGrowM(f.kind, steps), ring;
+      var grow = reshapeGrowM(f.kind, steps);
+      /* Scaled, the outline is the same curve bigger - a smooth one stays smooth, a detailed
+         (merged) bunker keeps its detail. */
       if (spec.scale) {
         var factor = 1 + grow / shapes.ringRadiusM(r.base);
-        ring = factor > 0.2 ? shapes.scaleAbout(r.base, factor) : null;
-      } else ring = shapes.reshapeOutline([r.base], { growM: grow, closeM: spec.closeM });
+        if (factor <= 0.2) return false;
+        f.points = shapes.scaleAbout(r.base, factor);
+        return true;
+      }
+      var ring = shapes.reshapeOutline([r.base], { growM: grow, closeM: spec.closeM });
       if (!ring) return false;
       f.points = shapes.smoothOutline(ring, f.kind);
       return true;
@@ -2753,7 +2884,7 @@
         var f = addFeature({ kind: kind, points: points, source: wanded ? "wand" : "", hole: hole });
         startAdjust(f, { wand: result.shape ? result : null, grow: { line: grow.line || null, ring: grow.ring || null, size: size, capture: out.capture }, line: kind === "fairway" && !result.shape ? from : null });
         var how = grow.line ? " grown from the line." : " grown out to its edge.";
-        setStatus(result.shape ? word + how + " ← → sensitivity, ↑ ↓ " + (RESHAPE[kind] ? "smooth and size" : "reach") + ". " + result.note : result.note + (kind === "fairway" ? " Placed a fairway of the set width instead." : ""), !result.shape);
+        setStatus(result.shape ? word + how + " ← → sensitivity, ↑ ↓ " + (RESHAPE[kind] ? (RESHAPE[kind].scale ? "size" : "smooth and size") : "reach") + ". " + result.note : result.note + (kind === "fairway" ? " Placed a fairway of the set width instead." : ""), !result.shape);
       });
     }
 
@@ -5835,6 +5966,7 @@
       }
       if (event.key === "Escape") { setTool("move"); if (selectedId) select(""); return; }
       var key = String(event.key || "").toLowerCase();
+      if (favouriteByKey(key)) { useFavourite(favouriteByKey(key) - 1); return; }
       if (key === "h") { fitCourse(); return; }
       if (key === "z") { zoomToSelected(); return; }
       /* Q is Fast pins; Q again steps its order: Single, Green → Tee, Tee → Green. */
@@ -5849,7 +5981,9 @@
       if (shortcut && (shortcut === "move" || canEdit())) setTool(shortcut);
     }
     document.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onFavKey, true);
     document.addEventListener("keydown", onAdjustKey, true);
+    document.addEventListener("pointerdown", stopFavListening, true);
 
     el.pick.addEventListener("click", pickCourse);
     el.inbox.addEventListener("click", onInboxClick);
@@ -5929,6 +6063,23 @@
     el["mode-pins"].addEventListener("click", function () { setMode("pins"); });
     el["mode-fast"].addEventListener("click", function () { setMode("fast"); });
     FAST_ORDERS.forEach(function (o) { el["fast-" + o].addEventListener("click", function () { setMode("fast", o); }); });
+    session.favourites = session.favourites.filter(validFavourite).slice(0, MAX_FAVOURITES);
+    /* One favourite to a key; ones saved before keys could be set keep their old 1-9. */
+    session.favourites.forEach(function (fav, i) {
+      if (fav.key && favouriteByKey(fav.key) - 1 !== i) delete fav.key;
+      if (!("key" in fav) && i < 9 && !favouriteByKey(String(i + 1))) fav.key = String(i + 1);
+    });
+    el["fav-add"].addEventListener("click", toggleFavourite);
+    el["fav-list"].addEventListener("click", function (event) {
+      var b = event.target.closest("[data-fav]");
+      if (b) useFavourite(Number(b.getAttribute("data-fav")));
+    });
+    el["fav-list"].addEventListener("contextmenu", function (event) {
+      var b = event.target.closest("[data-fav]");
+      if (!b) return;
+      event.preventDefault();
+      listenForFavKey(Number(b.getAttribute("data-fav")));
+    });
     el["wand-smaller"].addEventListener("click", function () { stepWandSize(-1); });
     el["wand-bigger"].addEventListener("click", function () { stepWandSize(1); });
     el.merge.checked = session.mergeBunkers;
@@ -6011,6 +6162,8 @@
       if (saveTimer) clearTimeout(saveTimer);
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("keydown", onAdjustKey, true);
+      document.removeEventListener("keydown", onFavKey, true);
+      document.removeEventListener("pointerdown", stopFavListening, true);
       document.removeEventListener("pointermove", onLassoMove);
       document.removeEventListener("pointerup", onLassoEnd);
       document.removeEventListener("pointercancel", onLassoEnd);
