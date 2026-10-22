@@ -2217,7 +2217,8 @@
         var metresY = Number(elevation.metresPerPixel) * Number(elevation.height) || 0;
         if (!metresX || !metresY) { noMesh(""); return; }
         mesh = window.GDTerrainMesh.create(canvas, {
-          aerial: drawn || aerialImg,
+          aerial: drawn ? drawn.picture : aerialImg,
+          trees: drawn ? drawn.trees : null,
           elevation: elevationImg,
           metres: [metresX, metresY],
           demSize: [Number(elevation.width), Number(elevation.height)],
@@ -2283,7 +2284,8 @@
     return s && s.mapStyle ? s.mapStyle() : "photo";
   }
 
-  /* The illustrated picture for this frame, or null for the photo.
+  /* The illustrated picture for this frame and the trees that stand on it, {picture, trees},
+     or null for the photo.
 
      Painted in the frame's own pixel space - the same mercator origin and zoom the projector
      uses - so it lines up with the bubble, the dot and the pin exactly as the photo does. Capped
@@ -2307,6 +2309,13 @@
       var toWorld = surfaceLib.worldPxProjector(zoom);
       var ox = Number(meta.originPx.x), oy = Number(meta.originPx.y);
       var pkg = marshal && marshal.pkg ? marshal.pkg() : null;
+      var trees = lib.placeTrees(window.GDWatchMapCore, surfaces, {
+        transform: { a: scale, b: 0, tx: -ox * scale, ty: -oy * scale },
+        refZoom: zoom,
+        metresPerPixel: metresX / picture.width,
+        imageWidth: picture.width,
+        imageHeight: picture.height
+      });
       var shapes = lib.paint(picture.getContext("2d"), {
         width: picture.width,
         height: picture.height,
@@ -2317,9 +2326,10 @@
         },
         surfaces: surfaces,
         holes: lib.packageHoles(pkg),
-        seed: Number(loadedHole) || 1
+        seed: Number(loadedHole) || 1,
+        trees: trees
       });
-      return shapes ? picture : null;
+      return shapes ? { picture: picture, trees: trees } : null;
     } catch (e) {
       return null;
     }

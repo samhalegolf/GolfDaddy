@@ -6,6 +6,9 @@
    in flat cartoon colours with mown stripes, so the mesh's own light does all the shading and
    the hills read as hills.
 
+   Trees are not painted: placeTrees says where they stand and gd-terrain-mesh.js stands
+   them up. The picture carries only the woodland floor and each tree's shadow.
+
    Only the picture changes. It is painted at the frame's own aspect and in the frame's own
    pixel space (the published surface's mercator origin and zoom), so the mesh's UVs, the
    projector, the overlay lift and tap grounding all stay exactly as they are for the photo.
@@ -38,9 +41,7 @@
     water: "#3d86c6",
     waterShore: "#82b8e2",
     treeFloor: "#3a7432",
-    crownShadow: "#1f4a1b",
-    crown: "#3f8436",
-    crownLight: "#6aab50"
+    treeShadow: "#1f4a1b"
   };
 
   /* Sizes in metres, turned into pixels by the frame's own scale. */
@@ -50,10 +51,9 @@
   var FRINGE_M = 1.4;
   var BUNKER_LIP_M = 0.9;
   var SHORE_M = 1.2;
-  var CROWN_SPACING_M = 7;
-  var CROWN_RADIUS_M = 4.6;
   var TEE_M = [9, 14];
-  var MAX_CROWNS = 6000;
+  /* The watch caps a hole at 1500 trees; a frame here can hold neighbouring holes too. */
+  var MAX_TREES = 3000;
 
   /* Same seed, same picture: the map must not shimmer between visits to a hole. */
   function seeded(seed) {
@@ -89,15 +89,6 @@
 
   function onCanvas(b, w, h, pad) {
     return b.maxX >= -pad && b.maxY >= -pad && b.minX <= w + pad && b.minY <= h + pad;
-  }
-
-  function inside(x, y, ring) {
-    var hit = false;
-    for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      var a = ring[i], b = ring[j];
-      if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) hit = !hit;
-    }
-    return hit;
   }
 
   function trace(ctx, ring) {
@@ -160,38 +151,20 @@
     return out;
   }
 
-  /* Tree clusters: a dark floor, then crowns on a jittered grid inside the shape, each with a
-     shadow toward the bottom right and a highlight toward the top left. Crowns may hang over
-     the edge, which is what gives a wood its ragged outline. */
-  function trees(ctx, ring, b, ppm, rand, budget) {
-    ctx.fillStyle = PALETTE.treeFloor;
-    trace(ctx, ring);
-    ctx.fill();
-    var spacing = CROWN_SPACING_M * ppm;
-    var area = (b.maxX - b.minX) * (b.maxY - b.minY);
-    if (area / (spacing * spacing) > budget.left) spacing = Math.sqrt(area / Math.max(1, budget.left));
-    if (!(spacing > 0.5)) return;
-    var crowns = [];
-    for (var y = b.minY; y <= b.maxY; y += spacing) {
-      for (var x = b.minX; x <= b.maxX; x += spacing) {
-        var px = x + (rand() - 0.5) * spacing * 0.8;
-        var py = y + (rand() - 0.5) * spacing * 0.8;
-        var r = CROWN_RADIUS_M * ppm * (0.75 + rand() * 0.5);
-        if (inside(px, py, ring)) crowns.push({ x: px, y: py, r: r });
-      }
-    }
-    budget.left -= crowns.length;
-    var shadow = Math.max(0.5, 0.35 * CROWN_RADIUS_M * ppm);
-    [[PALETTE.crownShadow, shadow, 1], [PALETTE.crown, 0, 1], [PALETTE.crownLight, -shadow * 0.7, 0.5]].forEach(function (pass) {
-      ctx.fillStyle = pass[0];
-      ctx.beginPath();
-      crowns.forEach(function (c) {
-        var cr = c.r * pass[2];
-        ctx.moveTo(c.x + pass[1] + cr, c.y + pass[1]);
-        ctx.arc(c.x + pass[1], c.y + pass[1], cr, 0, Math.PI * 2);
-      });
-      ctx.fill();
+  /* Under each standing tree (gd-terrain-mesh.js draws the trees themselves) a soft shadow
+     falling to the bottom right, away from the light the crowns are shaded by. */
+  function treeShadows(ctx, trees) {
+    ctx.save();
+    ctx.globalAlpha = 0.4;
+    ctx.fillStyle = PALETTE.treeShadow;
+    ctx.beginPath();
+    trees.forEach(function (t) {
+      var x = t.x + t.r * 0.45, y = t.y + t.r * 0.35;
+      ctx.moveTo(x + t.r, y);
+      ctx.arc(x, y, t.r, 0, Math.PI * 2);
     });
+    ctx.fill();
+    ctx.restore();
   }
 
   function teePad(ctx, centre, angle, ppm) {
@@ -234,6 +207,7 @@
        surfaces            GDBubbleHazardCore.collectSurfaces output, whole course
        holes               [{holeNumber, tee, green, route}] lat/lng
        seed                any integer, so a hole paints the same every time
+       trees               placeTrees output, for their shadows
      }
      Returns the number of shapes drawn - zero means nothing on this frame was mapped. */
   function paint(ctx, input) {
@@ -273,7 +247,12 @@
     ctx.restore();
 
     /* Back to front: what sits on top of what on a real course. */
-    woods.forEach(function (t) { trees(ctx, t.ring, t.b, ppm, rand, { left: MAX_CROWNS }); });
+    woods.forEach(function (t) {
+      ctx.fillStyle = PALETTE.treeFloor;
+      trace(ctx, t.ring);
+      ctx.fill();
+    });
+    treeShadows(ctx, input.trees || []);
     fairways.forEach(function (f) { outerBand(ctx, f.ring, FIRST_CUT_M * ppm, PALETTE.firstCut); });
     fairways.forEach(function (f) {
       var angle = angles[f.holeNumber] || 0;
@@ -306,6 +285,29 @@
     return fairways.length + greens.length + bunkers.length + water.length + woods.length;
   }
 
+  /* Where the trees stand, in canvas pixels: [{x, y, r, type}], r the crown radius in px and
+     type the watch's (0 round, 1 broadleaf, 2 pine, 3 yellow-green).
+
+     The watch's own placement (gd-watch-map-core.js buildHoleTrees) - ragged edges, mixed
+     sizes, kept off played ground, seeded from each area's outline - so a wood looks the same
+     on the phone as on the wrist. spatialRef is that function's: {transform, refZoom,
+     metresPerPixel, imageWidth, imageHeight}, mapping world-mercator pixels at refZoom onto
+     this canvas. Greens join the fairways as played ground; a hole's own green is all the
+     watch knows, a frame here shows the neighbours' too. */
+  function placeTrees(core, surfaces, spatialRef) {
+    if (!core || !core.buildHoleTrees || !surfaces || !(surfaces.trees || []).length) return [];
+    var rings = function (list) { return (list || []).map(function (s) { return s.ring; }); };
+    var geometry = {
+      fairways: rings(surfaces.fairways).concat(rings(surfaces.greens)),
+      bunkers: rings(surfaces.bunkers),
+      water: rings(surfaces.water),
+      trees: rings(surfaces.trees)
+    };
+    var base = core.WATCH_MAP_RECIPE_V1;
+    var recipe = Object.assign({}, base, { trees: Object.assign({}, base.trees, { maxTrees: MAX_TREES }) });
+    return core.buildHoleTrees(recipe, spatialRef, geometry).c.map(core.unpackTree);
+  }
+
   /* The package's holes as paint() wants them: lite packages carry tee/green/route on the
      hole, full ones under hole.geometry. */
   function packageHoles(pkg) {
@@ -325,5 +327,5 @@
     });
   }
 
-  return { paint: paint, packageHoles: packageHoles, holeIsMapped: holeIsMapped, PALETTE: PALETTE };
+  return { paint: paint, placeTrees: placeTrees, packageHoles: packageHoles, holeIsMapped: holeIsMapped, PALETTE: PALETTE };
 });

@@ -8,6 +8,9 @@
  *   - fairway stripes run across the line of play (rotated to tee -> first route point);
  *   - the same seed paints the same picture;
  *   - packageHoles reads tee/green/route from lite and full packages alike;
+ *   - placeTrees stands the watch's trees (buildHoleTrees) in the woods, off played ground,
+ *     and the picture draws only their shadows - the mesh draws the trees;
+ *   - the mesh draws trees far to near along the frame's own up;
  *   - the Map style setting defaults to Photo, cycles, survives a relaunch, and painter.js
  *     only swaps the picture (and rebuilds the mesh) when Illustrated is chosen.
  *
@@ -22,6 +25,7 @@ const vm = require('vm');
 
 const ROOT = path.join(__dirname, '..');
 const lib = require(path.join(ROOT, 'app', 'js', 'gd-illustrated-surface.js'));
+const watchCore = require(path.join(ROOT, 'scripts', 'gd-watch-map-core.js'));
 const SETTINGS_SRC = fs.readFileSync(path.join(ROOT, 'app', 'js', 'gps-settings.js'), 'utf8');
 const PAINTER_SRC = fs.readFileSync(path.join(ROOT, 'app', 'js', 'painter.js'), 'utf8');
 
@@ -74,7 +78,7 @@ assert.strictEqual(lib.holeIsMapped({ greens: [surface(square(0, 0, 5), 3)] }, '
 {
   const { ctx, shapes } = paint();
   assert.strictEqual(shapes, 5, 'fairway, green, near bunker, water, trees');
-  assert.ok(ctx.calls.some((c) => c[0] === 'arc'), 'tree crowns drawn');
+  assert.ok(!ctx.calls.some((c) => c[0] === 'arc' && c[3] < 8), 'no tree crowns painted: the mesh stands them up');
   assert.ok(!ctx.calls.some((c) => (c[0] === 'moveTo' || c[0] === 'lineTo') && c[1] >= 9000), 'off-frame bunker not traced');
 }
 
@@ -96,6 +100,46 @@ assert.notDeepStrictEqual(paint().ctx.calls, paint({ seed: 2 }).ctx.calls);
 
 // nothing on the frame
 assert.strictEqual(paint({ surfaces: { fairways: [surface(square(5000, 5000, 10), 1)] } }).shapes, 0);
+
+// trees: placed by the watch's generator, shadowed on the picture
+{
+  /* Canvas px straight from world px at zoom 20, about 0.12 m/px at this latitude. */
+  const zoom = 20, lat0 = -36.9, lng0 = 174.8;
+  const w0 = watchCore.worldPx(lat0, lng0, zoom);
+  const mpp = 40075016.686 * Math.cos(lat0 * Math.PI / 180) / (256 * Math.pow(2, zoom));
+  const ll = (x, y) => watchCore.latLngFromWorldPx({ x: w0.x + x, y: w0.y + y }, zoom);
+  const box = (x, y, sx, sy) => [ll(x, y), ll(x + sx, y), ll(x + sx, y + sy), ll(x, y + sy)];
+  const spatialRef = { transform: { a: 1, b: 0, tx: -w0.x, ty: -w0.y }, refZoom: zoom, metresPerPixel: mpp, imageWidth: 1600, imageHeight: 1600 };
+  const surfaces = {
+    trees: [surface(box(100, 100, 800, 800), 1)],
+    fairways: [surface(box(400, 400, 200, 200), 1)],
+    greens: [], bunkers: [], water: []
+  };
+  const trees = lib.placeTrees(watchCore, surfaces, spatialRef);
+  assert.ok(trees.length > 20, 'a wood becomes trees');
+  assert.ok(trees.every((t) => t.x >= -20 && t.x <= 1020 && t.y >= -20 && t.y <= 1020), 'trees stand in the wood, give or take a ragged edge');
+  assert.ok(!trees.some((t) => t.x > 410 && t.x < 590 && t.y > 410 && t.y < 590), 'none on the fairway');
+  assert.ok(trees.every((t) => t.r > 0 && [0, 1, 2, 3].includes(t.type)));
+  assert.deepStrictEqual(lib.placeTrees(watchCore, surfaces, spatialRef), trees, 'the same wood, the same trees');
+  assert.deepStrictEqual(lib.placeTrees(null, surfaces, spatialRef), [], 'no generator, no trees');
+  assert.deepStrictEqual(lib.placeTrees(watchCore, Object.assign({}, surfaces, { trees: [] }), spatialRef), []);
+
+  const { ctx } = paint({ trees: [{ x: 50, y: 60, r: 5, type: 0 }, { x: 80, y: 90, r: 4, type: 2 }] });
+  const shadows = ctx.calls.filter((c) => c[0] === 'arc' && (c[3] === 5 || c[3] === 4));
+  assert.strictEqual(shadows.length, 2, 'one shadow per tree');
+  assert.ok(shadows[0][1] > 50 && shadows[0][2] > 60, 'shadows fall bottom right');
+}
+
+// mesh draw order: far (up the screen) first
+{
+  global.window = {};
+  require(path.join(ROOT, 'app', 'js', 'gd-terrain-mesh.js'));
+  const order = global.window.GDTerrainMesh.treeDrawOrder;
+  const trees = [{ x: 0, y: 50 }, { x: 0, y: 10 }, { x: 0, y: 90 }];
+  assert.deepStrictEqual(order(trees, [0, -1]), [1, 0, 2], 'unrotated: top of the picture first');
+  assert.deepStrictEqual(order([{ x: 90, y: 0 }, { x: 10, y: 0 }], [1, 0]), [0, 1], 'rotated: follows up');
+  delete global.window;
+}
 
 // packageHoles: lite and full
 {
@@ -142,7 +186,8 @@ function launch(store) {
 }
 
 // painter wiring
-assert.ok(/aerial: drawn \|\| aerialImg/.test(PAINTER_SRC), 'the drawn map replaces the photo on the mesh');
+assert.ok(/aerial: drawn \? drawn\.picture : aerialImg/.test(PAINTER_SRC), 'the drawn map replaces the photo on the mesh');
+assert.ok(/trees: drawn \? drawn\.trees : null/.test(PAINTER_SRC), 'its trees go to the mesh');
 assert.ok(/if \(!drawn\) aerialImg\.src/.test(PAINTER_SRC), 'the photo is not fetched for the mesh when drawn');
 assert.ok(/mapStyle\(\) !== "illustrated"/.test(PAINTER_SRC), 'photo style never paints');
 assert.ok(/meshStyle === mapStyle\(\)/.test(PAINTER_SRC), 'a style change rebuilds the mesh');
