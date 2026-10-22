@@ -606,6 +606,51 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
   cursor: pointer;
 }
 #gdStudioShellRoot .gdStudioOverlayOptBtn:disabled { opacity: 0.4; cursor: default; }
+/* The favourites bar, under the options: the ☆ keeps the tool in hand, each chip picks one up. */
+#gdStudioShellRoot .gdStudioOverlayFavs {
+  position: absolute;
+  top: 60px;
+  left: 86px;
+  max-width: calc(100% - 152px);
+  z-index: 800;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: var(--gdOverlayScrim);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+#gdStudioShellRoot .gdStudioOverlayFavs::-webkit-scrollbar { display: none; }
+#gdStudioShellRoot .gdStudioOverlayFavList { display: flex; gap: 4px; }
+#gdStudioShellRoot .gdStudioOverlayFavAdd,
+#gdStudioShellRoot .gdStudioOverlayFav {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 30px;
+  padding: 0 10px 0 7px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--gdStudioText);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+#gdStudioShellRoot .gdStudioOverlayFavAdd svg,
+#gdStudioShellRoot .gdStudioOverlayFav svg { width: 16px; height: 16px; }
+#gdStudioShellRoot .gdStudioOverlayFavAdd { color: var(--gdStudioMuted); }
+#gdStudioShellRoot .gdStudioOverlayFavAdd.isActive { color: #f2d36b; }
+#gdStudioShellRoot .gdStudioOverlayFavAdd:hover,
+#gdStudioShellRoot .gdStudioOverlayFav:hover { background: rgba(231, 243, 236, 0.1); }
+#gdStudioShellRoot .gdStudioOverlayFav.isActive { background: var(--gdStudioAccent); color: var(--gdOverlayInk); }
 #gdStudioShellRoot .gdStudioOverlayWidth {
   width: 56px;
   min-height: 30px;
@@ -865,6 +910,8 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
   #gdStudioShellRoot .gdStudioOverlayRailRule { margin: 3px 10px; }
   #gdStudioShellRoot .gdStudioOverlayViewRail { top: 66px; right: 8px; }
   #gdStudioShellRoot .gdStudioOverlayOptions { top: 8px; left: 8px; right: 8px; width: auto; max-width: none; }
+  #gdStudioShellRoot .gdStudioOverlayFavs { top: 62px; left: 70px; max-width: calc(100% - 128px); }
+  #gdStudioShellRoot .gdStudioOverlayFavAdd, #gdStudioShellRoot .gdStudioOverlayFav { min-height: 36px; }
   #gdStudioShellRoot .gdStudioOverlayModes button { min-height: 36px; }
   #gdStudioShellRoot .gdStudioOverlayStep { width: 36px; height: 36px; }
   #gdStudioShellRoot .gdStudioOverlayWidth { min-height: 36px; font-size: 16px; }

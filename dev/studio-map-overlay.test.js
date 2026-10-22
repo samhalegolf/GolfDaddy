@@ -395,6 +395,19 @@ test("OSM's shapes can be made editable, and a course with no overlay starts fro
   assert.ok(page.includes("return !converted[item.id];"), "a converted OSM shape must not be drawn twice");
 });
 
+test("up and down scale a green or bunker, so it keeps its shape", () => {
+  assert.ok(/bunker: \{ stepM: [\d.]+, max: \d+, closeM: 0, scale: true \}/.test(page), "a bunker is scaled on up / down, not re-wanded");
+  assert.ok(/green: \{ stepM: [\d.]+, max: \d+, closeM: 0, scale: true \}/.test(page), "a green is scaled on up / down");
+  assert.ok(page.includes("f.points = shapes.scaleAbout(r.base, factor);"), "scaling starts from the outline it had when the presses began");
+});
+
+test("the favourites bar keeps a tool with its method and mode", () => {
+  assert.ok(page.includes('data-gd-overlay="fav-add"') && page.includes('data-gd-overlay="fav-list"'), "the bar has its star and its list");
+  assert.ok(page.includes("favourites: session.favourites,"), "favourites are remembered past a reload");
+  assert.ok(page.includes("session.favourites = session.favourites.filter(validFavourite)"), "a remembered favourite that no longer makes sense is dropped");
+  assert.ok(page.includes('if (/^[1-9]$/.test(key) && session.favourites[Number(key) - 1])'), "1-9 pick up a favourite");
+});
+
 test("the shape just placed can be dragged without switching to Move", () => {
   assert.ok(page.includes('return !!f && canEdit() && (tool === "move" || f.id === lastPlacedId);'), "only Move, or the last placed shape, can be dragged");
   assert.ok(page.includes("lastPlacedId = f.id;"), "placing a shape must make it the draggable one");
