@@ -100,6 +100,116 @@
     }
   `;
 
+  /* Trees: one quad per tree, standing on the ground the terrain shader puts under it.
+
+     The view is an orthographic tilt (the CSS lean), so a tree is drawn the way that camera
+     sees it, worked out in "screen" units - pixels across, and pixels up the screen before the
+     lean squashes them by cos(tilt). A crown of radius r whose middle stands z above the
+     ground shows as a circle of radius r lifted z.sin(tilt) up the screen; a trunk is the
+     strip under it. Flat (tilt 0) that collapses to a circle on the ground: the tree seen
+     from above, so the same quads serve both views.
+
+     Types follow the watch's sprite sets (gd-watch-map-core.js TREE_TYPES): 0 round,
+     1 broadleaf, 2 pine, 3 yellow-green (a round tree in a lighter green). */
+  const TREE_VERT = `
+    attribute vec4 aTree;              // x, y (image px), crown radius (px), type
+    attribute vec2 aCorner;            // -1..1 across, 0..1 bottom to top
+    uniform sampler2D uElevation;
+    uniform float uExaggeration;
+    uniform float uSeaLevel;
+    uniform vec2 uShear;
+    uniform vec2 uImagePx;
+    uniform vec2 uUp;                  // unit, image space: the way that becomes screen-up
+    uniform float uSinT;
+    uniform float uCosT;
+    varying vec2 vLocal;               // screen px from the tree's foot
+    varying vec3 vTree;                // radius, type, seed
+
+    float heightAt(vec2 uv) {
+      vec3 c = texture2D(uElevation, uv).rgb * 255.0;
+      return -10000.0 + (c.r * 65536.0 + c.g * 256.0 + c.b) * 0.1;
+    }
+
+    void main() {
+      float r = aTree.z;
+      float type = aTree.w;
+      vec2 uv = aTree.xy / uImagePx;
+      float h = (heightAt(uv) - uSeaLevel) * uExaggeration;
+      vec2 edge = min(uv, 1.0 - uv);
+      h *= smoothstep(0.0, 0.012, min(edge.x, edge.y));
+      vec2 foot = aTree.xy + uShear * h;
+
+      /* Tall enough for the tallest shape: a round crown peaks at 2.6r, a pine at 3.6r. */
+      float top = (type == 2.0 ? 3.6 * r : 1.6 * r) * uSinT + r * 1.15;
+      float x = aCorner.x * r * 1.15;
+      float y = mix(-r * 1.05, top, aCorner.y);
+      vLocal = vec2(x, y);
+      vTree = vec3(r, type, fract(sin(dot(aTree.xy, vec2(12.9898, 78.233))) * 43758.5453));
+
+      vec2 side = vec2(-uUp.y, uUp.x);
+      vec2 px = foot + side * x + uUp * (y / uCosT);
+      gl_Position = vec4(px.x / uImagePx.x * 2.0 - 1.0, 1.0 - px.y / uImagePx.y * 2.0, 0.0, 1.0);
+    }
+  `;
+
+  const TREE_FRAG = `
+    precision highp float;
+    uniform float uSinT;
+    uniform float uCosT;
+    varying vec2 vLocal;
+    varying vec3 vTree;
+
+    /* 0..1 coverage of a signed distance in px: soft edge one pixel wide. */
+    float cover(float d) { return clamp(0.5 - d, 0.0, 1.0); }
+
+    void main() {
+      float r = vTree.x, type = vTree.y, seed = vTree.z;
+      float x = vLocal.x, y = vLocal.y;
+      vec3 light = normalize(vec3(-0.5, 0.6, 0.62));   // from the screen's top left
+      vec3 colour = vec3(0.0);
+      float alpha = 0.0;
+
+      if (type == 2.0) {
+        /* Pine: a cone. Base ellipse 0.4r up, apex 3.6r up. */
+        float yb = 0.4 * r * uSinT, ya = 3.6 * r * uSinT;
+        float ry = max(r * uCosT, 0.001);
+        float e = length(vec2(x / r, (y - yb) / ry));
+        float a = cover((e - 1.0) * r);
+        if (ya - yb > 0.5) {
+          float t = clamp((y - yb) / (ya - yb), 0.0, 1.0);
+          float halfW = r * (1.0 - t);
+          float inside = y >= yb && y <= ya ? cover(abs(x) - halfW) : 0.0;
+          a = max(a, inside);
+        }
+        float lit = 0.62 + 0.38 * clamp(0.5 - x / r * 0.6 + (y - yb) / max(ya - yb, r) * 0.25, 0.0, 1.0);
+        colour = vec3(0.17, 0.40, 0.21) * (0.9 + 0.2 * seed) * lit;
+        alpha = a;
+      } else {
+        /* Round, broadleaf and yellow-green: a ball of foliage. Broadleaf is wider and lobed. */
+        float wide = type == 1.0 ? 1.1 : 1.0;
+        float yc = 1.6 * r * uSinT;
+        vec2 d = vec2(x / wide, y - yc) / r;
+        float lobes = type == 1.0 ? 1.0 + 0.07 * sin(atan(d.y, d.x) * 6.0 + seed * 6.283) : 1.0 + 0.03 * sin(atan(d.y, d.x) * 9.0 + seed * 6.283);
+        float dist = length(d) / lobes;
+        float a = cover((dist - 1.0) * r);
+        vec3 n = vec3(d.x, d.y, sqrt(max(0.0, 1.0 - min(1.0, dist * dist))));
+        float lit = 0.5 + 0.6 * max(dot(normalize(n), light), 0.0);
+        vec3 base = type == 3.0 ? vec3(0.45, 0.57, 0.23)
+          : type == 1.0 ? vec3(0.26, 0.53, 0.21) : vec3(0.23, 0.49, 0.20);
+        colour = base * (0.9 + 0.2 * seed) * lit;
+        alpha = a;
+        /* Trunk under the crown, seen only once the view leans. */
+        if (alpha < 1.0 && yc > 0.5) {
+          float trunk = cover(abs(x) - 0.13 * r) * (y >= 0.0 && y <= yc ? 1.0 : 0.0);
+          colour = mix(vec3(0.33, 0.24, 0.16), colour, alpha);
+          alpha = max(alpha, trunk);
+        }
+      }
+      if (alpha <= 0.0) discard;
+      gl_FragColor = vec4(colour, alpha);
+    }
+  `;
+
   function compile(gl, type, src) {
     const s = gl.createShader(type);
     gl.shaderSource(s, src);
@@ -108,10 +218,10 @@
     return s;
   }
 
-  function program(gl) {
+  function program(gl, vert, frag) {
     const p = gl.createProgram();
-    gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, VERT));
-    gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, FRAG));
+    gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, vert));
+    gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, frag));
     gl.linkProgram(p);
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
     return p;
@@ -145,6 +255,34 @@
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Index(idx), gl.STATIC_DRAW);
     return { vb, ib, count: idx.length, type: Index === Uint32Array ? gl.UNSIGNED_INT : gl.UNSIGNED_SHORT };
+  }
+
+  /* Four corners per tree. The index order is the draw order and is rebuilt by sortTrees,
+     so only the vertices are made here. */
+  function treeQuads(gl, trees) {
+    const verts = new Float32Array(trees.length * 4 * 6);
+    const corners = [[-1, 0], [1, 0], [1, 1], [-1, 1]];
+    let i = 0;
+    trees.forEach(function (t) {
+      corners.forEach(function (c) {
+        verts[i++] = t.x; verts[i++] = t.y; verts[i++] = t.r; verts[i++] = t.type;
+        verts[i++] = c[0]; verts[i++] = c[1];
+      });
+    });
+    const vb = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+    return { vb, ib: gl.createBuffer(), count: trees.length * 6, order: null };
+  }
+
+  /* Far trees first so near ones paint over them. Far is further along up: the top of the
+     screen once the frame is rotated. Pure, for the test. */
+  function treeDrawOrder(trees, up) {
+    const idx = trees.map(function (t, i) { return i; });
+    idx.sort(function (a, b) {
+      return (trees[b].x * up[0] + trees[b].y * up[1]) - (trees[a].x * up[0] + trees[a].y * up[1]);
+    });
+    return idx;
   }
 
   function texture(gl, image, linear) {
@@ -258,8 +396,19 @@
   function create(canvas, options) {
     const gl = canvas.getContext("webgl", { antialias: true, alpha: false });
     if (!gl) throw new Error("WebGL unavailable");
-    const prog = program(gl);
+    const prog = program(gl, VERT, FRAG);
     const mesh = grid(gl, options.segments || 192);
+    /* Trees come with the illustrated map only (gd-illustrated-surface.js placeTrees). A
+       16-bit index holds 16383 quads; a frame carries a few thousand at most. */
+    const trees = Array.isArray(options.trees) ? options.trees.slice(0, 16383) : [];
+    const treeProg = trees.length ? program(gl, TREE_VERT, TREE_FRAG) : null;
+    const treeMesh = trees.length ? treeQuads(gl, trees) : null;
+    const tu = {};
+    if (treeProg) {
+      ["aTree", "aCorner"].forEach(name => { tu[name] = gl.getAttribLocation(treeProg, name); });
+      ["uElevation", "uExaggeration", "uSeaLevel", "uShear", "uImagePx", "uUp", "uSinT", "uCosT"]
+        .forEach(name => { tu[name] = gl.getUniformLocation(treeProg, name); });
+    }
     const aGrid = gl.getAttribLocation(prog, "aGrid");
     const u = {};
     ["uElevation", "uAerial", "uExaggeration", "uSeaLevel", "uShear", "uImagePx", "uTexel", "uMetresPerTexel", "uLight", "uAmbient"]
@@ -313,7 +462,52 @@
       gl.vertexAttribPointer(aGrid, 2, gl.FLOAT, false, 0, 0);
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.ib);
       gl.drawElements(gl.TRIANGLE_STRIP, mesh.count, mesh.type, 0);
+      gl.disableVertexAttribArray(aGrid);
+
+      if (treeProg) drawTrees(Math.sin(rot) * shearPx, -Math.cos(rot) * shearPx, rot);
       gl.finish();
+    }
+
+    function drawTrees(shearX, shearY, rot) {
+      const up = [Math.sin(rot), -Math.cos(rot)];
+      const key = up[0].toFixed(4) + "," + up[1].toFixed(4);
+      if (treeMesh.order !== key) {
+        const idx = new Uint16Array(trees.length * 6);
+        treeDrawOrder(trees, up).forEach(function (n, i) {
+          const v = n * 4;
+          idx.set([v, v + 1, v + 2, v, v + 2, v + 3], i * 6);
+        });
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, treeMesh.ib);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.DYNAMIC_DRAW);
+        treeMesh.order = key;
+      }
+      const tilt = state.tiltDeg * Math.PI / 180;
+      gl.useProgram(treeProg);
+      gl.uniform2f(tu.uShear, shearX, shearY);
+      gl.uniform2f(tu.uImagePx, state.imagePx[0], state.imagePx[1]);
+      gl.uniform1f(tu.uExaggeration, state.exaggeration);
+      gl.uniform1f(tu.uSeaLevel, state.seaLevel);
+      gl.uniform2f(tu.uUp, up[0], up[1]);
+      gl.uniform1f(tu.uSinT, Math.sin(tilt));
+      gl.uniform1f(tu.uCosT, Math.cos(tilt));
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, elevation); gl.uniform1i(tu.uElevation, 0);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, treeMesh.vb);
+      gl.enableVertexAttribArray(tu.aTree);
+      gl.vertexAttribPointer(tu.aTree, 4, gl.FLOAT, false, 24, 0);
+      gl.enableVertexAttribArray(tu.aCorner);
+      gl.vertexAttribPointer(tu.aCorner, 2, gl.FLOAT, false, 24, 16);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, treeMesh.ib);
+      /* Painted over the ground in draw order, not depth tested: the ground's depth is its
+         height, which says nothing about which of two trees is nearer. */
+      gl.disable(gl.DEPTH_TEST);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.drawElements(gl.TRIANGLES, treeMesh.count, gl.UNSIGNED_SHORT, 0);
+      gl.disable(gl.BLEND);
+      gl.enable(gl.DEPTH_TEST);
+      gl.disableVertexAttribArray(tu.aTree);
+      gl.disableVertexAttribArray(tu.aCorner);
     }
 
     function dispose() {
@@ -326,6 +520,8 @@
         gl.deleteBuffer(mesh.vb);
         gl.deleteBuffer(mesh.ib);
         gl.deleteProgram(prog);
+        if (treeMesh) { gl.deleteBuffer(treeMesh.vb); gl.deleteBuffer(treeMesh.ib); }
+        if (treeProg) gl.deleteProgram(treeProg);
         var lose = gl.getExtension("WEBGL_lose_context");
         if (lose) lose.loseContext();
       } catch (e) { /* already gone */ }
@@ -349,5 +545,5 @@
     } catch (e) { return false; }
   }
 
-  root.GDTerrainMesh = { create: create, supported: supported, makeDisplacer: makeDisplacer };
+  root.GDTerrainMesh = { create: create, supported: supported, makeDisplacer: makeDisplacer, treeDrawOrder: treeDrawOrder };
 })(typeof window !== "undefined" ? window : this);
