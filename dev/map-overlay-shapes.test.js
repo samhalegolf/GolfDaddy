@@ -49,10 +49,10 @@ test("a tee is a round marker that faces nowhere", () => {
   assert.ok(r.every(d => Math.abs(d - shapes.TEE_RADIUS_M) < 0.01), "every corner sits on the tee's radius");
 });
 
-test("a green is kept as a smooth curve through six handles, and reads them back exactly", () => {
+test("a green is kept as a smooth curve through eight handles, and reads them back exactly", () => {
   const wand = shapes.circle(at(0, 0), 14, 40);
   const { handles: n, steps } = shapes.SMOOTH.green;
-  assert.strictEqual(n, 6);
+  assert.strictEqual(n, 8);
   const green = shapes.smoothOutline(wand, "green");
   assert.strictEqual(green.length, n * steps);
   const handles = shapes.ringHandles(green, n, steps);
@@ -528,12 +528,19 @@ function rArea(ring) {
 }
 const LONG_GREEN = Array.from({ length: 48 }, (_, i) => { const a = i / 48 * 2 * Math.PI; return rLL(Math.cos(a) * 15, Math.sin(a) * 6); });
 
-test("bigger and smaller move a green's whole edge the same distance - a long green stays long", () => {
+test("reshapeOutline moves the whole edge the same distance", () => {
   const big = rSpan(shapes.reshapeOutline([LONG_GREEN], { growM: 2 }));
   const small = rSpan(shapes.reshapeOutline([LONG_GREEN], { growM: -2 }));
   assert.ok(Math.abs(big.w - 34) < 0.8 && Math.abs(big.h - 16) < 0.8, "2m bigger all round: " + JSON.stringify(big));
   assert.ok(Math.abs(small.w - 26) < 0.8 && Math.abs(small.h - 8) < 0.8, "2m smaller all round: " + JSON.stringify(small));
   assert.strictEqual(shapes.reshapeOutline([LONG_GREEN], { growM: -7 }), null, "shrunk past nothing is nothing");
+});
+
+test("a green scaled bigger keeps its shape - a long green does not drift rounder", () => {
+  const base = rSpan(LONG_GREEN);
+  const big = rSpan(shapes.scaleAbout(LONG_GREEN, 1 + 4 / shapes.ringRadiusM(LONG_GREEN)));
+  assert.ok(big.w > base.w + 4, "it gets bigger: " + JSON.stringify(big));
+  assert.ok(Math.abs(big.w / big.h - base.w / base.h) < 1e-6, "same length to width: " + JSON.stringify(big));
 });
 
 test("smoothing a fairway bridges a tree's cut-in and leaves the rest of the edge where it was", () => {
