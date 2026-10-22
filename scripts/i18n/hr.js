@@ -235,8 +235,6 @@
     "bag.sevenIronQuestion": "Koliki je tvoj carry sa željezom 7?",
     "bag.sevenIronPlaceholder": "Carry željeza 7 (m)",
     "bag.sevenIronAria": "Carry željeza 7 u metrima",
-    "bag.signInToKeep": "Prijavi se da spremiš vlastite udaljenosti palica. Prikazane su standardne vrijednosti.",
-    "bag.standardSignIn": "Ovo su standardne udaljenosti koje oblikuju tvoj Bubble. Prijavi se da postaviš svoje.",
     "bag.standardUntilSet": "Standardne udaljenosti, dok ne postaviš svoje.",
     "bag.sevenIronFirst": "Prvo unesi carry željeza 7",
     "bag.generateRestTitle": "Generirati ostatak torbe?",

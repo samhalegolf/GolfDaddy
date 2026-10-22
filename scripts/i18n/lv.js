@@ -235,8 +235,6 @@
     "bag.sevenIronQuestion": "Cik tālu gaisā lido tava 7. dzelzs?",
     "bag.sevenIronPlaceholder": "7. dzelzs carry (m)",
     "bag.sevenIronAria": "7. dzelzs carry metros",
-    "bag.signInToKeep": "Piesakies, lai saglabātu savus nūju attālumus. Parādīti standarta attālumi.",
-    "bag.standardSignIn": "Šie ir standarta attālumi, kas nosaka tavu Bubble. Piesakies, lai iestatītu savus.",
     "bag.standardUntilSet": "Standarta attālumi, līdz iestatīsi savus.",
     "bag.sevenIronFirst": "Vispirms ievadi 7. dzelzs carry",
     "bag.generateRestTitle": "Izveidot pārējo somu?",

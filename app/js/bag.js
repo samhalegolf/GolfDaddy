@@ -14,12 +14,11 @@
  * tell those apart: a seeded default set is NOT a real bag, and passing it as
  * one would quietly retire the ghost.
  *
- * THE WHOLE BAG IS FREE, ghost and real alike (decided 30 Aug 2026). Setting
- * your own club distances used to be the membership; it is not any more, and
- * canEdit() below now asks only whether there is a profile to write into. A
- * player with no bag still sees the ghost distances driving their bubble,
- * because "these are the numbers behind your bubble" is the honest answer to
- * an empty list - not because the real ones are behind a till.
+ * THE WHOLE BAG IS FREE, ghost and real alike (decided 30 Aug 2026), for
+ * every player, signed in or not. A player with no bag still sees the ghost
+ * distances driving their bubble, because "these are the numbers behind your
+ * bubble" is the honest answer to an empty list - not because the real ones
+ * are behind a till.
  *
  * ONE LIST, TOO. The clubs were already shared; the way they were shown was
  * not. This surface drew its own column of rows in its own order while the
@@ -52,6 +51,28 @@
     return profiles.filter(function (p) { return p && p.id === raw.activeId; })[0] || profiles[0];
   }
 
+  /* The profile a write goes into, made on the spot if this device has none.
+     A fresh install that came straight to the play surface has no profile
+     until the shell makes one, and refusing the edit until then is what left
+     Generate doing nothing. Signing in always writes a profile, so this is a
+     signed-out device, and the profile is the guest's under the same id
+     gd-guest-access.js derives - otherwise the shell would mint its own guest
+     beside it and the bag would vanish on the way through. Minimal on purpose:
+     the shell's completeProfileForHome fills in the rest. */
+  function writableProfile(raw) {
+    var p = activeProfile(raw);
+    if (p) return p;
+    var guestId = safe(function () { return String(window.GDGuestIdentity.getOrCreateGuestId() || ""); }, "");
+    var id = guestId ? "guest" + guestId.slice(0, 8) : "guest";
+    var now = new Date().toISOString();
+    p = { id: id, name: "Guest", guestProfile: true, guestId: id, handicap: "",
+      permission: "player", accountPermission: "player", mode: "player", handedness: "right",
+      bag: [], createdAt: now, updatedAt: now };
+    raw.profiles = [p];
+    raw.activeId = p.id;
+    return p;
+  }
+
   function core() { return window.GDBagCore; }
 
   /* Longest club first, always - the shell's panel reads this same stored bag
@@ -76,12 +97,10 @@
 
   /* Mirrors gd-app-core's gdBagPersistRows, minus the shell-only rendering: the
      same three flags have to move together or the ghost/real distinction breaks
-     the next time either side reads it. Refuses without a profile rather than
-     inventing one - editing is a member action, and a member has an account. */
+     the next time either side reads it. */
   function save(clubs) {
     var raw = store();
-    var p = activeProfile(raw);
-    if (!p) return false;
+    var p = writableProfile(raw);
     p.bag = normalise(clubs).map(function (row) {
       return { club: row.club, baseCarry: row.baseCarry, totalM: totalFor(row) };
     });
@@ -114,24 +133,6 @@
     return normalise(engine && engine.defaultBagRows ? engine.defaultBagRows() : []);
   }
 
-  /* THE BAG IS FREE (decided 30 Aug 2026).
-   *
-   * This used to ask app.access whether the session had round features, which
-   * meant a signed-out or rangefinder-only player could see the ghost
-   * distances driving their bubble but not replace them. The shell's own bag
-   * sheet had stopped asking anything at all, so the same bag was editable
-   * through one door and read-only through another. Neither is the rule now:
-   * club distances are the player's own numbers and cost nothing.
-   *
-   * What is left is not an entitlement but a place to put the answer. save()
-   * and setHandedness() write into the active player profile and refuse rather
-   * than inventing one, so "is there a profile" is the only question worth
-   * asking before offering an edit - otherwise the edit is accepted and
-   * silently dropped, which is worse than saying no. */
-  function canEdit() {
-    return !!activeProfile();
-  }
-
   /* Handedness, from the same profile the bag comes from.
    *
    * It is a PLAYER value, not a round preference, which is why it lives here
@@ -150,13 +151,9 @@
     return p && p.handedness === "left" ? "left" : "right";
   }
 
-  /* Refuses without a profile rather than inventing one, exactly as save()
-     does - see the note there. */
   function setHandedness(value) {
-    if (!canEdit()) return refuse();
     var raw = store();
-    var p = activeProfile(raw);
-    if (!p) return false;
+    var p = writableProfile(raw);
     p.handedness = value === "left" ? "left" : "right";
     p.updatedAt = new Date().toISOString();
     var ok = safe(function () { localStorage.setItem(PROFILE_KEY, JSON.stringify(raw)); return true; }, false);
@@ -182,22 +179,12 @@
   }
 
   function setFirmness(preset) {
-    if (!canEdit()) return refuse();
     safe(function () { localStorage.setItem(FIRMNESS_KEY, preset); });
     /* Re-persist, don't just redraw: the totals are stored alongside the
        carries, and the shell reads those stored numbers. Redrawing alone left
        this surface showing one total and the shell showing the old one. */
     if (clubs.length) sync();
     render();
-  }
-
-  /* The notice line above the list, not the access bar: there is nothing to
-     buy any more, and nothing to sign in FOR except somewhere to keep the
-     clubs. Saying that plainly beats sending the player to a membership page
-     that would not change the answer. */
-  function refuse() {
-    note("bag.signInToKeep");
-    return false;
   }
 
   var clubs = load();
@@ -254,16 +241,13 @@
   function render() {
     var list = document.getElementById("bagList");
     if (!list) return;
-    var editable = canEdit();
     var showingGhost = !clubs.length;
     var rows = showingGhost ? ghostRows() : clubs;
 
     var notice = document.getElementById("bagNotice");
     if (notice) {
-      notice.classList.toggle("hiddenState", editable && !showingGhost);
-      i18n.set(notice, !editable ? "bag.standardSignIn"
-        : showingGhost ? "bag.standardUntilSet"
-          : null);
+      notice.classList.toggle("hiddenState", !showingGhost);
+      i18n.set(notice, showingGhost ? "bag.standardUntilSet" : null);
     }
 
     /* One renderer, shared with the shell's Bag panel: two columns filled left
@@ -277,7 +261,6 @@
         anchorRows: editingAnchorRows,
         artBase: "../",
         onEdit: function (club) {
-          if (!editable) return refuse();
           /* The ghost rows are the shipped defaults shown because there is
              nothing else to show; opening one would edit a bag the player
              never set. The notice above the list says so, and Add a club is
@@ -305,9 +288,6 @@
     document.querySelectorAll("#bagFirmness [data-firmness]").forEach(function (btn) {
       btn.setAttribute("aria-pressed", btn.dataset.firmness === preset ? "true" : "false");
     });
-    document.querySelectorAll(".bagEditAction").forEach(function (el) {
-      el.classList.toggle("hiddenState", !editable);
-    });
     /* The generator's tab says which of its two jobs it is about to do, the
        same way the shell's build button does: a bag with clubs in it is never
        offered a "Generate bag" that would replace them. */
@@ -320,7 +300,6 @@
   /* Name first, then distance - and through the core's add, so a blank name or
      a club already in the bag is refused the same way it is in the shell. */
   function addClub(club, carry) {
-    if (!canEdit()) return refuse();
     var result = safe(function () { return core().addRow(clubs, club, carry); }, null);
     if (!result) return false;
     if (result.error) { render(); noteError(result); return false; }
@@ -376,7 +355,6 @@
      clubs in the bag its build button IS "Generate rest", and it asks first.
      This now says the same thing. */
   function generate(sevenIronCarry) {
-    if (!canEdit()) return refuse();
     return clubs.length ? generateRest(sevenIronCarry) : generateQuickSet(sevenIronCarry);
   }
 
@@ -405,7 +383,6 @@
   }
 
   function openOverlay(which) {
-    if (!canEdit()) return refuse();
     closeOverlays();
     var els = overlayEls();
     var card = which === "quick" ? els.quick : els.add;

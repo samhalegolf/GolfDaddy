@@ -235,8 +235,6 @@
     "bag.sevenIronQuestion": "Cât carry faci cu fierul 7?",
     "bag.sevenIronPlaceholder": "Carry fier 7 (m)",
     "bag.sevenIronAria": "Carry-ul fierului 7 în metri",
-    "bag.signInToKeep": "Conectează-te ca să-ți păstrezi propriile distanțe. Cele afișate sunt distanțele standard.",
-    "bag.standardSignIn": "Acestea sunt distanțele standard după care se ghidează Bubble-ul tău. Conectează-te ca să le setezi pe ale tale.",
     "bag.standardUntilSet": "Distanțe standard, până le setezi pe ale tale.",
     "bag.sevenIronFirst": "Introdu mai întâi carry-ul fierului 7",
     "bag.generateRestTitle": "Generezi restul sacului?",

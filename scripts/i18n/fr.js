@@ -234,8 +234,6 @@
     "bag.sevenIronQuestion": "Quel est votre carry au fer‑7 ?",
     "bag.sevenIronPlaceholder": "Carry fer 7 (m)",
     "bag.sevenIronAria": "Carry du fer 7 en mètres",
-    "bag.signInToKeep": "Connectez-vous pour enregistrer vos propres distances de club. Celles affichées sont les distances standard.",
-    "bag.standardSignIn": "Ce sont les distances standard qui pilotent votre Bubble. Connectez-vous pour définir les vôtres.",
     "bag.standardUntilSet": "Distances standard, jusqu’à ce que vous définissiez les vôtres.",
     "bag.sevenIronFirst": "Saisissez d’abord votre carry au fer 7",
     "bag.generateRestTitle": "Générer le reste de votre sac ?",

@@ -234,8 +234,6 @@
     "bag.sevenIronQuestion": "Kui kaugele su 7‑raud õhus lendab?",
     "bag.sevenIronPlaceholder": "7‑raua carry (m)",
     "bag.sevenIronAria": "7‑raua carry meetrites",
-    "bag.signInToKeep": "Logi sisse, et hoida oma keppide kaugusi. Näidatud on standardkomplekt.",
-    "bag.standardSignIn": "Need on standardkaugused, mis su Bubble'it juhivad. Logi sisse, et määrata oma.",
     "bag.standardUntilSet": "Standardkaugused, kuni määrad oma.",
     "bag.sevenIronFirst": "Sisesta esmalt 7‑raua carry",
     "bag.generateRestTitle": "Kas luua ülejäänud kott?",

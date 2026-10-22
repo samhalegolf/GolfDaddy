@@ -235,8 +235,6 @@
     "bag.sevenIronQuestion": "Kiek toli ore skrenda tavo 7 geležinė?",
     "bag.sevenIronPlaceholder": "7 geležinės carry (m)",
     "bag.sevenIronAria": "7 geležinės carry metrais",
-    "bag.signInToKeep": "Prisijunk, kad išsaugotum savo lazdų atstumus. Rodomi standartiniai atstumai.",
-    "bag.standardSignIn": "Tai standartiniai atstumai, pagal kuriuos veikia tavo Bubble. Prisijunk, kad nustatytum savo.",
     "bag.standardUntilSet": "Standartiniai atstumai, kol nenustatysi savo.",
     "bag.sevenIronFirst": "Pirma įvesk 7 geležinės carry",
     "bag.generateRestTitle": "Sukurti likusį krepšį?",
