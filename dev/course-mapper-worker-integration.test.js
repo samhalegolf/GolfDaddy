@@ -121,6 +121,72 @@ test("OSM shapes with no hole numbers and no shared scorecard fail clearly, not 
   assert.ok(String(failed.body.error).includes("no shared scorecard found"));
 });
 
+/* Yarra Bend, 2026-10-23: its own holes drawn but not numbered, and the only numbered golf in
+   the sweep a neighbouring par 3 in an outline of its own. The par 3 must not publish as
+   Yarra Bend, and it must not stop Yarra Bend's own ground being numbered from its card. */
+function besideNumberedParThree() {
+  const ring = (south, west, north, east) => [
+    { lat: south, lon: west }, { lat: north, lon: west }, { lat: north, lon: east }, { lat: south, lon: east }, { lat: south, lon: west }
+  ];
+  const parThrees = Array.from({ length: 9 }, (_, i) => ({
+    type: "way", id: 900 + i, tags: { golf: "hole", ref: String(i + 1), par: "3" },
+    geometry: [{ lat: -0.0115 + i * 0.0003, lon: 0.0005 }, { lat: -0.0113 + i * 0.0003, lon: 0.0012 }]
+  }));
+  return {
+    elements: unnumberedFixture.elements.concat(
+      { type: "way", id: 801, tags: { leisure: "golf_course", name: "Yarra Bend Golf Course" }, geometry: ring(-0.002, -0.003, 0.014, 0.003) },
+      { type: "way", id: 802, tags: { leisure: "golf_course", name: "Studley Park Golf Course" }, geometry: ring(-0.013, -0.001, -0.008, 0.003) },
+      parThrees
+    )
+  };
+}
+
+test("a numbered par 3 next door is set aside and the course's own unnumbered ground is resolved from its card", async () => {
+  const patches = [];
+  stubWorld({
+    mapRow: { course_id: "pupuke", course_name: "Yarra Bend Golf Course", course_lat: 0.005, course_lng: 0, objects_json: {}, holes_json: {} },
+    patches,
+    osmFixture: besideNumberedParThree(),
+    scorecardRow: {
+      holes_json: [
+        { hole: 1, par: 5, metres: 400 },
+        { hole: 2, par: 3, metres: 150 }
+      ],
+      source: "website", source_url: "https://example.test/scorecard", sources_json: []
+    }
+  });
+  await worker.default({ json: async () => ({ jobId: "job-1" }) });
+  const jobPatches = patches.filter(p => p.table === "course_mapper_jobs");
+  const finalStatus = jobPatches.find(p => p.body.status === "done");
+  const failed = jobPatches.find(p => p.body.status === "failed");
+  assert.ok(finalStatus, "the job should finish as done, not refuse: " + (failed && failed.body.error));
+  const diagnostics = finalStatus.body.result.diagnostics;
+  assert.strictEqual(diagnostics.foreignGround.holesOutline.name, "Studley Park Golf Course");
+  assert.strictEqual(diagnostics.foreignGround.setAside, true);
+  assert.ok(finalStatus.body.result.queryStages.includes("neighbour-set-aside"));
+  assert.strictEqual(finalStatus.body.result.resolverStatus.trigger, "no-osm-numbering");
+  const ownWrite = patches.filter(p => p.table === "course_maps" && p.body.holes_json && Object.keys(p.body.holes_json).length === 2).pop();
+  assert.ok(ownWrite, "Yarra Bend's own two holes are written, numbered from its card");
+});
+
+test("a numbered neighbour beside an outline holding nothing of its own still refuses", async () => {
+  const patches = [];
+  const world = besideNumberedParThree();
+  world.elements = world.elements.filter(element => !(element.tags && element.tags.golf === "green") && !(element.tags && element.tags.golf === "fairway"));
+  stubWorld({
+    /* A pin of its own: the worker caches Overpass answers by query, and the same pin
+       would be handed the world above, greens and all. */
+    mapRow: { course_id: "pupuke", course_name: "Yarra Bend Golf Course", course_lat: 0.006, course_lng: 0, objects_json: {}, holes_json: {} },
+    patches,
+    osmFixture: world,
+    scorecardRow: null
+  });
+  await worker.default({ json: async () => ({ jobId: "job-1" }) });
+  const failed = patches.filter(p => p.table === "course_mapper_jobs").find(p => p.body.status === "failed");
+  assert.ok(failed, "nothing of this course's own to number: the run refuses");
+  assert.ok(String(failed.body.error).includes("course-outline-names-another-club"), failed.body.error);
+});
+
 (async function run() {
   process.env.SUPABASE_URL = "https://stub.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-stub";

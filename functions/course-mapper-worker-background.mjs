@@ -3099,9 +3099,14 @@ async function runMapperJob(job, origin) {
    * the fixes below spend effort completing a course that is not this one. When
    * OSM has drawn the pin inside one named club and every hole inside another,
    * the holes go up as that other club's course - under its own name, its own
-   * row, no facility - and this run refuses, saying which ground it found and
-   * that the asked-for outline holds nothing numbered. See foreignGroundClaim for
-   * exactly how little this is allowed to decide. */
+   * row, no facility. This run then carries on over what is left of its own
+   * outline if there is anything there to number, and refuses, saying which
+   * ground it found, only when there is not. See foreignGroundClaim for exactly
+   * how little this is allowed to decide. */
+  /* Set when a neighbour's holes were set aside and the run carried on over this course's
+     own ground: the verdict a later failure reports, because "this ground is another club's"
+     is still the reason nothing of this course's own could be numbered. */
+  let foreignFit = null;
   if (!collision.multiLoop && geometry.holesResolved > 0) {
     const claim = foreignGroundClaim(payload, course.center, { facilityName: facilityNameOf(course), selectedName: course.courseName || "" });
     if (claim) {
@@ -3122,27 +3127,44 @@ async function runMapperJob(job, origin) {
       diagnostics.neighbourCourses = await publishNeighbourCourses(job, course, [claim.loop], origin)
         .catch(error => [{ skipped: "publish-failed", error: String((error && error.message) || error).slice(0, 200) }]);
       const neighbour = diagnostics.neighbourCourses[0] || {};
-      diagnostics.fit = {
+      foreignFit = {
         trusted: false,
         reason: "ground-is-another-club",
         scope: "ground",
         detail: { outlineName: claim.holesOutline.name, pinOutlineName: claim.pinOutline.name, ownNumberedHoles: claim.insidePinOutline, holes: claim.holes }
       };
-      diagnostics.fit.message = courseFitMessage(diagnostics.fit);
-      throw fail(
-        "the " + claim.holes + " numbered holes found here sit inside the OSM outline \"" + claim.holesOutline.name + "\""
-        + (claim.holesOutline.owner ? " (" + claim.holesOutline.owner + ")" : "")
-        + ", " + (claim.awayFromPinM != null ? claim.awayFromPinM + "m from the pin, " : "")
-        + "while the pin sits inside \"" + claim.pinOutline.name + "\""
-        + (claim.insidePinOutline ? ", which holds only " + claim.insidePinOutline + " of them" : ", which holds no numbered holes")
-        + " (" + claim.reason + "). Not published as " + (course.courseName || course.courseId) + "."
-        + (neighbour.courseId
-          ? " Published as its own course, " + neighbour.courseId + " (" + neighbour.holesResolved + " holes)."
-          : neighbour.skipped === "already-mapped" && neighbour.existing
-            ? " It is already mapped as " + neighbour.existing.courseId + "."
-            : neighbour.skipped ? " Not published on its own either (" + neighbour.skipped + ")." : "")
-        + " To map " + (course.courseName || course.courseId) + ", number its holes in OpenStreetMap or draw them on the Mapping Overlay, then remap."
-      );
+      foreignFit.message = courseFitMessage(foreignFit);
+      /* The neighbour is published under its own name; what is left is this course's own
+         ground. When the pin's outline holds hole ways or greens of its own - Yarra Bend's
+         eighteen unnumbered holes beside Studley Park's numbered nine - the run carries on
+         over that ground alone, and the no-numbering resolver below matches it against the
+         scorecard. Only a pin outline with nothing in it refuses here. */
+      const own = claim.ownGround;
+      diagnostics.foreignGround.ownGround = { unnumberedHoles: own.unnumberedHoles, greens: own.greens };
+      if (own.unnumberedHoles || own.greens) {
+        payload = own.payload;
+        collision = detectHoleNumberCollision(payload);
+        geometry = resolveCourseGeometry(payload, course.courseId, course.center, existingObjects, siblingCentres);
+        queryStages.push("neighbour-set-aside");
+        diagnostics.foreignGround.setAside = true;
+        diagnostics.osmFeatures = golfFeatureCounts(payload);
+      } else {
+        diagnostics.fit = foreignFit;
+        throw fail(
+          "the " + claim.holes + " numbered holes found here sit inside the OSM outline \"" + claim.holesOutline.name + "\""
+          + (claim.holesOutline.owner ? " (" + claim.holesOutline.owner + ")" : "")
+          + ", " + (claim.awayFromPinM != null ? claim.awayFromPinM + "m from the pin, " : "")
+          + "while the pin sits inside \"" + claim.pinOutline.name + "\""
+          + (claim.insidePinOutline ? ", which holds only " + claim.insidePinOutline + " of them" : ", which holds no numbered holes")
+          + " (" + claim.reason + "). Not published as " + (course.courseName || course.courseId) + "."
+          + (neighbour.courseId
+            ? " Published as its own course, " + neighbour.courseId + " (" + neighbour.holesResolved + " holes)."
+            : neighbour.skipped === "already-mapped" && neighbour.existing
+              ? " It is already mapped as " + neighbour.existing.courseId + "."
+              : neighbour.skipped ? " Not published on its own either (" + neighbour.skipped + ")." : "")
+          + " To map " + (course.courseName || course.courseId) + ", number its holes in OpenStreetMap or draw them on the Mapping Overlay, then remap."
+        );
+      }
     }
   }
 
@@ -3372,6 +3394,7 @@ async function runMapperJob(job, origin) {
     /* Nothing numbered, and every green found is well away from the pin: the pin is on
        something that is not the golf (a range, a road), so the player is asked to pin the
        course rather than told there is no map. See pinOffGolfClaim. */
+    if (foreignFit && !diagnostics.fit) diagnostics.fit = foreignFit;
     const offGolf = !diagnostics.fit && pinOffGolfClaim(payload, course.center);
     if (offGolf) {
       diagnostics.fit = { trusted: false, reason: "pin-off-golf", scope: "ground", detail: offGolf };

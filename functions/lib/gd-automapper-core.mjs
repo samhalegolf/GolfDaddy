@@ -1369,7 +1369,55 @@ export function foreignGroundClaim(payload, centre, options) {
       contiguous: loopIsContiguous(numbers),
       awayFromPinM: loopCentre ? Math.round(distance(centre, loopCentre)) : null,
       payload
-    }
+    },
+    ownGround: ownGroundWithoutNeighbour(payload, holesOutline, pinOutline, features)
+  };
+}
+
+/* What is left of the selection's own course once the neighbour is set aside (Yarra Bend,
+ * 2026-10-23). Studley Park, a numbered par 3 a kilometre away, was the only numbered golf
+ * in the sweep; Yarra Bend's own eighteen hole ways carry no numbers. The claim refused,
+ * correctly, to publish Studley Park as Yarra Bend - and then the run stopped, so the
+ * unnumbered resolver that maps exactly this kind of course (holes drawn, no refs, matched
+ * against the scorecard) never saw Yarra Bend's ground at all.
+ *
+ * So the claim also hands back the payload without the neighbour: every element inside the
+ * holes' outline, that outline itself, and the numbered holes go; everything else stays,
+ * the pin's own outline included, because the resolver bounds its search with it. The
+ * counts say whether there is anything of the selection's own to try - unnumbered hole
+ * ways or greens inside the pin's outline - and the worker only carries on when there is. */
+/* Ways and relations by their drawn points; a bare node (a tee or pin tagged as a point) by
+   its own position, so the neighbour's point features go with it too. */
+function elementCentre(element) {
+  const drawn = centroidOfPoints(osmGuidePointsFromElement(element));
+  if (drawn) return drawn;
+  const lat = Number(element && element.lat), lng = Number(element && element.lon);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+}
+
+function ownGroundWithoutNeighbour(payload, holesOutline, pinOutline, features) {
+  const numbered = new Set(features.map(feature => feature.element));
+  const holesOutlineRef = holesOutline.ref;
+  const elements = ((payload && payload.elements) || []).filter(element => {
+    if (numbered.has(element)) return false;
+    if (String(element.type || "way") + "/" + String(element.id || "") === holesOutlineRef) return false;
+    const centre = elementCentre(element);
+    return !(centre && pointInRing(centre, holesOutline.ring));
+  });
+  let unnumberedHoles = 0;
+  let greens = 0;
+  elements.forEach(element => {
+    const golf = String((element.tags && element.tags.golf) || "").toLowerCase();
+    if (golf !== "hole" && golf !== "green") return;
+    const centre = elementCentre(element);
+    if (!centre || !pointInRing(centre, pinOutline.ring)) return;
+    if (golf === "hole") unnumberedHoles += 1;
+    else greens += 1;
+  });
+  return {
+    unnumberedHoles,
+    greens,
+    payload: Object.assign({}, payload, { elements })
   };
 }
 
