@@ -600,6 +600,44 @@ test("a single loop whose holes all sit inside another club's outline is refused
   silent([outline(1, PIN, 0.004, { name: "Seminole Lakes Golf Course" }), outline(2, OTHER, 0.006, { name: "North Course" }), ...holes], PIN,
     "an outline named only as a course label never rules holes out");
   silent([seminole, outline(2, OTHER, 0.006, {}), ...holes], PIN, "an unnamed, unowned outline says nothing");
+
+  assert.deepStrictEqual([claim.ownGround.unnumberedHoles, claim.ownGround.greens], [0, 0], "nothing of Seminole's own to carry on with");
+});
+
+/* Yarra Bend, 2026-10-23: Studley Park's numbered par 3 nine a kilometre away, and Yarra
+   Bend's own holes drawn but not numbered. The par 3 goes; Yarra Bend's ground stays. */
+test("a foreign-ground claim hands back the selection's own ground without the neighbour", () => {
+  const PIN = { lat: -37.7985, lng: 145.0153 };
+  const OTHER = { lat: -37.8075, lng: 145.0153 };
+  const ring = (at, half) => [
+    { lat: at.lat - half, lng: at.lng - half }, { lat: at.lat + half, lng: at.lng - half },
+    { lat: at.lat + half, lng: at.lng + half }, { lat: at.lat - half, lng: at.lng + half },
+    { lat: at.lat - half, lng: at.lng - half }
+  ];
+  const way = (id, tags, at) => ({ type: "way", id, tags, geometry: [at, { lat: at.lat + 0.0008, lng: at.lng + 0.0006 }] });
+  const yarraBend = { type: "way", id: 1, tags: { leisure: "golf_course", name: "Yarra Bend Golf Course" }, geometry: ring(PIN, 0.004) };
+  const studleyPark = { type: "way", id: 2, tags: { leisure: "golf_course", name: "Studley Park Golf Course" }, geometry: ring(OTHER, 0.002) };
+  const parThrees = Array.from({ length: 9 }, (_, i) => way(100 + i, { golf: "hole", ref: String(i + 1), par: "3" }, { lat: OTHER.lat - 0.0015 + i * 0.0003, lng: OTHER.lng }));
+  const parThreeGreen = way(150, { golf: "green" }, { lat: OTHER.lat, lng: OTHER.lng + 0.001 });
+  const parThreeTee = { type: "node", id: 151, lat: OTHER.lat + 0.001, lon: OTHER.lng, tags: { golf: "tee" } };
+  const ownHoles = Array.from({ length: 18 }, (_, i) => way(200 + i, { golf: "hole" }, { lat: PIN.lat - 0.003 + i * 0.0003, lng: PIN.lng - 0.002 }));
+  const ownGreens = Array.from({ length: 18 }, (_, i) => way(300 + i, { golf: "green" }, { lat: PIN.lat - 0.003 + i * 0.0003, lng: PIN.lng + 0.002 }));
+  const elements = [yarraBend, studleyPark, ...parThrees, parThreeGreen, parThreeTee, ...ownHoles, ...ownGreens];
+
+  const claim = core.foreignGroundClaim({ elements }, PIN, { facilityName: "Yarra Bend Golf Course", selectedName: "Yarra Bend Golf Course" });
+  assert.ok(claim, "the numbered nine are Studley Park's");
+  assert.strictEqual(claim.holesOutline.name, "Studley Park Golf Course");
+  assert.strictEqual(claim.insidePinOutline, 0);
+  assert.strictEqual(claim.ownGround.unnumberedHoles, 18);
+  assert.strictEqual(claim.ownGround.greens, 18);
+
+  const kept = new Set(claim.ownGround.payload.elements);
+  assert.ok(kept.has(yarraBend), "the pin's own outline stays: the resolver bounds its search with it");
+  assert.ok(!kept.has(studleyPark), "the neighbour's outline goes");
+  assert.ok(parThrees.every(hole => !kept.has(hole)), "the neighbour's numbered holes go");
+  assert.ok(!kept.has(parThreeGreen) && !kept.has(parThreeTee), "the neighbour's green and tee node go with it");
+  assert.strictEqual(claim.ownGround.payload.elements.length, 1 + 18 + 18);
+  assert.strictEqual(core.detectHoleNumberCollision(claim.ownGround.payload).holeFeatures, 0, "nothing numbered is left to resolve as this course");
 });
 
 (async function run() {
