@@ -16,7 +16,7 @@
  *                   earlier run or Collect Extra Objects left.
  *        lastRun  - the latest mapper job: its status, error and the counts it recorded, so a
  *                   drawer opened on a failed course says why it failed.
- *        osm.convertible - what OSM has here (and the mapper's default fairways) as overlay
+ *        osm.convertible - what OSM has here (and the mapper's guessed fairways, greens and tees) as overlay
  *                   shapes not yet in the overlay (osmToOverlayFeatures). Studio adds them to
  *                   the overlay so they can be reshaped; nothing is copied until it saves.
  *      The rest is for display.

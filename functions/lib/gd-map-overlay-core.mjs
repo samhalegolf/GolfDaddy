@@ -71,7 +71,7 @@
  *             still gives the resolver greens to hang fairways off.
  */
 
-import { osmAreaRings, coursePlayPoints, pointInShape, greenShapeSpan, osmGuideHoleRef, osmGuidePointsFromElement, SURFACE_SPAN_LIMITS_M, OSM_AUTO_GREEN_MAX_SPAN_M, FAIRWAY_FILL_SOURCE } from "./gd-automapper-core.mjs";
+import { osmAreaRings, coursePlayPoints, pointInShape, greenShapeSpan, osmGuideHoleRef, osmGuidePointsFromElement, SURFACE_SPAN_LIMITS_M, OSM_AUTO_GREEN_MAX_SPAN_M, FAIRWAY_FILL_SOURCE, OBJECT_DEDUPE_RADIUS_M, distance } from "./gd-automapper-core.mjs";
 
 export const OVERLAY_KINDS = new Set(["fairway", "hole", "green", "tee", "bunker", "water", "trees", "tree", "hazard", "waste"]);
 const POLYGON_KINDS = new Set(["fairway", "green", "tee", "bunker", "water", "trees", "tree", "hazard", "waste"]);
@@ -391,11 +391,16 @@ export function overlaySummary(features) {
    The same size checks the mapper applies are applied here, so nothing is offered that the
    mapper would have thrown away - including a wood drawn round the whole course.
 
-   Default fairways (the mapper's FAIRWAY_FILL_SOURCE objects, for holes OSM has no fairway on)
-   come too, numbered to their hole: drawn in, they become the hole's real fairway.
+   What the mapper guessed where OSM has nothing comes too, so it can be reshaped or replaced
+   rather than drawn from scratch: its default fairways (FAIRWAY_FILL_SOURCE), its estimated
+   circle greens and its tees (a point at the tee end of each hole line, so a tee pin). Drawn
+   in, each becomes the real thing. A default fairway is numbered to its hole when the saved
+   objects are one course's; at a facility two courses share hole numbers, so there - like
+   greens and tees always - it comes unnumbered and the mapper links it by where it lies. The
+   mapper's fairway aim points are not offered: they are points along a hole, not a shape.
 
-   Shapes already in the overlay are not offered again - matched on id, or on lying inside a
-   shape of the same kind someone has already drawn. */
+   Shapes already in the overlay, or already offered, are not offered again - matched on id,
+   or for a guess on lying in or near a shape of the same kind. */
 const OSM_TO_OVERLAY_KIND = { green: "green", tee: "tee", fairway: "fairway", bunker: "bunker", water_hazard: "water", lateral_water_hazard: "water", hole: "hole" };
 const KIND_SPAN_TYPE = { green: null, tee: null, fairway: "fairway_area", bunker: "bunker", water: "water", trees: "trees" };
 
@@ -425,6 +430,11 @@ export function osmToOverlayFeatures(payload, existing = [], savedObjects = []) 
   const have = normalizeOverlayFeatures(existing);
   const ids = new Set(have.map(f => f.id));
   const covered = (kind, centre) => have.some(f => f.kind === kind && !f.pin && overlayKindIsPolygon(kind) && pointInShape(centre, f.points));
+  /* A guess sits where the mapper thought the thing was, which a drawn green or OSM's tee can
+     miss by a few metres: anything of its kind on or within the mapper's own dedupe radius of
+     it already stands for it. */
+  const guessed = (kind, centre) => have.concat(out).some(f => f.kind === kind &&
+    ((!f.pin && pointInShape(centre, f.points)) || distance(centre, centreOfRing(f.points)) <= OBJECT_DEDUPE_RADIUS_M[kind]));
   const out = [];
   const offer = feature => {
     if (ids.has(feature.id) || covered(feature.kind, centreOfRing(feature.points))) return;
@@ -455,16 +465,41 @@ export function osmToOverlayFeatures(payload, existing = [], savedObjects = []) 
       offer({ id, kind, hole, points: thinRing(ring.map(p => ({ lat: p.lat, lng: p.lng }))), source: "osm", osm: key });
     });
   });
-  /* Default fairways: one per piece, numbered to the hole it was laid for ("fill/7#1"). */
+  const saved = (savedObjects || []).filter(object => object && typeof object === "object");
+  const oneCourse = new Set(saved.map(object => String(object.courseId || ""))).size <= 1;
+  /* Named after the saved object, so the same guess is the same shape from one load to the next. */
+  const guessId = (prefix, object) => {
+    const id = String(object.id || "").replace(/[^a-z0-9_-]/gi, "");
+    return id ? (prefix + id).slice(0, 40) : "";
+  };
+  const offerGuess = feature => {
+    if (feature.id && !guessed(feature.kind, centreOfRing(feature.points))) offer(feature);
+  };
+  /* Default fairways: one per piece, laid for a hole ("fill/7#1"). */
   const seen = new Set();
-  (savedObjects || []).forEach(object => {
-    if (!object || object.source !== FAIRWAY_FILL_SOURCE || !Array.isArray(object.shape)) return;
+  saved.forEach(object => {
+    if (object.source !== FAIRWAY_FILL_SOURCE || !Array.isArray(object.shape)) return;
     const match = /^fill\/(\d+)(?:#(\d+))?$/.exec(String(object.osmId || ""));
-    if (!match || Number(match[1]) !== validHoleNumber(object.holeNumber) || seen.has(object.osmId)) return;
-    seen.add(object.osmId);
+    const key = String(object.courseId || "") + "|" + object.osmId;
+    if (!match || Number(match[1]) !== validHoleNumber(object.holeNumber) || seen.has(key)) return;
+    seen.add(key);
     const points = object.shape.map(cleanPoint).filter(Boolean);
     if (points.length < 3) return;
-    offer({ id: "auto-fairway-" + match[1] + (match[2] ? "-" + match[2] : ""), kind: "fairway", hole: Number(match[1]), points, source: "auto" });
+    offer(oneCourse
+      ? { id: "auto-fairway-" + match[1] + (match[2] ? "-" + match[2] : ""), kind: "fairway", hole: Number(match[1]), points, source: "auto" }
+      : { id: guessId("auto-fairway-", object) || "auto-fairway-" + match[1], kind: "fairway", hole: null, points, source: "auto" });
+  });
+  /* Estimated greens: the circle the mapper drew at a hole line's end for want of a real one. */
+  saved.forEach(object => {
+    if (object.type !== "green" || object.source !== "osm_auto_green_estimate") return;
+    const points = (Array.isArray(object.shape) ? object.shape : object.greenShape || []).map(cleanPoint).filter(Boolean);
+    if (points.length >= 3) offerGuess({ id: guessId("auto-green-", object), kind: "green", hole: null, points: thinRing(points), source: "auto" });
+  });
+  /* Tees: the point the mapper took from the tee end of a hole line. */
+  saved.forEach(object => {
+    if (object.type !== "tee" || object.source !== "osm_auto_tee") return;
+    const point = cleanPoint(object.position);
+    if (point) offerGuess({ id: guessId("auto-tee-", object), kind: "tee", hole: null, points: [point], pin: true, source: "auto" });
   });
   return out;
 }
