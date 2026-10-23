@@ -883,6 +883,12 @@
     "bagEditor.rollSetSoft": "Κύλιση: μαλακό",
     "bagEditor.rollSetNormal": "Κύλιση: κανονικό",
     "bagEditor.rollSetFirm": "Κύλιση: σκληρό",
+    "bagSetup.title": "Ρυθμίστε τον σάκο σας",
+    "bagSetup.skip": "Παράλειψη",
+    "bagSetup.readyTitle": "Ο σάκος σας είναι έτοιμος",
+    "bagSetup.saveHint": "Δημιουργήστε δωρεάν λογαριασμό για να τον αποθηκεύσετε και να τον έχετε σε κάθε συσκευή.",
+    "bagSetup.signUp": "Δημιουργία δωρεάν λογαριασμού",
+    "bagSetup.notNow": "Όχι τώρα",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Γεια σου {name},",

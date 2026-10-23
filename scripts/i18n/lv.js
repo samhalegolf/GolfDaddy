@@ -906,6 +906,12 @@
     "bagEditor.rollSetSoft": "Ripošana iestatīta: mīksts",
     "bagEditor.rollSetNormal": "Ripošana iestatīta: normāls",
     "bagEditor.rollSetFirm": "Ripošana iestatīta: ciets",
+    "bagSetup.title": "Iestatiet savu somu",
+    "bagSetup.skip": "Izlaist",
+    "bagSetup.readyTitle": "Jūsu soma ir gatava",
+    "bagSetup.saveHint": "Izveidojiet bezmaksas kontu, lai to saglabātu un lietotu jebkurā ierīcē.",
+    "bagSetup.signUp": "Izveidot bezmaksas kontu",
+    "bagSetup.notNow": "Ne tagad",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Sveiki, {name}!",

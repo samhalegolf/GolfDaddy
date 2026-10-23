@@ -8760,6 +8760,18 @@
     safe(()=>window.gd67OpenAuth("signup",{prompt:true,next}));
     return true;
   }
+  /* A player with no bag tapping the home screen's Bag tile gets the small
+     setup card that grows out of the tile (clarity-support.js,
+     gdBagSetupClaim) instead of the sheet. It asks a guest to sign up once the
+     bag is built, so it comes before the sign-up prompt, not after it. */
+  function gdBagSetupFirst(tile,opts){
+    if(!tile||!window.gdBagSetupClaim)return false;
+    const open=()=>openBagStable(opts);
+    return !!safe(()=>window.gdBagSetupClaim(tile,{
+      openBag:open,
+      signUp:()=>{openProfileStable(opts);safe(()=>window.gd67OpenAuth("signup",{prompt:true,next:open}));}
+    }),false);
+  }
   function openBubbleStable(opts){
     /* openDataHub carries the gate and the guest demo entry; stop here too
        rather than re-labelling the shell for a panel that never opened. */
@@ -9054,7 +9066,8 @@
       const gpsContext=document.body.classList.contains("shell-gps")||document.body.classList.contains("gdGpsActive")||document.body.classList.contains("gps-active");
       const homeContext=document.body.classList.contains("shell-home")||!!event?.target?.closest?.("#gdV62Home");
       const opts={fromGps:gpsContext&&!homeContext,fromHome:homeContext||!gpsContext};
-      return gdSignupPromptFirst("bag",()=>openBagStable(opts),opts)||openBagStable(opts);
+      const homeTile=homeContext?event?.target?.closest?.("#gdV62Home .gdBagTile"):null;
+      return gdBagSetupFirst(homeTile,opts)||gdSignupPromptFirst("bag",()=>openBagStable(opts),opts)||openBagStable(opts);
     });
     bindDirect(".gdProfileTile",event=>{
       const gpsContext=document.body.classList.contains("shell-gps")||document.body.classList.contains("gdGpsActive")||document.body.classList.contains("gps-active");
@@ -9180,7 +9193,7 @@
 	      const gpsContext=document.body.classList.contains("shell-gps")||document.body.classList.contains("gdGpsActive")||document.body.classList.contains("gps-active");
       const homeContext=document.body.classList.contains("shell-home")||!!target.closest("#gdV62Home");
       if(target.id==="dockAdmin"||on.includes("openDeveloperPanel")){event.preventDefault();event.stopImmediatePropagation();openDeveloper({fromGps:gpsContext&&!homeContext,fromHome:homeContext||!gpsContext});return;}
-      if(target.id==="dockBag"||target.classList.contains("gdBagTile")||on.includes("openBag")){event.preventDefault();event.stopImmediatePropagation();const opts={fromGps:gpsContext&&!homeContext,fromHome:homeContext||!gpsContext};if(!gdSignupPromptFirst("bag",()=>openBagStable(opts),opts))openBagStable(opts);return;}
+      if(target.id==="dockBag"||target.classList.contains("gdBagTile")||on.includes("openBag")){event.preventDefault();event.stopImmediatePropagation();const opts={fromGps:gpsContext&&!homeContext,fromHome:homeContext||!gpsContext};const homeTile=homeContext?target.closest("#gdV62Home .gdBagTile"):null;if(gdBagSetupFirst(homeTile,opts))return;if(!gdSignupPromptFirst("bag",()=>openBagStable(opts),opts))openBagStable(opts);return;}
 	      if(target.id==="dockGps"||target.classList.contains("gdPlayTile")||on.includes("enterGpsModule")){
 	        event.preventDefault();
 	        event.stopImmediatePropagation();

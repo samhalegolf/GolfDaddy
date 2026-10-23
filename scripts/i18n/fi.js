@@ -883,6 +883,12 @@
     "bagEditor.rollSetSoft": "Rullaus: pehmeä",
     "bagEditor.rollSetNormal": "Rullaus: normaali",
     "bagEditor.rollSetFirm": "Rullaus: kova",
+    "bagSetup.title": "Määritä bägisi",
+    "bagSetup.skip": "Ohita",
+    "bagSetup.readyTitle": "Bägisi on valmis",
+    "bagSetup.saveHint": "Luo ilmainen tili tallentaaksesi sen ja käyttääksesi sitä millä tahansa laitteella.",
+    "bagSetup.signUp": "Luo ilmainen tili",
+    "bagSetup.notNow": "Ei nyt",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Hei {name},",

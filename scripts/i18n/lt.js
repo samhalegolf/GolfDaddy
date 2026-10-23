@@ -906,6 +906,12 @@
     "bagEditor.rollSetSoft": "Riedėjimas nustatytas: minkšta",
     "bagEditor.rollSetNormal": "Riedėjimas nustatytas: įprasta",
     "bagEditor.rollSetFirm": "Riedėjimas nustatytas: kieta",
+    "bagSetup.title": "Nustatykite savo krepšį",
+    "bagSetup.skip": "Praleisti",
+    "bagSetup.readyTitle": "Jūsų krepšys paruoštas",
+    "bagSetup.saveHint": "Susikurkite nemokamą paskyrą, kad jį išsaugotumėte ir naudotumėte bet kuriame įrenginyje.",
+    "bagSetup.signUp": "Sukurti nemokamą paskyrą",
+    "bagSetup.notNow": "Ne dabar",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Sveiki, {name},",

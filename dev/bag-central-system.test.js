@@ -409,6 +409,24 @@ test("a guest's first bag is shown, not just saved", () => {
     "as does the core's own gdBagPersistRows");
 });
 
+test("a new player's home Bag tap opens the setup card before anything else", () => {
+  /* The card grows out of the home tile, builds the bag from a 7-iron carry
+     and only then asks a guest to sign up - so it has to win over both the
+     sheet and the sign-up prompt, and only for an empty bag that has not
+     skipped it. */
+  const support = read("scripts/clarity-support.js");
+  const claim = support.slice(support.indexOf("win.gdBagSetupClaim = function"), support.indexOf("var coreOpenBag"));
+  assert.ok(claim.includes("setupSkipped() || realRows().length"), "only an empty bag that has not skipped the card");
+  const generate = support.slice(support.indexOf("function generateFromSetup("), support.indexOf("win.gdBagSetupClaim"));
+  assert.ok(generate.includes("persistRows(built"), "the card saves through the same path as the sheet");
+  assert.ok(generate.includes("signedInAccount()"), "a signed-in player is not asked to sign up");
+  const route = read("scripts/gd-route-audit.js");
+  const tapHandlers = route.match(/gdBagSetupFirst\(homeTile,opts\)/g) || [];
+  assert.strictEqual(tapHandlers.length, 2, "both home-tile tap handlers ask the card first");
+  assert.ok(/gdBagSetupFirst\(homeTile,opts\)\|\|gdSignupPromptFirst\("bag"/.test(route),
+    "and ahead of the sign-up prompt");
+});
+
 (async () => {
   let failed = 0;
   for (const t of tests) {

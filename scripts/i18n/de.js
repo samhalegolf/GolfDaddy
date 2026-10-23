@@ -883,6 +883,12 @@
     "bagEditor.rollSetSoft": "Ausrollen auf weich gestellt",
     "bagEditor.rollSetNormal": "Ausrollen auf normal gestellt",
     "bagEditor.rollSetFirm": "Ausrollen auf fest gestellt",
+    "bagSetup.title": "Richte dein Bag ein",
+    "bagSetup.skip": "Überspringen",
+    "bagSetup.readyTitle": "Dein Bag ist fertig",
+    "bagSetup.saveHint": "Erstelle ein kostenloses Konto, um es zu speichern und auf jedes Gerät mitzunehmen.",
+    "bagSetup.signUp": "Kostenloses Konto erstellen",
+    "bagSetup.notNow": "Nicht jetzt",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Hallo {name},",

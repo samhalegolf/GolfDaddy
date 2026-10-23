@@ -883,6 +883,12 @@
     "bagEditor.rollSetSoft": "Rull satt til mykt",
     "bagEditor.rollSetNormal": "Rull satt til normalt",
     "bagEditor.rollSetFirm": "Rull satt til hardt",
+    "bagSetup.title": "Sett opp bagen din",
+    "bagSetup.skip": "Hopp over",
+    "bagSetup.readyTitle": "Bagen din er klar",
+    "bagSetup.saveHint": "Opprett en gratis konto for å lagre den og ta den med til alle enheter.",
+    "bagSetup.signUp": "Opprett gratis konto",
+    "bagSetup.notNow": "Ikke nå",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Hei {name},",

@@ -906,6 +906,12 @@
     "bagEditor.rollSetSoft": "Dokotúľanie nastavené na mäkké",
     "bagEditor.rollSetNormal": "Dokotúľanie nastavené na normálne",
     "bagEditor.rollSetFirm": "Dokotúľanie nastavené na tvrdé",
+    "bagSetup.title": "Nastavte si bag",
+    "bagSetup.skip": "Preskočiť",
+    "bagSetup.readyTitle": "Váš bag je pripravený",
+    "bagSetup.saveHint": "Vytvorte si bezplatný účet, aby ste ho uložili a mali ho na každom zariadení.",
+    "bagSetup.signUp": "Vytvoriť bezplatný účet",
+    "bagSetup.notNow": "Teraz nie",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Ahoj {name},",

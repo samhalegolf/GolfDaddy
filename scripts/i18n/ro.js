@@ -906,6 +906,12 @@
     "bagEditor.rollSetSoft": "Roll setat pe moale",
     "bagEditor.rollSetNormal": "Roll setat pe normal",
     "bagEditor.rollSetFirm": "Roll setat pe tare",
+    "bagSetup.title": "Configurează-ți geanta",
+    "bagSetup.skip": "Omite",
+    "bagSetup.readyTitle": "Geanta ta e gata",
+    "bagSetup.saveHint": "Creează un cont gratuit ca s-o salvezi și s-o ai pe orice dispozitiv.",
+    "bagSetup.signUp": "Creează cont gratuit",
+    "bagSetup.notNow": "Nu acum",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Salut, {name},",

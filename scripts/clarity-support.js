@@ -936,6 +936,167 @@
   win.gdBagGenerateQuick = function(){ win.gdBagToggleGenerator(); };
   win.gdBagTryAddClub = function(){ win.gdBagAddSlot(); };
 
+  /* ---- first-run bag setup (the home screen's Bag tile, empty bag only) ----
+     A player with no bag who taps Bag on the home screen gets a small card
+     that grows out of the tile instead of the full sheet: one question, the
+     7-iron, and the bag is built from it. A guest is then asked to sign up so
+     the bag is kept - signing up adopts the guest profile once it holds a real
+     bag (gd-guest-access.js), so nothing else has to carry it across.
+
+     Both steps can be skipped. Skipping the first is remembered, so the next
+     tap on the tile opens the normal sheet rather than asking again. */
+  var SETUP_SKIPPED_KEY = 'gd_bag_setup_skipped_v1';
+  var setup = { root:null, tile:null, carry:155, actions:null, closing:false };
+
+  function signedInAccount(){ return safe(function(){ return win.GolfDaddyAccounts.current(); }, null); }
+  function setupSkipped(){ return safe(function(){ return localStorage.getItem(SETUP_SKIPPED_KEY) === '1'; }, false); }
+  function node(tag, cls, text){
+    var n = document.createElement(tag);
+    if(cls) n.className = cls;
+    if(text != null) n.textContent = text;
+    return n;
+  }
+  function button(cls, text, onClick){
+    var b = node('button', cls, text);
+    b.type = 'button';
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  /* Drawn fresh each time it opens, so it is always in the current language. */
+  function buildSetup(){
+    if(setup.root) setup.root.remove();
+    var root = node('div', 'gdBagSetup');
+    root.addEventListener('click', function(event){ if(event.target === root) skipSetup(); });
+    var card = node('div', 'gdBagSetupCard');
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-modal', 'true');
+    card.setAttribute('aria-labelledby', 'gdBagSetupTitle');
+
+    var carryStep = node('div', 'gdBagSetupStep');
+    carryStep.dataset.step = 'carry';
+    var title = node('div', 'gdBagSetupTitle', L('bagSetup.title'));
+    title.id = 'gdBagSetupTitle';
+    carryStep.appendChild(title);
+    carryStep.appendChild(node('div', 'gdBagGenQuestion', L('bag.sevenIronQuestion')));
+    var stepper = node('div', 'gdBagGenStepper');
+    var value = node('div', 'gdBagGenValue');
+    var carry = node('span', null, String(setup.carry));
+    function step(delta){
+      setup.carry = Math.max(60, Math.min(220, setup.carry + delta));
+      carry.textContent = String(setup.carry);
+    }
+    var less = button('', '−', function(){ step(-5); });
+    less.setAttribute('aria-label', L('bagEditor.less'));
+    var more = button('', '+', function(){ step(5); });
+    more.setAttribute('aria-label', L('bagEditor.more'));
+    value.appendChild(carry);
+    value.appendChild(node('small', null, L('bagPage.carryMetres')));
+    stepper.appendChild(less);
+    stepper.appendChild(value);
+    stepper.appendChild(more);
+    carryStep.appendChild(stepper);
+    carryStep.appendChild(button('gdBagBuild', L('bag.generateBag'), generateFromSetup));
+    carryStep.appendChild(button('gdBagSetupSkip', L('bagSetup.skip'), skipSetup));
+
+    var saveStep = node('div', 'gdBagSetupStep');
+    saveStep.dataset.step = 'save';
+    saveStep.hidden = true;
+    saveStep.appendChild(node('div', 'gdBagSetupTitle', L('bagSetup.readyTitle')));
+    saveStep.appendChild(node('div', 'gdBagSetupCount'));
+    saveStep.appendChild(node('div', 'gdBagSetupHint', L('bagSetup.saveHint')));
+    saveStep.appendChild(button('gdBagBuild', L('bagSetup.signUp'), function(){
+      closeSetup(false, setup.actions && setup.actions.signUp);
+    }));
+    saveStep.appendChild(button('gdBagSetupSkip', L('bagSetup.notNow'), function(){
+      closeSetup(false, setup.actions && setup.actions.openBag);
+    }));
+
+    card.appendChild(carryStep);
+    card.appendChild(saveStep);
+    root.appendChild(card);
+    document.body.appendChild(root);
+    setup.root = root;
+    return card;
+  }
+
+  /* The transform that lays the card exactly over the tile - so the card can
+     start there and grow into place, and shrink back into it on the way out. */
+  function overTile(card){
+    var t = safe(function(){ return setup.tile.getBoundingClientRect(); }, null);
+    var c = card.getBoundingClientRect();
+    if(!t || !t.width || !c.width) return 'scale(.6)';
+    return 'translate(' + Math.round(t.left - c.left) + 'px,' + Math.round(t.top - c.top) + 'px) scale('
+      + (t.width / c.width).toFixed(3) + ',' + (t.height / c.height).toFixed(3) + ')';
+  }
+
+  function openSetup(tile, actions){
+    setup.tile = tile;
+    setup.actions = actions || {};
+    setup.closing = false;
+    var card = buildSetup();
+    if(reducedMotion()){ setup.root.classList.add('open'); return; }
+    card.style.transition = 'none';
+    card.style.transform = overTile(card);
+    void card.offsetWidth;
+    card.style.transition = '';
+    card.style.transform = '';
+    setup.root.classList.add('open');
+  }
+
+  /* intoTile: shrink back into the tile (a dismissal - we stay on home).
+     Otherwise fade, because the player is moving on to another screen. */
+  function closeSetup(intoTile, then){
+    if(!setup.root || setup.closing) return;
+    setup.closing = true;
+    var root = setup.root;
+    var card = root.querySelector('.gdBagSetupCard');
+    root.classList.remove('open');
+    if(intoTile && card && !reducedMotion()) card.style.transform = overTile(card);
+    setTimeout(function(){
+      root.remove();
+      if(setup.root === root) setup.root = null;
+      if(typeof then === 'function') safe(then, null);
+    }, reducedMotion() ? 0 : 320);
+  }
+
+  function skipSetup(){
+    if(!setup.root || setup.closing) return;
+    var saveStep = setup.root.querySelector('[data-step="save"]');
+    /* After the bag is built, "skip" is the save question's Not now. */
+    if(saveStep && !saveStep.hidden){ closeSetup(false, setup.actions && setup.actions.openBag); return; }
+    safe(function(){ localStorage.setItem(SETUP_SKIPPED_KEY, '1'); }, null);
+    closeSetup(true);
+  }
+
+  function generateFromSetup(){
+    if(setup.closing || realRows().length) return;
+    var built = quickBag(setup.carry);
+    var saved = built && built.length ? persistRows(built, { silent:true }) : [];
+    if(!saved.length){ toast(L('bagEditor.couldNotGenerate')); return; }
+    /* Already signed in: the bag is saved to the account, so go and see it. */
+    if(signedInAccount()){ closeSetup(false, setup.actions && setup.actions.openBag); return; }
+    var root = setup.root;
+    root.querySelector('[data-step="carry"]').hidden = true;
+    root.querySelector('[data-step="save"]').hidden = false;
+    root.querySelector('.gdBagSetupCount').textContent = win.GDI18n.tn('practiceHub.clubCount', saved.length);
+  }
+
+  /* The home tile's question: should this tap open the setup card instead of
+     the sheet? True means the card is up and the caller should stop. */
+  win.gdBagSetupClaim = function(tile, actions){
+    if(!tile || setup.root) return false;
+    if(setupSkipped() || realRows().length) return false;
+    openSetup(tile, actions);
+    return true;
+  };
+
+  document.addEventListener('keydown', function(event){
+    if(event.key !== 'Escape' || !setup.root) return;
+    event.stopPropagation();
+    skipSetup();
+  }, true);
+
   var coreOpenBag = win.openBag;
   win.openBag = function(){
     resetUi();

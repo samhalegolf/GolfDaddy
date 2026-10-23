@@ -906,6 +906,12 @@
     "bagEditor.rollSetSoft": "Kotrljanje postavljeno na mekano",
     "bagEditor.rollSetNormal": "Kotrljanje postavljeno na normalno",
     "bagEditor.rollSetFirm": "Kotrljanje postavljeno na tvrdo",
+    "bagSetup.title": "Postavite svoju torbu",
+    "bagSetup.skip": "Preskoči",
+    "bagSetup.readyTitle": "Vaša torba je spremna",
+    "bagSetup.saveHint": "Izradite besplatni račun da je spremite i koristite na bilo kojem uređaju.",
+    "bagSetup.signUp": "Izradi besplatni račun",
+    "bagSetup.notNow": "Ne sada",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Bok, {name},",

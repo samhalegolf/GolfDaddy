@@ -213,3 +213,20 @@
   .gdBagGenPanel{transition:opacity .18s ease}
   .gdBagGenPanel.folded,.gdBagOverlayCard.folded{transform:none;transition:opacity .18s ease}
 }
+
+/* ---- first-run bag setup: the card that grows out of the home Bag tile ----
+   About a third of the screen. clarity-support.js sets the starting transform
+   so the card sits exactly over the tile, then clears it to grow into place. */
+.gdBagSetup{position:fixed;inset:0;z-index:8000;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(2,5,3,0);transition:background .32s ease}
+.gdBagSetup.open{background:rgba(2,5,3,.62)}
+.gdBagSetupCard{box-sizing:border-box;width:min(100%,420px);min-height:33vh;display:flex;flex-direction:column;justify-content:center;padding:20px 18px 14px;border-radius:24px;background:#0d1410;border:1px solid rgba(126,255,174,.18);box-shadow:0 24px 60px rgba(0,0,0,.65);color:#fff;transform-origin:0 0;transition:transform .42s cubic-bezier(.2,.9,.3,1)}
+.gdBagSetupStep{display:grid;gap:14px;opacity:0;transition:opacity .2s ease}
+.gdBagSetup.open .gdBagSetupStep{opacity:1;transition-delay:.16s}
+.gdBagSetupStep[hidden]{display:none!important}
+.gdBagSetupTitle{font-size:12px;font-weight:950;letter-spacing:.12em;text-transform:uppercase;color:#a8ffcd}
+.gdBagSetupCount{font-size:26px;font-weight:950;letter-spacing:-.04em;line-height:1.1}
+.gdBagSetupHint{font-size:14px;font-weight:750;line-height:1.4;color:rgba(238,245,242,.72);text-wrap:pretty}
+.gdBagSetupSkip{justify-self:center;border:0;background:none;padding:6px 14px;color:rgba(238,245,242,.6);font-size:13px;font-weight:850}
+@media (prefers-reduced-motion: reduce){
+  .gdBagSetup,.gdBagSetupCard,.gdBagSetupStep{transition:none!important}
+}

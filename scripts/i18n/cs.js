@@ -906,6 +906,12 @@
     "bagEditor.rollSetSoft": "Doběh nastaven na měkký",
     "bagEditor.rollSetNormal": "Doběh nastaven na normální",
     "bagEditor.rollSetFirm": "Doběh nastaven na tvrdý",
+    "bagSetup.title": "Nastavte si bag",
+    "bagSetup.skip": "Přeskočit",
+    "bagSetup.readyTitle": "Váš bag je připraven",
+    "bagSetup.saveHint": "Vytvořte si bezplatný účet, abyste ho uložili a měli ho na každém zařízení.",
+    "bagSetup.signUp": "Vytvořit bezplatný účet",
+    "bagSetup.notNow": "Teď ne",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Ahoj {name},",

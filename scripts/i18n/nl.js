@@ -883,6 +883,12 @@
     "bagEditor.rollSetSoft": "Roll ingesteld op zacht",
     "bagEditor.rollSetNormal": "Roll ingesteld op normaal",
     "bagEditor.rollSetFirm": "Roll ingesteld op hard",
+    "bagSetup.title": "Stel je tas in",
+    "bagSetup.skip": "Overslaan",
+    "bagSetup.readyTitle": "Je tas is klaar",
+    "bagSetup.saveHint": "Maak een gratis account aan om hem op te slaan en op elk apparaat te gebruiken.",
+    "bagSetup.signUp": "Gratis account aanmaken",
+    "bagSetup.notNow": "Niet nu",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Hoi {name},",

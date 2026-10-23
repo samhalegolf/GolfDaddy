@@ -883,6 +883,12 @@
     "bagEditor.rollSetSoft": "Veeremine: pehme",
     "bagEditor.rollSetNormal": "Veeremine: tavaline",
     "bagEditor.rollSetFirm": "Veeremine: kõva",
+    "bagSetup.title": "Seadista oma kott",
+    "bagSetup.skip": "Jäta vahele",
+    "bagSetup.readyTitle": "Sinu kott on valmis",
+    "bagSetup.saveHint": "Loo tasuta konto, et see salvestada ja igas seadmes kaasas kanda.",
+    "bagSetup.signUp": "Loo tasuta konto",
+    "bagSetup.notNow": "Mitte praegu",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Tere, {name}!",
