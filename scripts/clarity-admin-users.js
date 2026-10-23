@@ -102,7 +102,7 @@
     createPlayer: async function () {
       var name = prompt("Player name"); if (!name) return;
       var email = prompt("Email (optional until claimed)") || "";
-      await api({ action:"create_player", name:name, email:email, assignSam:true });
+      await api({ action:"create_player", name:name, email:email });
       refresh();
     },
     assign: async function (id) { await api({ action:"assign_coach", playerId:id }); refresh(); },

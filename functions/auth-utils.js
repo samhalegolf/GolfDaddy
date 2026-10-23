@@ -157,6 +157,32 @@ async function claimCanonicalPlayer(authUser, input) {
   });
   return { player: row, accountId: row && row.account_id || accountId, profileId: row && row.profile_id || profileId };
 }
+/* The one coach <-> player link writer. Both directions are written because
+ * coach-roster.js lists a player claimed by either side, and coach-unlink-player
+ * clears both. A deliberate link also lifts any unlink tombstone for this coach
+ * (metadata.severedCoachIds), or account-sync would strip it again. */
+function linkId(value) { return text(value, 120).replace(/[^a-zA-Z0-9_:-]/g, ""); }
+function withId(list, id) { const out = (Array.isArray(list) ? list : []).map(linkId).filter(Boolean); if (out.indexOf(id) === -1) out.push(id); return out.filter((v, i) => out.indexOf(v) === i); }
+async function linkCoachToPlayer(coachId, playerId, options) {
+  coachId = linkId(coachId); playerId = linkId(playerId);
+  if (!coachId || !playerId || coachId === playerId) return { linked: false };
+  const coachRows = await supabaseRest("app_accounts?select=account_id,linked_player_ids&account_id=eq." + encodeURIComponent(coachId) + "&limit=1", { method: "GET" });
+  const playerRows = await supabaseRest("app_accounts?select=account_id,linked_coach_ids,metadata&account_id=eq." + encodeURIComponent(playerId) + "&limit=1", { method: "GET" });
+  const coach = Array.isArray(coachRows) && coachRows[0];
+  const player = Array.isArray(playerRows) && playerRows[0];
+  const now = new Date().toISOString();
+  if (coach) {
+    await supabaseRest("app_accounts?account_id=eq." + encodeURIComponent(coachId), { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ linked_player_ids: withId(coach.linked_player_ids, playerId), updated_at: now }) });
+  }
+  if (player) {
+    const metadata = player.metadata && typeof player.metadata === "object" && !Array.isArray(player.metadata) ? player.metadata : {};
+    const patch = { linked_coach_ids: withId(player.linked_coach_ids, coachId), updated_at: now };
+    if (Array.isArray(metadata.severedCoachIds) && metadata.severedCoachIds.indexOf(coachId) !== -1) patch.metadata = Object.assign({}, metadata, { severedCoachIds: metadata.severedCoachIds.filter(id => id !== coachId) });
+    if (options && options.createdBy) patch.created_by_coach_id = coachId;
+    await supabaseRest("app_accounts?account_id=eq." + encodeURIComponent(playerId), { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify(patch) });
+  }
+  return { linked: !!(coach && player) };
+}
 module.exports = {
-  anonKey, email, hasAuth, hasAuthWithServiceKey, json, role, supabaseAuth, supabaseRest, text, findAccountByAuthUserId, findAccountByEmail, findAccountById, upsertAccount, claimCanonicalPlayer
+  anonKey, email, hasAuth, hasAuthWithServiceKey, json, role, supabaseAuth, supabaseRest, text, findAccountByAuthUserId, findAccountByEmail, findAccountById, upsertAccount, claimCanonicalPlayer, linkCoachToPlayer
 };
