@@ -883,6 +883,12 @@
     "bagEditor.rollSetSoft": "Rodada: blando",
     "bagEditor.rollSetNormal": "Rodada: normal",
     "bagEditor.rollSetFirm": "Rodada: firme",
+    "bagSetup.title": "Configura tu bolsa",
+    "bagSetup.skip": "Omitir",
+    "bagSetup.readyTitle": "Tu bolsa está lista",
+    "bagSetup.saveHint": "Crea una cuenta gratis para guardarla y llevarla a cualquier dispositivo.",
+    "bagSetup.signUp": "Crear cuenta gratis",
+    "bagSetup.notNow": "Ahora no",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Hola, {name}:",

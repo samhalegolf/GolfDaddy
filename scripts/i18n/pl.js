@@ -929,6 +929,12 @@
     "bagEditor.rollSetSoft": "Toczenie ustawione na miękko",
     "bagEditor.rollSetNormal": "Toczenie ustawione na normalnie",
     "bagEditor.rollSetFirm": "Toczenie ustawione na twardo",
+    "bagSetup.title": "Skonfiguruj swoją torbę",
+    "bagSetup.skip": "Pomiń",
+    "bagSetup.readyTitle": "Twoja torba jest gotowa",
+    "bagSetup.saveHint": "Załóż darmowe konto, aby ją zapisać i mieć na każdym urządzeniu.",
+    "bagSetup.signUp": "Załóż darmowe konto",
+    "bagSetup.notNow": "Nie teraz",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Cześć {name},",

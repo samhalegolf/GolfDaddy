@@ -883,6 +883,12 @@
     "bagEditor.rollSetSoft": "Търкаляне: меко",
     "bagEditor.rollSetNormal": "Търкаляне: нормално",
     "bagEditor.rollSetFirm": "Търкаляне: твърдо",
+    "bagSetup.title": "Настройте чантата си",
+    "bagSetup.skip": "Пропусни",
+    "bagSetup.readyTitle": "Чантата ви е готова",
+    "bagSetup.saveHint": "Създайте безплатен акаунт, за да я запазите и използвате на всяко устройство.",
+    "bagSetup.signUp": "Създай безплатен акаунт",
+    "bagSetup.notNow": "Не сега",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Здравей, {name},",

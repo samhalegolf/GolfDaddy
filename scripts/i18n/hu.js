@@ -883,6 +883,12 @@
     "bagEditor.rollSetSoft": "Gurulás: puha",
     "bagEditor.rollSetNormal": "Gurulás: normál",
     "bagEditor.rollSetFirm": "Gurulás: kemény",
+    "bagSetup.title": "Állítsd be a táskádat",
+    "bagSetup.skip": "Kihagyás",
+    "bagSetup.readyTitle": "Elkészült a táskád",
+    "bagSetup.saveHint": "Hozz létre ingyenes fiókot, hogy elmentsd és bármelyik eszközön elérd.",
+    "bagSetup.signUp": "Ingyenes fiók létrehozása",
+    "bagSetup.notNow": "Most nem",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Szia, {name}!",

@@ -883,6 +883,12 @@
     "bagEditor.rollSetSoft": "Roll impostato su morbido",
     "bagEditor.rollSetNormal": "Roll impostato su normale",
     "bagEditor.rollSetFirm": "Roll impostato su duro",
+    "bagSetup.title": "Configura la tua sacca",
+    "bagSetup.skip": "Salta",
+    "bagSetup.readyTitle": "La tua sacca è pronta",
+    "bagSetup.saveHint": "Crea un account gratuito per salvarla e portarla su qualsiasi dispositivo.",
+    "bagSetup.signUp": "Crea account gratuito",
+    "bagSetup.notNow": "Non ora",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Ciao {name},",

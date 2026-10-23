@@ -889,6 +889,12 @@
     "bagEditor.rollSetSoft": "Roll set to soft",
     "bagEditor.rollSetNormal": "Roll set to normal",
     "bagEditor.rollSetFirm": "Roll set to firm",
+    "bagSetup.title": "Set up your bag",
+    "bagSetup.skip": "Skip",
+    "bagSetup.readyTitle": "Your bag is ready",
+    "bagSetup.saveHint": "Create a free account to save it and take it to any device.",
+    "bagSetup.signUp": "Create free account",
+    "bagSetup.notNow": "Not now",
 
     /* Emails (gd-email-templates-core.js). Sent by the server in the recipient's language. {{name}} placeholders are filled by the email system: keep them exactly, with both braces. */
     "email.hi": "Hi {name},",
