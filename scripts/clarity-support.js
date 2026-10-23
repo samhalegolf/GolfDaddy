@@ -944,7 +944,9 @@
      bag (gd-guest-access.js), so nothing else has to carry it across.
 
      Both steps can be skipped. Skipping the first is remembered, so the next
-     tap on the tile opens the normal sheet rather than asking again. */
+     tap on the tile opens the normal sheet rather than asking again. A guest
+     who already has an account is offered a small Sign in on both steps -
+     their saved bag is on the account, not on this device. */
   var SETUP_SKIPPED_KEY = 'gd_bag_setup_skipped_v1';
   var setup = { root:null, tile:null, carry:155, actions:null, closing:false };
 
@@ -962,6 +964,18 @@
     b.addEventListener('click', onClick);
     return b;
   }
+
+  /* "Already have an account? Sign in" - only for a guest. */
+  function signInRow(){
+    if(signedInAccount()) return null;
+    var row = node('div', 'gdBagSetupSignIn');
+    row.appendChild(node('span', null, L('auth.haveAccount')));
+    row.appendChild(button('', L('common.signIn'), function(){
+      closeSetup(false, setup.actions && setup.actions.signIn);
+    }));
+    return row;
+  }
+  function appendIf(parent, child){ if(child) parent.appendChild(child); }
 
   /* Drawn fresh each time it opens, so it is always in the current language. */
   function buildSetup(){
@@ -998,6 +1012,7 @@
     carryStep.appendChild(stepper);
     carryStep.appendChild(button('gdBagBuild', L('bag.generateBag'), generateFromSetup));
     carryStep.appendChild(button('gdBagSetupSkip', L('bagSetup.skip'), skipSetup));
+    appendIf(carryStep, signInRow());
 
     var saveStep = node('div', 'gdBagSetupStep');
     saveStep.dataset.step = 'save';
@@ -1011,6 +1026,7 @@
     saveStep.appendChild(button('gdBagSetupSkip', L('bagSetup.notNow'), function(){
       closeSetup(false, setup.actions && setup.actions.openBag);
     }));
+    appendIf(saveStep, signInRow());
 
     card.appendChild(carryStep);
     card.appendChild(saveStep);

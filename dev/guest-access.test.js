@@ -267,23 +267,28 @@ test("the auth gate lets a guest into the shot system and keeps admin out", () =
   assert.strictEqual(member.gdAuthGateAllows("admin"), true);
 });
 
-/* Bag, shot system and Profile show the free sign-up form to a guest. It is a
-   prompt, not a gate: every tap for the Bag, once per session for the others,
-   never for an account. */
-test("the sign-up prompt: every Bag tap, once per session elsewhere, never for an account", () => {
+/* The shot system and Profile show the free sign-up form to a guest. It is a
+   prompt, not a gate: once per session, never for an account. The Bag no
+   longer asks here - its setup card builds the bag first and asks after
+   (clarity-support.js, gdBagSetupClaim). */
+test("the sign-up prompt: once per session, never for an account", () => {
   const guest = bootAuthGate(null);
   guest.gd67OpenAuth = () => {};
   assert.strictEqual(guest.gdClaimSignupPrompt("profile"), true, "a guest's first tap shows the sign-up prompt");
   assert.strictEqual(guest.gdClaimSignupPrompt("shotSystem"), false, "after that the shot system and Profile go straight through");
-  assert.strictEqual(guest.gdClaimSignupPrompt("bag"), true, "the Bag asks on every tap");
-  assert.strictEqual(guest.gdClaimSignupPrompt("bag"), true);
 
   const early = bootAuthGate(null);
-  assert.strictEqual(early.gdClaimSignupPrompt("bag"), false, "no form to show yet means no prompt, not a dead tap");
+  assert.strictEqual(early.gdClaimSignupPrompt("profile"), false, "no form to show yet means no prompt, not a dead tap");
 
   const member = bootAuthGate({ accountId: "acc-1" });
   member.gd67OpenAuth = () => {};
-  assert.strictEqual(member.gdClaimSignupPrompt("bag"), false);
+  assert.strictEqual(member.gdClaimSignupPrompt("profile"), false);
+});
+
+test("the Bag never shows the sign-up form before the bag", () => {
+  const route = fs.readFileSync(path.join(ROOT, "scripts", "gd-route-audit.js"), "utf8");
+  assert.ok(!/gdSignupPromptFirst\("bag"/.test(route), "no Bag door asks for an account first");
+  assert.ok(!/EVERY_TAP/.test(fs.readFileSync(path.join(ROOT, "scripts", "inline", "gd-auth-gate-v1.js"), "utf8")));
 });
 
 /* The guest profile screen says "Sign In" and "Create Account" on its account

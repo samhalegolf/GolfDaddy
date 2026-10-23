@@ -227,6 +227,8 @@
 .gdBagSetupCount{font-size:26px;font-weight:950;letter-spacing:-.04em;line-height:1.1}
 .gdBagSetupHint{font-size:14px;font-weight:750;line-height:1.4;color:rgba(238,245,242,.72);text-wrap:pretty}
 .gdBagSetupSkip{justify-self:center;border:0;background:none;padding:6px 14px;color:rgba(238,245,242,.6);font-size:13px;font-weight:850}
+.gdBagSetupSignIn{display:flex;justify-content:center;align-items:center;gap:6px;margin-top:-6px;font-size:12px;font-weight:750;color:rgba(238,245,242,.45)}
+.gdBagSetupSignIn button{border:0;background:none;padding:4px 2px;color:#a8ffcd;font-size:12px;font-weight:900;text-decoration:underline;text-underline-offset:2px}
 @media (prefers-reduced-motion: reduce){
   .gdBagSetup,.gdBagSetupCard,.gdBagSetupStep{transition:none!important}
 }
