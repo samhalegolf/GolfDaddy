@@ -560,8 +560,8 @@
       '<div class="gdStudioOverlayAi" data-gd-overlay="ai-panel" hidden></div>' +
       '<div class="gdStudioSourceTest" data-gd-overlay="source-panel" hidden></div>' +
       '<div class="gdStudioViewportBar">' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="convert" disabled title="Add what OSM has here - greens, tees, fairways, bunkers, water, trees, hole lines - and the mapper\'s default fairways to the overlay as shapes you can reshape. Once saved and ready, each replaces the OSM shape it came from.">Make OSM editable</button>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="fresh" disabled title="Copy everything OSM has here into the overlay as your own shapes, then stop reading OSM for this course: from here on the mapper reads only the shapes drawn here, starting from OSM\'s.">Start fresh from OSM</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="convert" disabled title="Add what OSM has here - greens, tees, fairways, bunkers, water, trees, hole lines - and the mapper\'s guessed greens, tees and fairways to the overlay as shapes you can reshape. Once saved and ready, each replaces the OSM shape it came from.">Make OSM editable</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="fresh" disabled title="Copy everything OSM has here, and everything the mapper guessed, into the overlay as your own shapes, then stop reading OSM for this course: from here on the mapper reads only the shapes drawn here, starting from OSM\'s.">Start fresh from OSM</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-overlay="ready" disabled>Mark ready</button>' +
       '<span class="gdStudioOverlayReadyChoice" data-gd-overlay="ready-choice" hidden>' +
       '<button type="button" class="gdStudioDiagramBtn" data-ready-osm="include" title="The mapper reads OpenStreetMap and your shapes, yours winning where they overlap">With OSM</button>' +
@@ -4445,7 +4445,7 @@
       var added = list.filter(function (f) { return room[f.kind === "tree" ? "tree" : "other"]-- > 0; });
       added.forEach(function (f) { session.features.push(JSON.parse(JSON.stringify(f))); });
       var counts = {};
-      added.forEach(function (f) { var k = f.source === "auto" ? "default fairway" : f.kind === "trees" ? "tree area" : kindLabel(f.kind).toLowerCase(); counts[k] = (counts[k] || 0) + 1; });
+      added.forEach(function (f) { var k = f.source === "auto" ? "guessed " + kindLabel(f.kind).toLowerCase() : f.kind === "trees" ? "tree area" : kindLabel(f.kind).toLowerCase(); counts[k] = (counts[k] || 0) + 1; });
       var said = Object.keys(counts).map(function (k) { return counts[k] + " " + k + (counts[k] === 1 ? "" : "s"); }).join(", ");
       return said + "." + (added.length < list.length ? " " + (list.length - added.length) + " more did not fit (" + MAX_FEATURES + " shapes and " + MAX_TREES + " single trees a course)." : "");
     }
@@ -4802,7 +4802,7 @@
       el.convert.textContent = convertible ? "Make OSM editable (" + convertible + ")" : "Make OSM editable";
       el.fresh.disabled = !canEdit() || !session.loadedFor || session.osmMode === "exclude";
       el.fresh.title = session.osmMode === "exclude" ? "Already reading your shapes only - switch Mapper reads back to OSM + my shapes to start again from OSM"
-        : "Copy everything OSM has here into the overlay as your own shapes, then stop reading OSM for this course: from here on the mapper reads only the shapes drawn here, starting from OSM's.";
+        : "Copy everything OSM has here, and everything the mapper guessed, into the overlay as your own shapes, then stop reading OSM for this course: from here on the mapper reads only the shapes drawn here, starting from OSM's.";
       el.unnumber.disabled = !canEdit() || !session.features.some(function (f) { return f.hole; });
       el.apply.disabled = !has || session.dirty;
       el.run.disabled = !has || session.dirty;

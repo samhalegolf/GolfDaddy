@@ -445,6 +445,36 @@ test("the mapper's default fairways come over numbered to their hole", () => {
   assert.deepStrictEqual(features.map(f => [f.kind, f.hole, f.source]), [["fairway", 3, "auto"]], "one per fill, from the hole it was laid for");
 });
 
+test("the mapper's guessed greens and tees come over to reshape, unless something already stands for them", () => {
+  const circle = (eastM, northM) => Array.from({ length: 12 }, (_, i) => at(eastM + 14 * Math.cos(i / 12 * Math.PI * 2), northM + 14 * Math.sin(i / 12 * Math.PI * 2)));
+  const saved = [
+    { id: "green-a", type: "green", source: "osm_auto_green_estimate", holeNumber: 1, greenShape: circle(0, 300) },
+    { id: "green-b", type: "green", source: "osm_auto_green_estimate", holeNumber: 2, shape: circle(400, 300) },
+    { id: "green-c", type: "green", source: "osm_auto_green_polygon", holeNumber: 3, shape: circle(800, 300) },
+    { id: "tee-a", type: "tee", source: "osm_auto_tee", holeNumber: 1, position: at(0, 0) },
+    { id: "fw-a", type: "fairway", source: "osm_auto_fairway", holeNumber: 1, position: at(0, 150) }
+  ];
+  const features = overlay.osmToOverlayFeatures({ elements: [] }, [], saved);
+  assert.deepStrictEqual(features.map(f => [f.id, f.kind, f.hole, !!f.pin]),
+    [["auto-green-green-a", "green", null, false], ["auto-green-green-b", "green", null, false], ["auto-tee-tee-a", "tee", null, true]],
+    "estimated circles and hole-line tees come over unnumbered; real greens and aim points do not");
+  assert.ok(overlay.normalizeOverlayFeatures(features).length === 3, "each one saves as an overlay shape");
+  /* A wand green drawn 10m off the circle's centre already stands for it. */
+  const drawn = [{ id: "w1", kind: "green", source: "wand", points: circle(10, 300) }];
+  assert.deepStrictEqual(overlay.osmToOverlayFeatures({ elements: [] }, drawn, saved).map(f => f.id), ["auto-green-green-b", "auto-tee-tee-a"]);
+});
+
+test("at a facility, each course's default fairways come over unnumbered, so the two courses' hole numbers never clash", () => {
+  const shape = [at(100, -15), at(200, -15), at(200, 15), at(100, 15)];
+  const shape2 = shape.map(p => ({ lat: p.lat + 0.01, lng: p.lng }));
+  const saved = [
+    { id: "a3", courseId: "one", type: "fairway_area", source: core.FAIRWAY_FILL_SOURCE, osmId: "fill/3", holeNumber: 3, shape },
+    { id: "b3", courseId: "two", type: "fairway_area", source: core.FAIRWAY_FILL_SOURCE, osmId: "fill/3", holeNumber: 3, shape: shape2 }
+  ];
+  const features = overlay.osmToOverlayFeatures({ elements: [] }, [], saved);
+  assert.deepStrictEqual(features.map(f => [f.id, f.hole]), [["auto-fairway-a3", null], ["auto-fairway-b3", null]]);
+});
+
 test("single trees count against their own cap, so a tree-lined course still has room for its shapes", () => {
   const ring = (lat, lng) => [{ lat, lng }, { lat: lat + 0.00003, lng }, { lat, lng: lng + 0.00003 }];
   const trees = Array.from({ length: overlay.OVERLAY_MAX_TREES + 5 }, (_, i) => ({ id: "t" + i, kind: "tree", points: ring(54 + i * 1e-5, -5.8) }));
