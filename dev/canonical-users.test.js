@@ -31,6 +31,14 @@ assert.match(admin, /requireAdmin/);
 assert.match(admin, /action === "merge_preview"/);
 assert.match(admin, /action === "merge_execute"/);
 assert.match(admin, /action === "assign_coach"/);
+// Admin coach links live where the coach roster reads them, not in a second store.
+const coachLinks = read("supabase/migrations/20261023_coach_links_single_source.sql");
+assert.match(admin, /linkCoachToPlayer\(SAM_ACCOUNT_ID, accountId\)/);
+assert.ok(!/caddy_coach_player_assignments|caddy_set_coach_assignment/.test(admin), "Admin must not write a coach link the roster never reads");
+assert.match(auth, /async function linkCoachToPlayer/);
+assert.ok(!/async function linkAccounts/.test(invite) && !/async function linkAccounts/.test(read("functions/email-notification.js")), "coach linking has one writer");
+assert.match(coachLinks, /drop table if exists public\.caddy_coach_player_assignments/);
+assert.ok(!/insert into caddy_coach_player_assignments/.test(coachLinks), "merge must not write the dropped table");
 assert.match(signup, /claimCanonicalPlayer/);
 assert.ok(signup.indexOf("const claimed = await claimCanonicalPlayer") < signup.indexOf("const pack = await upsertAccount"), "claim must occur before compatibility account/profile creation");
 assert.match(auth, /caddy_claim_or_create_player/);

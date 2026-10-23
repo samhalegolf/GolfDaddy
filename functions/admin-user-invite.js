@@ -1,6 +1,6 @@
 "use strict";
 
-const { claimCanonicalPlayer, email, findAccountByAuthUserId, findAccountById, hasAuth, json, role, supabaseAuth, supabaseRest, text, upsertAccount } = require("./auth-utils");
+const { claimCanonicalPlayer, email, findAccountByAuthUserId, findAccountById, hasAuth, json, linkCoachToPlayer, role, supabaseAuth, supabaseRest, text, upsertAccount } = require("./auth-utils");
 const { sendSystemAlert } = require("./alert-utils");
 const { isStaffRole, resolveCaller } = require("./clarity-caller");
 const { sendAccountSetupEmail } = require("./email-notification");
@@ -66,32 +66,6 @@ async function setupLink(accountEmail) {
   return String(built.link);
 }
 
-async function linkAccounts(coachId, playerId) {
-  coachId = cleanId(coachId);
-  playerId = cleanId(playerId);
-  if (!coachId || !playerId || coachId === playerId) return { linked: false };
-  const coachRows = await supabaseRest("app_accounts?select=account_id,linked_player_ids&account_id=eq." + encodeURIComponent(coachId) + "&limit=1", { method: "GET" });
-  const playerRows = await supabaseRest("app_accounts?select=account_id,linked_coach_ids&account_id=eq." + encodeURIComponent(playerId) + "&limit=1", { method: "GET" });
-  const coach = Array.isArray(coachRows) && coachRows[0];
-  const player = Array.isArray(playerRows) && playerRows[0];
-  const now = new Date().toISOString();
-  if (coach) {
-    await supabaseRest("app_accounts?account_id=eq." + encodeURIComponent(coachId), {
-      method: "PATCH",
-      headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ linked_player_ids: unique([].concat(coach.linked_player_ids || [], [playerId])), updated_at: now })
-    });
-  }
-  if (player) {
-    await supabaseRest("app_accounts?account_id=eq." + encodeURIComponent(playerId), {
-      method: "PATCH",
-      headers: { Prefer: "return=minimal" },
-      body: JSON.stringify({ linked_coach_ids: unique([].concat(player.linked_coach_ids || [], [coachId])), created_by_coach_id: coachId, updated_at: now })
-    });
-  }
-  return { linked: !!(coach && player) };
-}
-
 async function createProfileOnly(caller, body) {
   const coachId = cleanId(caller && caller.actorAccountId);
   if (!coachId) { const error = new Error("Coach account is not ready"); error.status = 409; throw error; }
@@ -150,7 +124,7 @@ async function createProfileOnly(caller, body) {
       handedness: "right", handicap: "", bag_json: [], profile_json: profile, updated_at: now
     })
   });
-  await linkAccounts(coachId, accountId);
+  await linkCoachToPlayer(coachId, accountId, { createdBy: true });
   await claimCanonicalPlayer(null, { accountId, profileId, name, email: "" });
   return { account, profile };
 }
@@ -262,7 +236,7 @@ exports.handler = async function(event) {
       profileJson: preservedProfile, bag: Array.isArray(body.bag) ? body.bag : (draft && draft.profile && draft.profile.bag_json)
     });
     const playerId = pack && pack.account && pack.account.accountId || targetAccountId;
-    const linkResult = accountRole === "player" ? await linkAccounts(actorAccountId, playerId) : { linked: false };
+    const linkResult = accountRole === "player" ? await linkCoachToPlayer(actorAccountId, playerId, { createdBy: true }) : { linked: false };
     if (linkResult.linked && pack && pack.account) {
       pack.account.linkedCoachIds = unique([].concat(pack.account.linkedCoachIds || [], [actorAccountId]));
       pack.account.createdByCoachId = pack.account.createdByCoachId || actorAccountId;

@@ -1,4 +1,4 @@
-const { email: authEmail, supabaseAuth, supabaseRest, upsertAccount } = require("./auth-utils");
+const { email: authEmail, linkCoachToPlayer, supabaseAuth, supabaseRest, upsertAccount } = require("./auth-utils");
 const { appStoreUrl, playStoreUrl } = require("../clarity-caddy-app-store.js");
 /* Wording, branding and the service/activity split all live in one place now - see the header
    of scripts/gd-email-templates-core.js. This file owns delivery and the Supabase side of an
@@ -132,7 +132,6 @@ function text(value, limit){ var input = String(value || "").trim(); return inpu
 function email(value){ var input = text(value, 240).toLowerCase(); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input) ? input : ""; }
 function tempPassword(){ return "Clarity-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10) + "!"; }
 function cleanId(value){ return text(value, 120).replace(/[^a-zA-Z0-9_:-]/g, ""); }
-function unique(list){ var out = []; (Array.isArray(list) ? list : []).forEach(function(item){ item = cleanId(item); if(item && out.indexOf(item) === -1)out.push(item); }); return out; }
 
 async function createSetupLinkForAccount(accountEmail, name, actorName, siteUrl){
   accountEmail = authEmail(accountEmail);
@@ -156,21 +155,8 @@ async function syncInvitedAccount(authUser, payload, message){
   var pack = await upsertAccount(authUser, {accountId: targetId, email: message.to, name: message.recipientName, role: "player", coachId: creatorId || null, eventType: "account_created_invite_synced"});
   var invitedId = pack && pack.account && pack.account.accountId || targetId;
   if(!creatorId || !invitedId || creatorId === invitedId)return pack;
-  await linkAccounts(creatorId, invitedId);
+  await linkCoachToPlayer(creatorId, invitedId, { createdBy: true });
   return pack;
-}
-
-async function linkAccounts(creatorId, invitedId){
-  var creatorRows = await supabaseRest("app_accounts?select=account_id,linked_player_ids&account_id=eq." + encodeURIComponent(creatorId) + "&limit=1", {method: "GET"});
-  var invitedRows = await supabaseRest("app_accounts?select=account_id,linked_coach_ids&account_id=eq." + encodeURIComponent(invitedId) + "&limit=1", {method: "GET"});
-  var creator = Array.isArray(creatorRows) && creatorRows[0];
-  var invited = Array.isArray(invitedRows) && invitedRows[0];
-  if(creator){
-    await supabaseRest("app_accounts?account_id=eq." + encodeURIComponent(creatorId), {method: "PATCH", headers: {Prefer: "return=minimal"}, body: JSON.stringify({linked_player_ids: unique([].concat(creator.linked_player_ids || [], [invitedId])), updated_at: new Date().toISOString()})});
-  }
-  if(invited){
-    await supabaseRest("app_accounts?account_id=eq." + encodeURIComponent(invitedId), {method: "PATCH", headers: {Prefer: "return=minimal"}, body: JSON.stringify({linked_coach_ids: unique([].concat(invited.linked_coach_ids || [], [creatorId])), created_by_coach_id: creatorId, updated_at: new Date().toISOString()})});
-  }
 }
 
 function safeUrl(value, fallbackOrigin){ if(!String(value || "").trim())return ""; try{ var url = new URL(String(value || ""), fallbackOrigin); return /^https?:$/.test(url.protocol) ? url.toString() : ""; }catch(error){ return ""; } }
