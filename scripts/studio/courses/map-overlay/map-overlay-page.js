@@ -4430,7 +4430,7 @@
        server gave them, so the same shape is never offered twice. Saved and marked ready, each
        replaces the OSM shape it came from when the mapper runs. */
     function convertibleOsm() {
-      var list = (session.osm && !session.osm.error && session.osm.convertible) || [];
+      var list = (session.osm && session.osm.convertible) || [];
       var have = {};
       session.features.forEach(function (f) { have[f.id] = true; });
       return list.filter(function (f) { return !have[f.id]; });
@@ -4468,6 +4468,12 @@
       var id = session.loadedFor;
       if (!canEdit() || !id) return;
       var list = convertibleOsm();
+      /* Nothing to copy and nothing drawn: switching to "my shapes only" would leave the mapper
+         reading nothing at all. */
+      if (!list.length && !session.features.length) {
+        setStatus("Nothing to start from yet: " + (session.osm && session.osm.error ? "OSM did not load (" + session.osm.error + ") and the course has no saved shapes." : "the course and OSM have no shapes here.") + " Reload the course to try again.", true);
+        return;
+      }
       if (!window.confirm("Start fresh from OSM?\n\n" + (list.length ? list.length + " shape" + (list.length === 1 ? "" : "s") + " OSM has here " + (list.length === 1 ? "is" : "are") + " copied into the overlay as your own" : "Everything OSM has here is already in the overlay") +
         ", and from now on the mapper reads only the shapes drawn here. OSM is hidden and not read again for this course (you can turn it back on under Mapper reads).")) return;
       var said = addOsmShapes();
@@ -4477,7 +4483,9 @@
       drawFeatures();
       changed();
       updateActions();
-      saveOsmMode(id, "exclude", "Started fresh from OSM" + (said ? ": " + said : ".") + " The mapper now reads only your shapes. Mark ready when they look right.");
+      saveOsmMode(id, "exclude", "Started fresh from OSM" + (said ? ": " + said : ".") +
+        (session.osm && session.osm.error ? " OSM did not load, so these came from the course's saved shapes, and no hole lines came - the mapper numbers holes from the scorecard." : "") +
+        " The mapper now reads only your shapes. Mark ready when they look right.");
     }
 
     function saveOsmMode(id, mode, said) {

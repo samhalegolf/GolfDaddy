@@ -393,8 +393,13 @@ export function overlaySummary(features) {
 
    What the mapper guessed where OSM has nothing comes too, so it can be reshaped or replaced
    rather than drawn from scratch: its default fairways (FAIRWAY_FILL_SOURCE), its estimated
-   circle greens and its tees (a point at the tee end of each hole line, so a tee pin). Drawn
-   in, each becomes the real thing. A default fairway is numbered to its hole when the saved
+   circle greens and its tees (a point at the tee end of each hole line, so a tee-sized round
+   tee box). Drawn in, each becomes the real thing.
+
+   When Overpass did not answer (payload null), the course's saved shapes that came from OSM
+   stand in for it - what OSM had at the last run, under the id the OSM element converts to
+   ("osm-way-123") - so Start fresh still starts from everything on the map. Only hole lines
+   do not come then: the course does not save them as shapes. A default fairway is numbered to its hole when the saved
    objects are one course's; at a facility two courses share hole numbers, so there - like
    greens and tees always - it comes unnumbered and the mapper links it by where it lies. The
    mapper's fairway aim points are not offered: they are points along a hole, not a shape.
@@ -425,6 +430,9 @@ function centreOfRing(points) {
   const sum = points.reduce((acc, p) => ({ lat: acc.lat + p.lat, lng: acc.lng + p.lng }), { lat: 0, lng: 0 });
   return { lat: sum.lat / points.length, lng: sum.lng / points.length };
 }
+
+const SAVED_OSM_KIND = { green: "green", fairway_area: "fairway", bunker: "bunker", water: "water", trees: "trees" };
+const SAVED_OSM_SOURCES = new Set(["osm_auto_green_polygon", "osm_auto_surface"]);
 
 export function osmToOverlayFeatures(payload, existing = [], savedObjects = []) {
   const have = normalizeOverlayFeatures(existing);
@@ -495,11 +503,24 @@ export function osmToOverlayFeatures(payload, existing = [], savedObjects = []) 
     const points = (Array.isArray(object.shape) ? object.shape : object.greenShape || []).map(cleanPoint).filter(Boolean);
     if (points.length >= 3) offerGuess({ id: guessId("auto-green-", object), kind: "green", hole: null, points: thinRing(points), source: "auto" });
   });
-  /* Tees: the point the mapper took from the tee end of a hole line. */
+  /* Tees: the point the mapper took from the tee end of a hole line, as a tee box round it. */
   saved.forEach(object => {
     if (object.type !== "tee" || object.source !== "osm_auto_tee") return;
     const point = cleanPoint(object.position);
-    if (point) offerGuess({ id: guessId("auto-tee-", object), kind: "tee", hole: null, points: [point], pin: true, source: "auto" });
+    if (point) offerGuess({ id: guessId("auto-tee-", object), kind: "tee", hole: null, points: pinShape({ kind: "tee", points: [point] }), source: "auto" });
+  });
+  /* Overpass did not answer: what OSM had at the last run, saved on the course. A surface is
+     saved once per hole it touches, so one per OSM element; one the overlay put there (a
+     negative way id) is the overlay's own and is not offered back. */
+  if (!payload) saved.forEach(object => {
+    const kind = SAVED_OSM_KIND[object.type];
+    if (!kind || !SAVED_OSM_SOURCES.has(object.source) || /^way\/-/.test(String(object.osmId || ""))) return;
+    const points = (Array.isArray(object.shape) ? object.shape : object.greenShape || []).map(cleanPoint).filter(Boolean);
+    if (points.length < 3) return;
+    const osm = /^(way|relation)\/\d+$/.test(String(object.osmId || "")) ? String(object.osmId) : "";
+    const feature = { kind, hole: null, points: thinRing(points), source: "osm" };
+    if (osm) offer(Object.assign(feature, { id: ("osm-" + osm.replace("/", "-")).slice(0, 40), osm }));
+    else offerGuess(Object.assign(feature, { id: guessId("osm-" + kind + "-", object) }));
   });
   return out;
 }
