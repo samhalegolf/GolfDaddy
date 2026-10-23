@@ -456,12 +456,31 @@ test("the mapper's guessed greens and tees come over to reshape, unless somethin
   ];
   const features = overlay.osmToOverlayFeatures({ elements: [] }, [], saved);
   assert.deepStrictEqual(features.map(f => [f.id, f.kind, f.hole, !!f.pin]),
-    [["auto-green-green-a", "green", null, false], ["auto-green-green-b", "green", null, false], ["auto-tee-tee-a", "tee", null, true]],
+    [["auto-green-green-a", "green", null, false], ["auto-green-green-b", "green", null, false], ["auto-tee-tee-a", "tee", null, false]],
     "estimated circles and hole-line tees come over unnumbered; real greens and aim points do not");
+  assert.ok(features[2].points.length >= 3, "a guessed tee comes over as a tee box, not a dot");
   assert.ok(overlay.normalizeOverlayFeatures(features).length === 3, "each one saves as an overlay shape");
   /* A wand green drawn 10m off the circle's centre already stands for it. */
   const drawn = [{ id: "w1", kind: "green", source: "wand", points: circle(10, 300) }];
   assert.deepStrictEqual(overlay.osmToOverlayFeatures({ elements: [] }, drawn, saved).map(f => f.id), ["auto-green-green-b", "auto-tee-tee-a"]);
+});
+
+test("when Overpass does not answer, the course's saved OSM shapes stand in for it", () => {
+  const box = (eastM, northM, r) => [at(eastM - r, northM - r), at(eastM + r, northM - r), at(eastM + r, northM + r), at(eastM - r, northM + r)];
+  const saved = [
+    { id: "g1", type: "green", source: "osm_auto_green_polygon", holeNumber: 1, shape: box(0, 300, 12) },
+    { id: "b1", type: "bunker", source: "osm_auto_surface", osmId: "way/77", holeNumber: 1, shape: box(20, 280, 5) },
+    { id: "b1x", type: "bunker", source: "osm_auto_surface", osmId: "way/77", holeNumber: 2, shape: box(20, 280, 5) },
+    { id: "f1", type: "fairway_area", source: "osm_auto_surface", osmId: "relation/9", holeNumber: 1, shape: box(0, 150, 20) },
+    { id: "o1", type: "bunker", source: "osm_auto_surface", osmId: "way/-123", holeNumber: 1, shape: box(-40, 200, 5) },
+    { id: "t1", type: "tee", source: "osm_auto_tee", holeNumber: 1, position: at(0, 0) }
+  ];
+  const offline = overlay.osmToOverlayFeatures(null, [], saved);
+  assert.deepStrictEqual(offline.map(f => [f.id, f.kind, f.osm || ""]),
+    [["auto-tee-t1", "tee", ""], ["osm-green-g1", "green", ""], ["osm-way-77", "bunker", "way/77"], ["osm-relation-9", "fairway", "relation/9"]],
+    "one shape per OSM element, under its OSM id; the overlay's own bunker is not offered back");
+  const online = overlay.osmToOverlayFeatures({ elements: [] }, [], saved);
+  assert.deepStrictEqual(online.map(f => f.id), ["auto-tee-t1"], "with OSM loaded, OSM itself is the source");
 });
 
 test("at a facility, each course's default fairways come over unnumbered, so the two courses' hole numbers never clash", () => {

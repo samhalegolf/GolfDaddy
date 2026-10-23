@@ -17,7 +17,8 @@
  *        lastRun  - the latest mapper job: its status, error and the counts it recorded, so a
  *                   drawer opened on a failed course says why it failed.
  *        osm.convertible - what OSM has here (and the mapper's guessed fairways, greens and tees) as overlay
- *                   shapes not yet in the overlay (osmToOverlayFeatures). Studio adds them to
+ *                   shapes not yet in the overlay (osmToOverlayFeatures); when Overpass fails,
+ *                   the course's saved shapes stand in for OSM's. Studio adds them to
  *                   the overlay so they can be reshaped; nothing is copied until it saves.
  *      The rest is for display.
  * POST {courseId, features:[...], playOrders?:[...]}  (admin) -> saves the overlay, normalised.
@@ -172,7 +173,12 @@ export default async function courseMapOverlay(req) {
         .map(id => loadSavedObjects(id).catch(() => [])))).flat();
       const lastRun = loadLastRun(ownerId).catch(() => null);
       if (course.lat == null || course.lng == null) body.osm = { error: "course has no centre" };
-      else body.osm = await loadOsmContext(course, overlay.features, saved).catch(error => ({ error: String(error && error.message || error).slice(0, 200) }));
+      /* Without OSM, what to start from is still the course's saved shapes (osmToOverlayFeatures
+         with no payload), so Start fresh never comes up empty because Overpass was slow. */
+      else body.osm = await loadOsmContext(course, overlay.features, saved).catch(error => ({
+        error: String(error && error.message || error).slice(0, 200),
+        convertible: osmToOverlayFeatures(null, overlay.features, saved)
+      }));
       body.objects = displayObjects(saved);
       body.lastRun = await lastRun;
     }
