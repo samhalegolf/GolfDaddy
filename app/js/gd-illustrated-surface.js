@@ -293,15 +293,22 @@
      on the phone as on the wrist. spatialRef is that function's: {transform, refZoom,
      metresPerPixel, imageWidth, imageHeight}, mapping world-mercator pixels at refZoom onto
      this canvas. Greens join the fairways as played ground; a hole's own green is all the
-     watch knows, a frame here shows the neighbours' too. */
-  function placeTrees(core, surfaces, spatialRef) {
-    if (!core || !core.buildHoleTrees || !surfaces || !(surfaces.trees || []).length) return [];
+     watch knows, a frame here shows the neighbours' too.
+
+     singleTrees, optional, are the course's real tree markers ({lat, lng, r}, r the crown
+     radius in metres: the Studio overlay's single trees and the tree finder's): each stands
+     where it is at its own size, and a wood with one in it is drawn as those trees rather than
+     filled - so a big marker is one big tree, never a cluster. */
+  function placeTrees(core, surfaces, spatialRef, singleTrees) {
+    var single = Array.isArray(singleTrees) ? singleTrees : [];
+    if (!core || !core.buildHoleTrees || !surfaces || !((surfaces.trees || []).length || single.length)) return [];
     var rings = function (list) { return (list || []).map(function (s) { return s.ring; }); };
     var geometry = {
       fairways: rings(surfaces.fairways).concat(rings(surfaces.greens)),
       bunkers: rings(surfaces.bunkers),
       water: rings(surfaces.water),
-      trees: rings(surfaces.trees)
+      trees: rings(surfaces.trees),
+      singleTrees: single
     };
     var base = core.WATCH_MAP_RECIPE_V1;
     var recipe = Object.assign({}, base, { trees: Object.assign({}, base.trees, { maxTrees: MAX_TREES }) });
