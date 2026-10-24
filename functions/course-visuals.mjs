@@ -1,4 +1,5 @@
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
+import { courseSlug } from "./lib/gd-course-slug.mjs";
 const TABLE = "course_visuals";
 const BUCKET = "course-visuals";
 const ADMIN_EMAILS = new Set(["samhalegolf@gmail.com", "admin@clarity.local"]);
@@ -353,7 +354,7 @@ function status(value) {
 }
 
 function slug(value) {
-  return String(value || "course").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 160);
+  return courseSlug(value || "course").slice(0, 160);
 }
 
 function storageMessage(error) {

@@ -31,7 +31,7 @@
   function now(){return new Date().toISOString();}
   function safe(fn,fb){try{return fn();}catch(_error){return fb;}}
   function clone(value){return safe(function(){return JSON.parse(JSON.stringify(value));},value);}
-  function slug(value){return String(value||"course").toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,140)||"course";}
+  function slug(value){return String(value||"course").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,140)||"course";}
   function stableId(prefix){return String(prefix||"cv")+"_"+Date.now().toString(36)+"_"+Math.random().toString(36).slice(2,8);}
   function stableIdStamp(id){
     var match=String(id||"").match(/_([a-z0-9]+)_/i);

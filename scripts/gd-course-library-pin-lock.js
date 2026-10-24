@@ -26,7 +26,7 @@
   function i18nPlain(el,text){const i=window.GDI18n;if(!el)return;if(i)i.plain(el,text);else el.textContent=text;}
   function toastSafe(msg){try{if(typeof toast==='function')toast(msg);}catch(e){}}
   function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-  function slug(s){return String(s||'item').toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'item';}
+  function slug(s){return String(s||'item').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'')||'item';}
   function finiteMappingPoint(point){
     const lat=Number(point?.lat??point?.latitude);
     const lng=Number(point?.lng??point?.lon??point?.longitude);

@@ -15,7 +15,7 @@
   function nowIso(){return new Date().toISOString();}
   function clone(value){return safe(()=>JSON.parse(JSON.stringify(value)),value);}
   function slug(value){
-    return String(value||"course").toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"course";
+    return String(value||"course").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"course";
   }
   function cleanName(value){
     return String(value||"").toLowerCase()

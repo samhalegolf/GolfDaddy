@@ -43,6 +43,7 @@ import { loadPlayerRequests } from "./lib/gd-player-requests.mjs";
 import { loadMapperQueue } from "./lib/gd-mapper-queue.mjs";
 import { TREE_KIND, queueTreeRun } from "./lib/gd-tree-queue.mjs";
 import { SCORECARD_KIND } from "./lib/gd-facility-scorecards.mjs";
+import { courseSlug } from "./lib/gd-course-slug.mjs";
 
 const TABLE = "course_mapper_jobs";
 const MAPS_TABLE = "course_maps";
@@ -122,7 +123,7 @@ const supabaseFetch = createSupabaseFetch({
   label: "course-mapper-jobs"
 });
 
-function slug(value) { return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90); }
+function slug(value) { return courseSlug(value).slice(0, 90); }
 
 /* Two shapes, one answer. A course_maps row carries the geometry itself; a
    course_maps_list row carries the view's counts of it (object_count,

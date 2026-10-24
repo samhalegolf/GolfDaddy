@@ -14,8 +14,9 @@
 
 import { verifiedAdminEmail, loadCourse, json } from "./lib/gd-map-overlay-store.mjs";
 import { hasSupabase, loadAsk, writeAsk, STALE_ASK_MS } from "./lib/gd-scorecard-ask-store.mjs";
+import { courseSlug } from "./lib/gd-course-slug.mjs";
 
-function slug(value) { return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90); }
+function slug(value) { return courseSlug(value).slice(0, 90); }
 function aiConfigured() { return !!process.env.ANTHROPIC_API_KEY; }
 
 async function pingBackground(origin, courseId) {

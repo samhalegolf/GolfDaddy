@@ -57,7 +57,7 @@
      builds has to match what that file computes from the same profile id, or
      the re-key below moves records somewhere nothing reads. */
   function slug(value) {
-    return String(value || "item").toLowerCase().trim()
+    return String(value || "item").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim()
       .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "item";
   }
   function uidFor(profileId) { return "user-" + slug(profileId); }

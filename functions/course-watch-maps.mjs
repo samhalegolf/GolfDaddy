@@ -57,6 +57,7 @@ import { wakeGarminBuild } from "./lib/gd-garmin-build-wake.mjs";
 /* The in-progress rule is shared with the course page's Apple bake wake (same window as
    PRUNE_GRACE_MS: no bake that could still be running is ever treated as finished). */
 import { bakeInProgress } from "./lib/gd-apple-bake-wake.mjs";
+import { courseSlug } from "./lib/gd-course-slug.mjs";
 const MAPS_TABLE = "course_maps";
 const OVERLAYS_TABLE = "course_map_overlays";
 const WATCH_TABLE = "course_watch_maps";
@@ -372,7 +373,7 @@ async function verifiedUser(req) {
   }
 }
 
-function slug(value) { return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90); }
+function slug(value) { return courseSlug(value).slice(0, 90); }
 
 function holeNumbersFromObjects(objectsJson) {
   const numbers = new Set();

@@ -1,4 +1,5 @@
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
+import { courseSlug } from "./lib/gd-course-slug.mjs";
 const TABLE = "course_visual_recipes";
 const ADMIN_EMAILS = new Set(["samhalegolf@gmail.com", "admin@clarity.local"]);
 
@@ -35,7 +36,7 @@ async function verifiedUser(req, payload) {
 }
 
 function slug(value) {
-  return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
+  return courseSlug(value).slice(0, 90);
 }
 
 function text(value, limit = 160) {
