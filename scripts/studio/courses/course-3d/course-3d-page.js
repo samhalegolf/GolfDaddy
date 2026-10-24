@@ -797,64 +797,103 @@
 
     /* The illustrated picture and its trees, painted exactly as painter.js illustratedPicture
        paints them for Play: same library, same frame pixel space, same tree placement. */
-    function illustrated(entry, metresX) {
-      var lib = window.GDIllustratedSurface, core = window.GDBubbleHazardCore;
+    /* The frame's own pixel space at a given canvas size: world-mercator pixels at the frame's
+       capture zoom, shifted to its origin and scaled. Null when the frame carries no projection. */
+    function frameSpace(entry, maxPx) {
       var meta = entry.meta, zoom = Number(meta.captureZoom), out = meta.outputDimensions || {};
       var frameW = Number(out.width) || 0, frameH = Number(out.height) || 0;
-      if (!lib || !core) return Promise.reject(new Error("the illustrated map library did not load"));
-      if (!meta.originPx || !Number.isInteger(zoom) || !frameW || !frameH) return Promise.reject(new Error("this frame has no projection to paint in"));
+      if (!meta.originPx || !Number.isInteger(zoom) || !frameW || !frameH) return null;
+      var scale = Math.min(1, maxPx / Math.max(frameW, frameH));
+      var ox = Number(meta.originPx.x), oy = Number(meta.originPx.y);
+      return {
+        zoom: zoom, scale: scale, ox: ox, oy: oy,
+        width: Math.max(1, Math.round(frameW * scale)),
+        height: Math.max(1, Math.round(frameH * scale)),
+        project: function (pt) {
+          var w = worldPx(pt.lat, pt.lng, zoom);
+          return { x: (w.x - ox) * scale, y: (w.y - oy) * scale };
+        }
+      };
+    }
+
+    /* Where the trees stand, from the course's mapped tree areas through the app's own
+       placement (the watch's), in canvas pixels for this frame space. */
+    function placeTrees(space, surfaces, metresX) {
+      return window.GDIllustratedSurface.placeTrees(window.GDWatchMapCore, surfaces, {
+        transform: { a: space.scale, b: 0, tx: -space.ox * space.scale, ty: -space.oy * space.scale },
+        refZoom: space.zoom,
+        metresPerPixel: metresX / space.width,
+        imageWidth: space.width,
+        imageHeight: space.height
+      });
+    }
+
+    /* Canvas-pixel trees as the renderer takes them: frame uv and crown radius in metres. */
+    function treesInMetres(trees, space, metresX) {
+      var ppm = space.width / metresX;
+      return trees.map(function (t) { return { u: t.x / space.width, v: t.y / space.height, r: t.r / ppm, type: t.type }; });
+    }
+
+    function packageSurfaces() {
+      var core = window.GDBubbleHazardCore;
+      if (!window.GDIllustratedSurface || !core) return Promise.reject(new Error("the illustrated map library did not load"));
       return fetchPackage().then(function (pkg) {
         if (!pkg) throw new Error("no course package for this course");
-        var surfaces = core.collectPackageSurfaces(pkg);
+        return { pkg: pkg, surfaces: core.collectPackageSurfaces(pkg) };
+      });
+    }
+
+    /* The illustrated picture and its trees, painted exactly as painter.js illustratedPicture
+       paints them for Play: same library, same frame pixel space, same tree placement. */
+    function illustrated(entry, metresX) {
+      var lib = window.GDIllustratedSurface, core = window.GDBubbleHazardCore;
+      var space = frameSpace(entry, ILLUSTRATED_PX);
+      if (!space) return Promise.reject(new Error("this frame has no projection to paint in"));
+      return packageSurfaces().then(function (course) {
+        var surfaces = course.surfaces;
         if (!core.hasAnySurface(surfaces) || !lib.holeIsMapped(surfaces, entry.holeNumber)) {
           throw new Error("this hole has no green or fairway on the map, so Play shows the photo");
         }
-        var scale = Math.min(1, ILLUSTRATED_PX / Math.max(frameW, frameH));
         var picture = document.createElement("canvas");
-        picture.width = Math.max(1, Math.round(frameW * scale));
-        picture.height = Math.max(1, Math.round(frameH * scale));
-        var ox = Number(meta.originPx.x), oy = Number(meta.originPx.y);
-        var trees = lib.placeTrees(window.GDWatchMapCore, surfaces, {
-          transform: { a: scale, b: 0, tx: -ox * scale, ty: -oy * scale },
-          refZoom: zoom,
-          metresPerPixel: metresX / picture.width,
-          imageWidth: picture.width,
-          imageHeight: picture.height
-        });
+        picture.width = space.width;
+        picture.height = space.height;
+        var trees = placeTrees(space, surfaces, metresX);
         var drawn = lib.paint(picture.getContext("2d"), {
-          width: picture.width,
-          height: picture.height,
-          pxPerMetre: picture.width / metresX,
-          project: function (pt) {
-            var w = worldPx(pt.lat, pt.lng, zoom);
-            return { x: (w.x - ox) * scale, y: (w.y - oy) * scale };
-          },
+          width: space.width,
+          height: space.height,
+          pxPerMetre: space.width / metresX,
+          project: space.project,
           surfaces: surfaces,
-          holes: lib.packageHoles(pkg),
+          holes: lib.packageHoles(course.pkg),
           seed: Number(entry.holeNumber) || 1,
           trees: trees
         });
         if (!drawn) throw new Error("nothing mapped falls inside this frame");
-        var ppm = picture.width / metresX;
-        return {
-          picture: picture,
-          illustrated: true,
-          trees: trees.map(function (t) { return { u: t.x / picture.width, v: t.y / picture.height, r: t.r / ppm, type: t.type }; })
-        };
+        return { picture: picture, illustrated: true, trees: treesInMetres(trees, space, metresX) };
       });
     }
 
-    /* The frame JPEG, scaled down if it is bigger than this GPU can hold as a texture. */
-    function photo(entry) {
-      return loadImage(assetUrl(entry.path)).then(function (img) {
+    /* The frame JPEG, scaled down if it is bigger than this GPU can hold as a texture, with the
+       same trees the illustrated map stands up. The trees are placed from the mapped tree areas,
+       not found in the photo, so they stand where the map says woods are. No trees is still a
+       complete picture: any failure finding them leaves the photo bare. */
+    function photo(entry, metresX) {
+      var space = frameSpace(entry, ILLUSTRATED_PX);
+      var treesPromise = space ? packageSurfaces().then(function (course) {
+        return treesInMetres(placeTrees(space, course.surfaces, metresX), space, metresX);
+      }).catch(function () { return []; }) : Promise.resolve([]);
+      var picturePromise = loadImage(assetUrl(entry.path)).then(function (img) {
         var max = Math.min(MAX_PICTURE_PX, scene.maxTexture || MAX_PICTURE_PX);
         var big = Math.max(img.naturalWidth, img.naturalHeight);
-        if (big <= max) return { picture: img, trees: [] };
+        if (big <= max) return img;
         var s = max / big, c = document.createElement("canvas");
         c.width = Math.round(img.naturalWidth * s);
         c.height = Math.round(img.naturalHeight * s);
         c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-        return { picture: c, trees: [] };
+        return c;
+      });
+      return Promise.all([picturePromise, treesPromise]).then(function (res) {
+        return { picture: res[0], trees: res[1] };
       });
     }
 
@@ -892,9 +931,9 @@
       var picturePromise = style === "illustrated"
         ? illustrated(entry, metresX).catch(function (error) {
             loadedNote = "Illustrated unavailable (" + (error.message || error) + ") - showing the photo";
-            return photo(entry);
+            return photo(entry, metresX);
           })
-        : photo(entry);
+        : photo(entry, metresX);
       var elevationPromise = elevation && elevation.path
         ? loadImage(assetUrl(elevation.path)).catch(function () { return null; })
         : Promise.resolve(null);
