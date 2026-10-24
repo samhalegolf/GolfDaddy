@@ -44,6 +44,7 @@ const STUDIO_SCRIPTS = [
   "scripts/studio/courses/mapping-queue/mapping-queue-page.js",
   "scripts/studio/gd-studio-course-pick.js",
   "scripts/studio/courses/map-viewport/map-viewport-page.js",
+  "scripts/studio/courses/course-3d/course-3d-page.js",
   "scripts/studio/courses/map-overlay/map-overlay-shapes.js",
   "scripts/studio/courses/map-overlay/map-overlay-page.js",
   "scripts/studio/courses/course-visuals/course-visuals-page.js",
