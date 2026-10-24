@@ -1,0 +1,92 @@
+[
+  {
+    "file": "radiata-pine.glb",
+    "name": "Radiata pine",
+    "variant": null,
+    "heightM": 27.99,
+    "crownRadiusM": 8.03,
+    "triangles": 1971,
+    "kb": 209.2,
+    "billboardType": 2
+  },
+  {
+    "file": "macrocarpa.glb",
+    "name": "Macrocarpa",
+    "variant": null,
+    "heightM": 17.34,
+    "crownRadiusM": 9.48,
+    "triangles": 2173,
+    "kb": 230.5,
+    "billboardType": 1
+  },
+  {
+    "file": "poplar.glb",
+    "name": "Poplar",
+    "variant": null,
+    "heightM": 24.54,
+    "crownRadiusM": 3.55,
+    "triangles": 1051,
+    "kb": 112.2,
+    "billboardType": 3
+  },
+  {
+    "file": "willow.glb",
+    "name": "Willow",
+    "variant": null,
+    "heightM": 11.79,
+    "crownRadiusM": 7.42,
+    "triangles": 2886,
+    "kb": 305.7,
+    "billboardType": 3
+  },
+  {
+    "file": "eucalyptus.glb",
+    "name": "Eucalyptus",
+    "variant": null,
+    "heightM": 23.98,
+    "crownRadiusM": 6.67,
+    "triangles": 1244,
+    "kb": 132.5,
+    "billboardType": 0
+  },
+  {
+    "file": "pohutukawa.glb",
+    "name": "Pōhutukawa",
+    "variant": null,
+    "heightM": 13.86,
+    "crownRadiusM": 10.41,
+    "triangles": 2828,
+    "kb": 299.6,
+    "billboardType": 1
+  },
+  {
+    "file": "cabbage-tree.glb",
+    "name": "Cabbage tree / tī kōuka",
+    "variant": null,
+    "heightM": 6.63,
+    "crownRadiusM": 1.73,
+    "triangles": 899,
+    "kb": 96.2,
+    "billboardType": 3
+  },
+  {
+    "file": "native-broadleaf.glb",
+    "name": "Native broadleaf",
+    "variant": null,
+    "heightM": 10.96,
+    "crownRadiusM": 4.83,
+    "triangles": 1055,
+    "kb": 112.6,
+    "billboardType": 0
+  },
+  {
+    "file": "pohutukawa-flowering.glb",
+    "name": "Pōhutukawa",
+    "variant": "flowering",
+    "heightM": 13.86,
+    "crownRadiusM": 10.41,
+    "triangles": 2828,
+    "kb": 299.6,
+    "billboardType": 1
+  }
+]
