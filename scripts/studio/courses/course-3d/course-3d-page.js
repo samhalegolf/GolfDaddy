@@ -51,7 +51,7 @@
     };
   }
 
-  /* Every hole in the record that has a frame, newest wins if a hole appears twice. */
+  /* Every published hole frame in the record (the role the visual worker writes for Play). */
   function holesFromRecord(record) {
     var assets = record && (Array.isArray(record.uploaded_assets) ? record.uploaded_assets
       : Array.isArray(record.uploadedAssets) ? record.uploadedAssets : []) || [];
@@ -59,7 +59,7 @@
     assets.forEach(function (asset) {
       var meta = asset && asset.metadata && asset.metadata.playSurface;
       var n = Number(asset && asset.holeNumber);
-      if (meta && n > 0 && asset.path) byHole[n] = { holeNumber: n, path: String(asset.path), meta: meta };
+      if (asset && asset.role === "hole-frame-published" && meta && n > 0 && asset.path) byHole[n] = { holeNumber: n, path: String(asset.path), meta: meta };
     });
     return Object.keys(byHole).map(Number).sort(function (a, b) { return a - b; }).map(function (n) { return byHole[n]; });
   }
@@ -944,7 +944,8 @@
         .then(function (res) { return res.ok ? res.json() : Promise.reject(new Error("HTTP " + res.status)); })
         .then(function (data) {
           if (destroyed || token !== loadToken) return;
-          var record = data && (data.record || data) || null;
+          /* /api/course-visuals answers {visual, storage}: the course_visuals row is under visual. */
+          var record = data && data.visual || null;
           holes = holesFromRecord(record);
           el.hole.innerHTML = holes.map(function (h) {
             return '<option value="' + h.holeNumber + '">' + h.holeNumber + (h.meta.elevation ? "" : " (flat)") + "</option>";
