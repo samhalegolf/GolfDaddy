@@ -124,6 +124,20 @@ assert.strictEqual(paint({ surfaces: { fairways: [surface(square(5000, 5000, 10)
   assert.deepStrictEqual(lib.placeTrees(null, surfaces, spatialRef), [], 'no generator, no trees');
   assert.deepStrictEqual(lib.placeTrees(watchCore, Object.assign({}, surfaces, { trees: [] }), spatialRef), []);
 
+  /* A real tree marker: a big one drawn as an area (as the overlay's single trees reach the
+     package) stays ONE tree at its own crown size, not a filled cluster. */
+  const marker = { centre: ll(1200, 1200), rM: 12 };
+  const markerArea = [ll(1100, 1100), ll(1300, 1100), ll(1300, 1300), ll(1100, 1300)];
+  const withMarker = Object.assign({}, surfaces, { trees: [surface(markerArea, 1)] });
+  const filled = lib.placeTrees(watchCore, withMarker, spatialRef);
+  assert.ok(filled.length > 1, 'without the marker the area is filled as a wood');
+  const single = lib.placeTrees(watchCore, withMarker, spatialRef, [{ lat: marker.centre.lat, lng: marker.centre.lng, r: marker.rM }]);
+  assert.strictEqual(single.length, 1, 'one marker, one tree');
+  assert.ok(Math.abs(single[0].x - 1200) <= 1 && Math.abs(single[0].y - 1200) <= 1, 'standing where the marker is');
+  assert.ok(Math.abs(single[0].r - marker.rM / mpp) <= 1, 'at the marker\'s crown size');
+  assert.strictEqual(lib.placeTrees(watchCore, Object.assign({}, surfaces, { trees: [] }), spatialRef, [{ lat: marker.centre.lat, lng: marker.centre.lng, r: 6 }]).length, 1,
+    'markers stand with no wood on the map at all');
+
   const { ctx } = paint({ trees: [{ x: 50, y: 60, r: 5, type: 0 }, { x: 80, y: 90, r: 4, type: 2 }] });
   const shadows = ctx.calls.filter((c) => c[0] === 'arc' && (c[3] === 5 || c[3] === 4));
   assert.strictEqual(shadows.length, 2, 'one shadow per tree');

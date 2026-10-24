@@ -88,7 +88,7 @@
     var z = norm(sub(eye, target)), x = norm(cross([0, 1, 0], z)), y = cross(z, x);
     return {
       matrix: [x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -dot(x, eye), -dot(y, eye), -dot(z, eye), 1],
-      right: x, up: y
+      right: x, up: y, back: z
     };
   }
   function multiply(a, b) {
@@ -163,10 +163,14 @@
     }
   `;
 
-  /* Trees: a camera-facing quad standing on the ground, drawn as the app's mesh draws them -
-     a ball of foliage or a cone, with a trunk once the view leans - but in metres and from the
-     camera's actual angle: from straight above a tree is a disc, from the ground a tree. Real
-     size: the relief is exaggerated, the trees are not. */
+  /* Trees: a camera-facing quad standing on the ground, drawn from the camera's actual angle:
+     from straight above a tree is a disc, from the ground a tree. Real size, from the marker:
+     the crown radius is the marker's, and the height follows it (a broadleaf stands about 2.6
+     crown radii tall, a pine 3.6), give or take a tenth so a row of equal markers is not a row
+     of clones. The relief is exaggerated, the trees are not.
+
+     Two looks over the same quad: TREE_FRAG is the app's cartoon tree, for the Illustrated
+     map; TREE_FRAG_REAL is a leafier, photo-tinted tree for the aerial. */
   var TREE_VERT = `
     attribute vec4 aTree;              // u, v, crown radius (m), type
     attribute vec2 aCorner;            // -1..1 across, 0..1 bottom to top
@@ -179,18 +183,22 @@
     uniform vec3 uUp;
     uniform float uSinT;
     varying vec2 vLocal;
-    varying vec3 vTree;
+    varying vec4 vTree;                // radius, type, seed, height scale
     varying vec3 vWorld;
+    varying vec2 vFootUv;
   ` + DECODE + `
     void main() {
       float r = aTree.z, type = aTree.w;
       float h = (heightAt(aTree.xy) - uSeaLevel) * uExaggeration;
       vec3 foot = vec3((aTree.x - 0.5) * uMetres.x, h, (aTree.y - 0.5) * uMetres.y);
-      float top = (type == 2.0 ? 3.6 * r : 1.6 * r) * uSinT + r * 1.15;
-      float x = aCorner.x * r * 1.15;
-      float y = mix(-r * 1.05, top, aCorner.y);
+      float seed = fract(sin(dot(aTree.xy, vec2(12.9898, 78.233))) * 43758.5453);
+      float hs = 0.9 + 0.2 * fract(seed * 7.13);
+      float top = (type == 2.0 ? 3.6 * r : 1.6 * r) * uSinT * hs + r * 1.35;
+      float x = aCorner.x * r * 1.4;
+      float y = mix(-r * 1.35, top, aCorner.y);
       vLocal = vec2(x, y);
-      vTree = vec3(r, type, fract(sin(dot(aTree.xy, vec2(12.9898, 78.233))) * 43758.5453));
+      vTree = vec4(r, type, seed, hs);
+      vFootUv = aTree.xy;
       vWorld = foot + uRight * x + uUp * y;
       gl_Position = uViewProj * vec4(vWorld, 1.0);
     }
@@ -204,19 +212,19 @@
     uniform vec3 uSky;
     uniform float uFogFar;
     varying vec2 vLocal;
-    varying vec3 vTree;
+    varying vec4 vTree;
     varying vec3 vWorld;
 
     float cover(float d, float r) { return clamp(0.5 - d / (r * 0.06), 0.0, 1.0); }
 
     void main() {
-      float r = vTree.x, type = vTree.y, seed = vTree.z;
+      float r = vTree.x, type = vTree.y, seed = vTree.z, vs = uSinT * vTree.w;
       float x = vLocal.x, y = vLocal.y;
       vec3 light = normalize(vec3(-0.5, 0.6, 0.62));
       vec3 colour = vec3(0.0);
       float alpha = 0.0;
       if (type == 2.0) {
-        float yb = 0.4 * r * uSinT, ya = 3.6 * r * uSinT;
+        float yb = 0.4 * r * vs, ya = 3.6 * r * vs;
         float ry = max(r * uCosT, 0.001);
         float e = length(vec2(x / r, (y - yb) / ry));
         float a = cover((e - 1.0) * r, r);
@@ -230,7 +238,7 @@
         alpha = a;
       } else {
         float wide = type == 1.0 ? 1.1 : 1.0;
-        float yc = 1.6 * r * uSinT;
+        float yc = 1.6 * r * vs;
         vec2 d = vec2(x / wide, y - yc) / r;
         float lobes = type == 1.0 ? 1.0 + 0.07 * sin(atan(d.y, d.x) * 6.0 + seed * 6.283) : 1.0 + 0.03 * sin(atan(d.y, d.x) * 9.0 + seed * 6.283);
         float dist = length(d) / lobes;
@@ -249,6 +257,144 @@
       if (alpha <= 0.02) discard;
       float fog = smoothstep(uFogFar * 0.45, uFogFar, distance(vWorld, uEye));
       gl_FragColor = vec4(mix(colour, uSky, fog), alpha);
+    }
+  `;
+
+  var NOISE = `
+    float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+    float noise(vec2 p) {
+      vec2 i = floor(p), f = fract(p);
+      f = f * f * (3.0 - 2.0 * f);
+      return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+    }
+    float fbm(vec2 p) {
+      float v = 0.0, a = 0.5;
+      for (int i = 0; i < 4; i++) { v += a * noise(p); p = p * 2.07 + vec2(1.7, 9.2); a *= 0.5; }
+      return v;
+    }
+  `;
+
+  /* The aerial's tree. A crown built of clumps with a leafy edge, lit by the same sun as the
+     ground (uLightView is that sun in the quad's own right / up / towards-camera axes), darker
+     underneath and between clumps, and tinted by the photo it stands on so a tree on a dry
+     course is not a fresh-green sticker. Pines are tiers of jagged boughs. */
+  var TREE_FRAG_REAL = `
+    precision highp float;
+    uniform sampler2D uPicture;
+    uniform float uSinT;
+    uniform float uCosT;
+    uniform vec3 uLightView;
+    uniform vec3 uEye;
+    uniform vec3 uSky;
+    uniform float uFogFar;
+    varying vec2 vLocal;
+    varying vec4 vTree;
+    varying vec3 vWorld;
+    varying vec2 vFootUv;
+  ` + NOISE + `
+    void main() {
+      float r = vTree.x, type = vTree.y, seed = vTree.z, vs = uSinT * vTree.w;
+      float x = vLocal.x, y = vLocal.y;
+      vec3 L = normalize(uLightView);
+      float litSide = L.x >= 0.0 ? 1.0 : -1.0;
+      vec3 under = texture2D(uPicture, vFootUv).rgb;
+      vec2 o = vec2(seed * 37.0, seed * 91.0);
+      vec3 colour;
+      float alpha;
+      if (type == 2.0) {
+        float yb = 0.25 * r * vs, ya = 3.6 * r * vs;
+        float ry = max(r * uCosT, 0.001);
+        /* From above: a star of boughs. */
+        vec2 q = vec2(x / r, (y - yb) / ry);
+        float star = 0.8 + 0.18 * abs(sin(atan(q.y, q.x) * 7.0 + seed * 6.0)) + (fbm(q * 4.0 + o) - 0.5) * 0.3;
+        alpha = smoothstep(star + 0.06, star - 0.06, length(q));
+        float tier = 1.0;
+        if (ya - yb > r * 0.05 && y >= yb - r * 0.1 && y <= ya) {
+          float t = clamp((y - yb) / (ya - yb), 0.0, 1.0);
+          tier = fract(t * 5.0 + seed);
+          float halfW = r * (1.0 - t) * (0.7 + 0.4 * tier) + (fbm(vec2(x, y) / r * 5.0 + o) - 0.5) * 0.35 * r * (1.0 - t * 0.6);
+          alpha = max(alpha, smoothstep(0.08 * r, -0.08 * r, abs(x) - halfW));
+        }
+        float shade = (0.65 + 0.4 * clamp(0.5 + 0.4 * (x / r) * litSide, 0.0, 1.0)) * mix(0.68, 1.0, tier);
+        shade *= 0.85 + 0.3 * fbm(vec2(x, y) / r * 9.0 + o);
+        colour = mix(vec3(0.10, 0.22, 0.12), under * 0.8, 0.25) * shade * (0.9 + 0.2 * seed);
+      } else {
+        float wide = type == 1.0 ? 1.12 : 1.0;
+        float yc = 1.6 * r * vs;
+        vec2 d = vec2(x / wide, y - yc) / r;
+        float edge = 0.72 + 0.45 * fbm(d * 1.6 + o);
+        float dist = length(d) + (fbm(d * 8.0 + o * 1.3) - 0.5) * 0.16;
+        alpha = smoothstep(edge + 0.05, edge - 0.05, dist);
+        float rr = clamp(length(d) / edge, 0.0, 1.0);
+        float clump = fbm(d * 4.5 + o * 0.7);
+        vec3 n = normalize(vec3(d.x / edge, d.y / edge, sqrt(max(0.0, 1.0 - rr * rr)) + 0.2));
+        n = normalize(n + vec3((clump - 0.5) * 1.2, (fbm(d * 4.5 + o * 0.7 + vec2(5.2, 1.3)) - 0.5) * 1.2, 0.0));
+        float diffuse = max(dot(n, L), 0.0);
+        float ao = mix(0.68, 1.0, smoothstep(-1.0, 0.7, d.y)) * mix(0.8, 1.0, clump);
+        vec3 base = type == 3.0 ? vec3(0.36, 0.42, 0.18) : type == 1.0 ? vec3(0.17, 0.32, 0.13) : vec3(0.15, 0.29, 0.12);
+        vec3 leaf = mix(base, under * 0.9, 0.35) * (0.88 + 0.24 * seed);
+        colour = leaf * (0.55 + 0.75 * diffuse) * ao * (0.88 + 0.24 * noise(d * 28.0 + o));
+        colour += vec3(0.03, 0.04, 0.05) * rr * rr * rr;
+        if (alpha < 1.0 && yc > r * 0.05) {
+          float tw = 0.09 * r * (1.0 - 0.3 * clamp(y / yc, 0.0, 1.0));
+          float trunk = smoothstep(0.03 * r, -0.03 * r, abs(x) - tw) * step(0.0, y) * step(y, yc);
+          vec3 bark = vec3(0.25, 0.2, 0.16) * (0.7 + 0.5 * clamp(0.5 + 0.5 * (x / tw) * litSide, 0.0, 1.0));
+          colour = mix(bark, colour, alpha);
+          alpha = max(alpha, trunk);
+        }
+      }
+      if (alpha <= 0.03) discard;
+      float fog = smoothstep(uFogFar * 0.45, uFogFar, distance(vWorld, uEye));
+      gl_FragColor = vec4(mix(colour, uSky, fog), alpha);
+    }
+  `;
+
+  /* Each aerial tree's shadow: a soft patch lying on the ground, thrown away from the sun by
+     the tree's own height. Only with the aerial - the Illustrated picture paints its own. */
+  var SHADOW_VERT = `
+    attribute vec4 aTree;
+    attribute vec2 aCorner;
+    uniform sampler2D uElevation;
+    uniform mat4 uViewProj;
+    uniform vec2 uMetres;
+    uniform float uExaggeration;
+    uniform float uSeaLevel;
+    uniform vec2 uShadowDir;           // ground metres of shadow per metre of height
+    varying vec2 vQ;
+    varying float vSeed;
+    varying vec3 vWorld;
+  ` + DECODE + `
+    void main() {
+      float r = aTree.z;
+      float seed = fract(sin(dot(aTree.xy, vec2(12.9898, 78.233))) * 43758.5453);
+      float crown = 1.6 * r * (0.9 + 0.2 * fract(seed * 7.13));
+      vec2 dir = normalize(uShadowDir), side = vec2(-dir.y, dir.x);
+      float len = length(uShadowDir) * crown;
+      vec2 q = vec2(aCorner.x, aCorner.y * 2.0 - 1.0);
+      vec2 foot = vec2((aTree.x - 0.5) * uMetres.x, (aTree.y - 0.5) * uMetres.y);
+      vec2 p = foot + dir * len * 0.6 + dir * q.y * (r * 1.1 + len * 0.5) + side * q.x * r * 1.1;
+      float h = (heightAt(clamp(p / uMetres + 0.5, 0.0, 1.0)) - uSeaLevel) * uExaggeration + 0.25;
+      vQ = q;
+      vSeed = seed;
+      vWorld = vec3(p.x, h, p.y);
+      gl_Position = uViewProj * vec4(vWorld, 1.0);
+    }
+  `;
+
+  var SHADOW_FRAG = `
+    precision highp float;
+    uniform vec3 uEye;
+    uniform float uFogFar;
+    varying vec2 vQ;
+    varying float vSeed;
+    varying vec3 vWorld;
+  ` + NOISE + `
+    void main() {
+      float d = length(vQ) + (fbm(vQ * 3.0 + vSeed * 40.0) - 0.5) * 0.3;
+      float fog = smoothstep(uFogFar * 0.45, uFogFar, distance(vWorld, uEye));
+      float a = (1.0 - smoothstep(0.45, 1.0, d)) * 0.42 * (1.0 - fog);
+      if (a <= 0.01) discard;
+      gl_FragColor = vec4(0.02, 0.04, 0.02, a);
     }
   `;
 
@@ -339,8 +485,12 @@
     if (!gl) throw new Error("WebGL is not available in this browser");
     var ground = program(gl, GROUND_VERT, GROUND_FRAG, ["aGrid"],
       ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uPicture", "uTexel", "uMetresPerTexel", "uLight", "uAmbient", "uEye", "uSky", "uFogFar"]);
-    var treeProg = program(gl, TREE_VERT, TREE_FRAG, ["aTree", "aCorner"],
-      ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uRight", "uUp", "uSinT", "uCosT", "uEye", "uSky", "uFogFar"]);
+    var treeUniforms = ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uRight", "uUp", "uSinT", "uCosT", "uEye", "uSky", "uFogFar"];
+    var cartoonTrees = program(gl, TREE_VERT, TREE_FRAG, ["aTree", "aCorner"], treeUniforms);
+    var realTrees = program(gl, TREE_VERT, TREE_FRAG_REAL, ["aTree", "aCorner"], treeUniforms.concat(["uPicture", "uLightView"]));
+    var shadows = program(gl, SHADOW_VERT, SHADOW_FRAG, ["aTree", "aCorner"],
+      ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uShadowDir", "uEye", "uFogFar"]);
+    var LIGHT = norm([-0.6, 0.75, -0.35]);
     var sky = [0.62, 0.74, 0.84];
     var hole = null;   // {mesh, elevation, picture, trees, metres, demSize, seaLevel, ambient, heightAt}
 
@@ -354,7 +504,8 @@
       hole = null;
     }
 
-    /* input: {picture, elevation (image|null), demSize, metres, seaLevel, ambient, trees:[{u,v,r,type}]} */
+    /* input: {picture, elevation (image|null), demSize, metres, seaLevel, ambient, realistic,
+       trees:[{u,v,r,type}]} - realistic draws the aerial's trees and their shadows. */
     function setHole(input) {
       release();
       var dem = input.elevation;
@@ -386,6 +537,7 @@
         demSize: demSize,
         seaLevel: dem ? input.seaLevel : 0,
         ambient: input.ambient,
+        realistic: !!input.realistic,
         heightAt: heightAt
       };
     }
@@ -436,7 +588,7 @@
       gl.uniform1f(ground.uSeaLevel, hole.seaLevel);
       gl.uniform2f(ground.uTexel, 1 / hole.demSize[0], 1 / hole.demSize[1]);
       gl.uniform2f(ground.uMetresPerTexel, hole.metres[0] / hole.demSize[0], hole.metres[1] / hole.demSize[1]);
-      gl.uniform3f(ground.uLight, -0.6, 0.75, -0.35);
+      gl.uniform3fv(ground.uLight, new Float32Array(LIGHT));
       gl.uniform1f(ground.uAmbient, hole.ambient);
       gl.uniform3fv(ground.uEye, new Float32Array(camera.eye));
       gl.uniform3fv(ground.uSky, new Float32Array(sky));
@@ -452,44 +604,70 @@
 
       if (hole.trees) {
         sortTrees(camera.eye);
-        /* How far the view leans from straight down: 0 overhead (a disc), 1 level (a tree). */
-        var look = norm(sub(camera.target, camera.eye));
-        var sinT = Math.sqrt(Math.max(0, 1 - look[1] * look[1])), cosT = Math.max(0.0001, Math.abs(look[1]));
-        gl.useProgram(treeProg.program);
-        gl.uniformMatrix4fv(treeProg.uViewProj, false, new Float32Array(viewProj));
-        gl.uniform2f(treeProg.uMetres, hole.metres[0], hole.metres[1]);
-        gl.uniform1f(treeProg.uExaggeration, exaggeration);
-        gl.uniform1f(treeProg.uSeaLevel, hole.seaLevel);
-        gl.uniform3fv(treeProg.uRight, new Float32Array(view.right));
-        gl.uniform3fv(treeProg.uUp, new Float32Array(view.up));
-        gl.uniform1f(treeProg.uSinT, sinT);
-        gl.uniform1f(treeProg.uCosT, cosT);
-        gl.uniform3fv(treeProg.uEye, new Float32Array(camera.eye));
-        gl.uniform3fv(treeProg.uSky, new Float32Array(sky));
-        gl.uniform1f(treeProg.uFogFar, fogFar);
-        gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, hole.elevation); gl.uniform1i(treeProg.uElevation, 0);
-        gl.bindBuffer(gl.ARRAY_BUFFER, hole.trees.vb);
-        gl.enableVertexAttribArray(treeProg.aTree);
-        gl.vertexAttribPointer(treeProg.aTree, 4, gl.FLOAT, false, 24, 0);
-        gl.enableVertexAttribArray(treeProg.aCorner);
-        gl.vertexAttribPointer(treeProg.aCorner, 2, gl.FLOAT, false, 24, 16);
-        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, hole.trees.ib);
+        var common = {
+          uViewProj: viewProj, uMetres: hole.metres, uExaggeration: exaggeration, uSeaLevel: hole.seaLevel,
+          uEye: camera.eye, uSky: sky, uFogFar: fogFar
+        };
         gl.depthMask(false);
         gl.enable(gl.BLEND);
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-        gl.drawElements(gl.TRIANGLES, hole.trees.count, gl.UNSIGNED_SHORT, 0);
+        if (hole.realistic) {
+          /* Shadows first, lying on the ground: away from the sun by the tree's height. */
+          gl.enable(gl.POLYGON_OFFSET_FILL);
+          gl.polygonOffset(-2, -2);
+          drawTrees(shadows, common, { uShadowDir: [-LIGHT[0] / LIGHT[1], -LIGHT[2] / LIGHT[1]] });
+          gl.disable(gl.POLYGON_OFFSET_FILL);
+        }
+        /* How far the view leans from straight down: 0 overhead (a disc), 1 level (a tree). */
+        var look = norm(sub(camera.target, camera.eye));
+        var lean = {
+          uRight: view.right, uUp: view.up,
+          uSinT: Math.sqrt(Math.max(0, 1 - look[1] * look[1])), uCosT: Math.max(0.0001, Math.abs(look[1]))
+        };
+        if (hole.realistic) {
+          lean.uLightView = [dot(LIGHT, view.right), dot(LIGHT, view.up), dot(LIGHT, view.back)];
+          lean.uPicture = 1;
+        }
+        drawTrees(hole.realistic ? realTrees : cartoonTrees, common, lean);
         gl.disable(gl.BLEND);
         gl.depthMask(true);
-        gl.disableVertexAttribArray(treeProg.aTree);
-        gl.disableVertexAttribArray(treeProg.aCorner);
       }
+    }
+
+    /* One pass over the trees' quads with a program: uniforms by name, numbers or arrays. */
+    function drawTrees(prog, common, extra) {
+      gl.useProgram(prog.program);
+      [common, extra].forEach(function (set) {
+        Object.keys(set).forEach(function (name) {
+          var loc = prog[name], v = set[name];
+          if (!loc) return;
+          if (name === "uPicture") { gl.uniform1i(loc, 1); return; }
+          if (typeof v === "number") gl.uniform1f(loc, v);
+          else if (v.length === 16) gl.uniformMatrix4fv(loc, false, new Float32Array(v));
+          else if (v.length === 3) gl.uniform3fv(loc, new Float32Array(v));
+          else gl.uniform2fv(loc, new Float32Array(v));
+        });
+      });
+      gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, hole.elevation); gl.uniform1i(prog.uElevation, 0);
+      gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, hole.picture);
+      gl.bindBuffer(gl.ARRAY_BUFFER, hole.trees.vb);
+      gl.enableVertexAttribArray(prog.aTree);
+      gl.vertexAttribPointer(prog.aTree, 4, gl.FLOAT, false, 24, 0);
+      gl.enableVertexAttribArray(prog.aCorner);
+      gl.vertexAttribPointer(prog.aCorner, 2, gl.FLOAT, false, 24, 16);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, hole.trees.ib);
+      gl.drawElements(gl.TRIANGLES, hole.trees.count, gl.UNSIGNED_SHORT, 0);
+      gl.disableVertexAttribArray(prog.aTree);
+      gl.disableVertexAttribArray(prog.aCorner);
     }
 
     function dispose() {
       release();
       try {
         gl.deleteProgram(ground.program);
-        gl.deleteProgram(treeProg.program);
+        gl.deleteProgram(cartoonTrees.program);
+        gl.deleteProgram(realTrees.program);
+        gl.deleteProgram(shadows.program);
         var lose = gl.getExtension("WEBGL_lose_context");
         if (lose) lose.loseContext();
       } catch (e) { /* already gone */ }
@@ -797,64 +975,146 @@
 
     /* The illustrated picture and its trees, painted exactly as painter.js illustratedPicture
        paints them for Play: same library, same frame pixel space, same tree placement. */
-    function illustrated(entry, metresX) {
-      var lib = window.GDIllustratedSurface, core = window.GDBubbleHazardCore;
+    /* The frame's own pixel space at a given canvas size: world-mercator pixels at the frame's
+       capture zoom, shifted to its origin and scaled. Null when the frame carries no projection. */
+    function frameSpace(entry, maxPx) {
       var meta = entry.meta, zoom = Number(meta.captureZoom), out = meta.outputDimensions || {};
       var frameW = Number(out.width) || 0, frameH = Number(out.height) || 0;
-      if (!lib || !core) return Promise.reject(new Error("the illustrated map library did not load"));
-      if (!meta.originPx || !Number.isInteger(zoom) || !frameW || !frameH) return Promise.reject(new Error("this frame has no projection to paint in"));
+      if (!meta.originPx || !Number.isInteger(zoom) || !frameW || !frameH) return null;
+      var scale = Math.min(1, maxPx / Math.max(frameW, frameH));
+      var ox = Number(meta.originPx.x), oy = Number(meta.originPx.y);
+      return {
+        zoom: zoom, scale: scale, ox: ox, oy: oy,
+        width: Math.max(1, Math.round(frameW * scale)),
+        height: Math.max(1, Math.round(frameH * scale)),
+        project: function (pt) {
+          var w = worldPx(pt.lat, pt.lng, zoom);
+          return { x: (w.x - ox) * scale, y: (w.y - oy) * scale };
+        }
+      };
+    }
+
+    /* Where the trees stand, in canvas pixels for this frame space, through the app's own
+       placement (the watch's): every real tree marker where it is at its own crown size, then
+       the mapped woods with no marker in them filled. A marker is one tree however big. */
+    function placeTrees(space, surfaces, metresX, singleTrees) {
+      return window.GDIllustratedSurface.placeTrees(window.GDWatchMapCore, surfaces, {
+        transform: { a: space.scale, b: 0, tx: -space.ox * space.scale, ty: -space.oy * space.scale },
+        refZoom: space.zoom,
+        metresPerPixel: metresX / space.width,
+        imageWidth: space.width,
+        imageHeight: space.height
+      }, singleTrees);
+    }
+
+    /* The course's real tree markers, {lat, lng, r} with r the crown radius in metres, as the
+       watch bake reads them (course-watch-maps.mjs courseSingleTrees): the single trees placed
+       in the Mapping Overlay, and the tree finder's trees live at its layer's level. Both are
+       admin reads; either failing just leaves the woods to be filled as before. */
+    var TREE_DEFAULT_LEVEL = 2;   // gd-course-trees-core.mjs TREE_DEFAULT_LEVEL
+    var markersPromise = null, markersKey = "";
+    function adminGet(url) {
+      var token = typeof window.gdAdminCourseDbAccessToken === "function" ? window.gdAdminCourseDbAccessToken()
+        : Promise.resolve((function () {
+          try {
+            var auth = window.ClaritySupabaseAuth, s = auth && typeof auth.session === "function" ? auth.session() : null;
+            return String(s && (s.access_token || s.accessToken) || "");
+          } catch (e) { return ""; }
+        })());
+      return token.then(function (t) {
+        return fetch(url, { headers: { Accept: "application/json", Authorization: "Bearer " + t }, cache: "no-store" });
+      }).then(function (res) { return res.ok ? res.json() : null; });
+    }
+    function treeMarkers() {
+      if (markersKey === session.courseKey && markersPromise) return markersPromise;
+      markersKey = session.courseKey;
+      var id = encodeURIComponent(session.courseKey);
+      var placed = adminGet("/api/course-map-overlay?courseId=" + id).then(function (data) {
+        var core = window.GDWatchMapCore;
+        return core && core.singleTreesFromOverlay ? core.singleTreesFromOverlay(data && data.overlay && data.overlay.features) : [];
+      }).catch(function () { return []; });
+      var found = adminGet("/api/course-trees?courseId=" + id).then(function (data) {
+        var row = data && data.row;
+        if (!row || !Array.isArray(row.trees)) return [];
+        var level = Number.isFinite(Number(row.level)) ? Number(row.level) : TREE_DEFAULT_LEVEL;
+        return row.trees.filter(function (a) {
+          return Array.isArray(a) && a.length >= 4 && Number.isFinite(Number(a[0])) && Number.isFinite(Number(a[1])) && Number(a[2]) > 0 && (Number(a[3]) | 0) <= level;
+        }).map(function (a) { return { lat: Number(a[0]), lng: Number(a[1]), r: Number(a[2]) }; });
+      }).catch(function () { return []; });
+      markersPromise = Promise.all([placed, found]).then(function (res) { return res[0].concat(res[1]); });
+      return markersPromise;
+    }
+
+    /* Canvas-pixel trees as the renderer takes them: frame uv and crown radius in metres. */
+    function treesInMetres(trees, space, metresX) {
+      var ppm = space.width / metresX;
+      return trees.map(function (t) { return { u: t.x / space.width, v: t.y / space.height, r: t.r / ppm, type: t.type }; });
+    }
+
+    function packageSurfaces() {
+      var core = window.GDBubbleHazardCore;
+      if (!window.GDIllustratedSurface || !core) return Promise.reject(new Error("the illustrated map library did not load"));
       return fetchPackage().then(function (pkg) {
         if (!pkg) throw new Error("no course package for this course");
-        var surfaces = core.collectPackageSurfaces(pkg);
+        return { pkg: pkg, surfaces: core.collectPackageSurfaces(pkg) };
+      });
+    }
+
+    /* The illustrated picture and its trees, painted exactly as painter.js illustratedPicture
+       paints them for Play: same library, same frame pixel space, same tree placement. */
+    function illustrated(entry, metresX) {
+      var lib = window.GDIllustratedSurface, core = window.GDBubbleHazardCore;
+      var space = frameSpace(entry, ILLUSTRATED_PX);
+      if (!space) return Promise.reject(new Error("this frame has no projection to paint in"));
+      return Promise.all([packageSurfaces(), treeMarkers()]).then(function (res) {
+        var course = res[0], markers = res[1];
+        var surfaces = course.surfaces;
         if (!core.hasAnySurface(surfaces) || !lib.holeIsMapped(surfaces, entry.holeNumber)) {
           throw new Error("this hole has no green or fairway on the map, so Play shows the photo");
         }
-        var scale = Math.min(1, ILLUSTRATED_PX / Math.max(frameW, frameH));
         var picture = document.createElement("canvas");
-        picture.width = Math.max(1, Math.round(frameW * scale));
-        picture.height = Math.max(1, Math.round(frameH * scale));
-        var ox = Number(meta.originPx.x), oy = Number(meta.originPx.y);
-        var trees = lib.placeTrees(window.GDWatchMapCore, surfaces, {
-          transform: { a: scale, b: 0, tx: -ox * scale, ty: -oy * scale },
-          refZoom: zoom,
-          metresPerPixel: metresX / picture.width,
-          imageWidth: picture.width,
-          imageHeight: picture.height
-        });
+        picture.width = space.width;
+        picture.height = space.height;
+        var trees = placeTrees(space, surfaces, metresX, markers);
         var drawn = lib.paint(picture.getContext("2d"), {
-          width: picture.width,
-          height: picture.height,
-          pxPerMetre: picture.width / metresX,
-          project: function (pt) {
-            var w = worldPx(pt.lat, pt.lng, zoom);
-            return { x: (w.x - ox) * scale, y: (w.y - oy) * scale };
-          },
+          width: space.width,
+          height: space.height,
+          pxPerMetre: space.width / metresX,
+          project: space.project,
           surfaces: surfaces,
-          holes: lib.packageHoles(pkg),
+          holes: lib.packageHoles(course.pkg),
           seed: Number(entry.holeNumber) || 1,
           trees: trees
         });
         if (!drawn) throw new Error("nothing mapped falls inside this frame");
-        var ppm = picture.width / metresX;
-        return {
-          picture: picture,
-          illustrated: true,
-          trees: trees.map(function (t) { return { u: t.x / picture.width, v: t.y / picture.height, r: t.r / ppm, type: t.type }; })
-        };
+        return { picture: picture, illustrated: true, trees: treesInMetres(trees, space, metresX) };
       });
     }
 
-    /* The frame JPEG, scaled down if it is bigger than this GPU can hold as a texture. */
-    function photo(entry) {
-      return loadImage(assetUrl(entry.path)).then(function (img) {
+    /* The frame JPEG, scaled down if it is bigger than this GPU can hold as a texture, with the
+       same trees the illustrated map stands up: the real tree markers where they stand, and the
+       mapped woods with none in them filled. No trees is still a complete picture: any failure
+       finding them leaves the photo bare. */
+    function photo(entry, metresX) {
+      var space = frameSpace(entry, ILLUSTRATED_PX);
+      var treesPromise = space ? Promise.all([
+        packageSurfaces().catch(function () { return { surfaces: {} }; }),
+        treeMarkers()
+      ]).then(function (res) {
+        return treesInMetres(placeTrees(space, res[0].surfaces, metresX, res[1]), space, metresX);
+      }).catch(function () { return []; }) : Promise.resolve([]);
+      var picturePromise = loadImage(assetUrl(entry.path)).then(function (img) {
         var max = Math.min(MAX_PICTURE_PX, scene.maxTexture || MAX_PICTURE_PX);
         var big = Math.max(img.naturalWidth, img.naturalHeight);
-        if (big <= max) return { picture: img, trees: [] };
+        if (big <= max) return img;
         var s = max / big, c = document.createElement("canvas");
         c.width = Math.round(img.naturalWidth * s);
         c.height = Math.round(img.naturalHeight * s);
         c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-        return { picture: c, trees: [] };
+        return c;
+      });
+      return Promise.all([picturePromise, treesPromise]).then(function (res) {
+        return { picture: res[0], trees: res[1] };
       });
     }
 
@@ -892,9 +1152,9 @@
       var picturePromise = style === "illustrated"
         ? illustrated(entry, metresX).catch(function (error) {
             loadedNote = "Illustrated unavailable (" + (error.message || error) + ") - showing the photo";
-            return photo(entry);
+            return photo(entry, metresX);
           })
-        : photo(entry);
+        : photo(entry, metresX);
       var elevationPromise = elevation && elevation.path
         ? loadImage(assetUrl(elevation.path)).catch(function () { return null; })
         : Promise.resolve(null);
@@ -912,6 +1172,7 @@
           metres: metres,
           seaLevel: elevation && elevation.elevationRange ? Number(elevation.elevationRange.min) : 0,
           ambient: drawn.illustrated ? AMBIENT.illustrated : AMBIENT.photo,
+          realistic: !drawn.illustrated,
           trees: drawn.trees
         });
         anchors = anchorsFor(entry, metres);
