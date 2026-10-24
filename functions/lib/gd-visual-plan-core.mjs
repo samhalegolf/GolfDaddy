@@ -7,6 +7,7 @@
    server snapshot frames the course the same way the in-browser scan does. */
 
 import { exportImageUrl } from "./gd-imagery-sources.mjs";
+import { courseSlug } from "./gd-course-slug.mjs";
 
 /* Capture policies describe FRAMING - zoom, bleed, lens, budget. They no longer name a tile
    source: which imagery a course may be shot from is a licensing decision resolved per region
@@ -240,7 +241,7 @@ function splitBoundsAlongRoute(bounds, holeData, policy) {
 
 /* ---------- plan ------------------------------------------------------------------------- */
 
-function slug(value) { return String(value || "course").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90) || "course"; }
+function slug(value) { return courseSlug(value || "course").slice(0, 90) || "course"; }
 function hashString(value) {
   const text = typeof value === "string" ? value : JSON.stringify(value) || "";
   let hash = 5381;

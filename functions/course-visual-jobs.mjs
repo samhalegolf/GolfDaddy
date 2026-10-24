@@ -13,6 +13,7 @@
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import courseVersionLabel from "../scripts/gd-course-version-label.js";
 import { isTestKind } from "./lib/gd-test-bake-core.mjs";
+import { courseSlug } from "./lib/gd-course-slug.mjs";
 
 const TABLE = "course_visual_jobs";
 const MAPS_TABLE = "course_maps";
@@ -67,7 +68,7 @@ const supabaseFetch = createSupabaseFetch({
   label: "course-visual-jobs"
 });
 
-function slug(value) { return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90); }
+function slug(value) { return courseSlug(value).slice(0, 90); }
 
 function latestJob(jobs, predicate) {
   return (Array.isArray(jobs) ? jobs : []).find(predicate) || null;

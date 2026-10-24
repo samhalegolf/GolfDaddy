@@ -124,7 +124,7 @@
   }
 
   function cleanIdentity(value) {
-    return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   }
 
   function hasConcreteIdentity(input) {
@@ -156,7 +156,7 @@
   }
 
   function makeRunId(input) {
-    var stem = courseIdFrom(input).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 36) || "course";
+    var stem = courseIdFrom(input).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 36) || "course";
     return "map-run-" + stem + "-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 7);
   }
 

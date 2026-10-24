@@ -5,6 +5,7 @@ import { courseBoundsFromObjects } from "./lib/gd-course-package-shape.mjs";
 const TABLE = "course_maps";
 import { purgeCourseData } from "./lib/gd-course-cleanup.mjs";
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
+import { courseSlug } from "./lib/gd-course-slug.mjs";
 
 const ADMIN_EMAILS = new Set(["samhalegolf@gmail.com", "admin@clarity.local"]);
 
@@ -220,7 +221,7 @@ export default async function courseMaps(req) {
    distinction is testable rather than a comment nobody reads at the call site. */
 function visualSnapshotCourseId(course) {
   const raw = course && typeof course === "object" ? course.courseId : course;
-  return String(raw || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return courseSlug(raw);
 }
 
 /* Where a course sits decides whether a Clarity map is even possible: the visual
@@ -1000,7 +1001,7 @@ function validHole(value) {
 }
 
 function slug(value) {
-  return String(value || "course").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "course";
+  return courseSlug(value || "course") || "course";
 }
 
 function cleanName(value) {

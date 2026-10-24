@@ -332,7 +332,7 @@
   function shapesApi() { return window.GDOverlayShapes || null; }
   function liveSources() { var api = sourcesApi(); return api && Array.isArray(api.list) ? api.list : []; }
   function courseIdOf(course) {
-    return String(course && (course.courseId || course.id || course.canonicalKey) || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
+    return String(course && (course.courseId || course.id || course.canonicalKey) || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
   }
   function courseLatLng(course) {
     var lat = num(course && (course.lat != null ? course.lat : course.latitude));

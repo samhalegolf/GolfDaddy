@@ -41,7 +41,7 @@
   function now(){return new Date().toISOString();}
   function safe(fn,fb){try{return fn();}catch(_error){return fb;}}
   function clone(value){return safe(function(){return JSON.parse(JSON.stringify(value));},value);}
-  function slug(value){return String(value||"course").toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,140)||"course";}
+  function slug(value){return String(value||"course").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().trim().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,140)||"course";}
   function text(value,limit){var out=String(value||"").trim();return limit&&out.length>limit?out.slice(0,limit):out;}
   function finite(value){var n=Number(value);return Number.isFinite(n)?n:null;}
   function point(value){

@@ -25,7 +25,7 @@
   var COUNTED_KEY = "gd-course-usage-counted";
 
   function courseKey(value) {
-    return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
+    return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
   }
 
   function deviceOrigin() {
