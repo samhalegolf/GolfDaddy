@@ -52,7 +52,8 @@ import { sampleCourseSeasons, seasonsAreFresh } from "./lib/gd-sentinel-seasons.
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import { overlayOwnerId } from "./lib/gd-overlay-owner.mjs";
-import { liveTrees, TREES_TABLE } from "./lib/gd-course-trees-core.mjs";
+import { TREES_TABLE } from "./lib/gd-course-trees-store.mjs";
+import { courseSingleTrees } from "./lib/gd-course-single-trees.mjs";
 import { wakeGarminBuild } from "./lib/gd-garmin-build-wake.mjs";
 /* The in-progress rule is shared with the course page's Apple bake wake (same window as
    PRUNE_GRACE_MS: no bake that could still be running is ever treated as finished). */
@@ -582,25 +583,6 @@ function paletteRecord(colours) {
   };
 }
 
-/* The trees the bake stamps where they really stand (watch-map-core buildHoleTrees): the ones
-   placed by hand in the course's Studio overlay, and the ones its tree run found that are live
-   at its tree layer's level (lib/gd-course-trees-core.mjs). Neither is in course_maps: a
-   tree-lined course holds thousands, nothing but the watch reads them, and the course objects
-   are synced whole to every phone and Studio. All of them go to every hole; each hole keeps
-   the ones on its own picture, and one standing on another is stamped once. Best-effort: with
-   none, or nothing to read, the woods are made up as before. */
-async function courseSingleTrees(courseId) {
-  const [placed, found] = await Promise.all([
-    overlayOwnerId(supabaseFetch, courseId)
-      .then(ownerId => supabaseFetch(OVERLAYS_TABLE + "?select=features&course_id=eq." + encodeURIComponent(ownerId) + "&limit=1"))
-      .then(rows => watchMapCore.singleTreesFromOverlay(Array.isArray(rows) && rows[0] ? rows[0].features : []))
-      .catch(() => []),
-    supabaseFetch(TREES_TABLE + "?select=trees,level&course_id=eq." + encodeURIComponent(courseId) + "&limit=1")
-      .then(rows => liveTrees(Array.isArray(rows) ? rows[0] : null).map(t => ({ lat: t.lat, lng: t.lng, r: t.r })))
-      .catch(() => [])
-  ]);
-  return placed.concat(found);
-}
 
 /* When the course's tree layer was last published, or null - a Garmin package built before
    it is behind. */
@@ -644,7 +626,7 @@ async function generateWatchPackage({ courseId, map, actorEmail }) {
   try { colours = await courseColours(courseId, map, holeNumbers, terrainIndex); }
   catch (error) { colours = { palette: paletteCore.basePalette(), measured: null, aerial: null, seasonal: null }; }
   const recipe = Object.assign({}, watchMapCore.WATCH_MAP_RECIPE_V1, { colors: colours.palette.colors });
-  const singleTrees = await courseSingleTrees(courseId);
+  const singleTrees = await courseSingleTrees(supabaseFetch, courseId);
 
   let holeIndex = 0;
   for (const holeNumber of holeNumbers) {
@@ -838,7 +820,7 @@ async function generateGarminPackage({ courseId, map, terrainIndex }) {
   try { colours = await courseColours(courseId, map, holeNumbers, terrainIndex); }
   catch (error) { colours = { palette: paletteCore.basePalette() }; }
   const recipe = Object.assign({}, watchMapCore.WATCH_MAP_RECIPE_V1, { colors: colours.palette.colors });
-  const singleTrees = await courseSingleTrees(courseId);
+  const singleTrees = await courseSingleTrees(supabaseFetch, courseId);
 
   const holes = [];
   const errors = [];

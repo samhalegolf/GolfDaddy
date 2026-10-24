@@ -27,11 +27,14 @@ function stubFetch(world) {
     if (table === "course_visuals") return jsonResponse(200, world.visuals || []);
     if (table === "course_visual_jobs") return jsonResponse(200, world.visualJobs || []);
     if (table === "course_mapper_jobs") return jsonResponse(200, world.mapperJobs || []);
+    if (table === "course_map_overlays") return jsonResponse(200, world.overlays || []);
+    if (table === "course_trees") return jsonResponse(200, world.trees || []);
     return jsonResponse(200, []);
   };
 }
 
 let buildCoursePackage = null;
+let coursePackage = null;
 
 /* ---- the pin lifecycle ----
  *
@@ -296,11 +299,66 @@ test("courseBounds is framed by playable geometry, not by hazards", async () => 
   assert.ok(withSurfaces.north < 36.01, "the boundary pond did not stretch the course north");
 });
 
+/* ---- real trees ----
+ * The app's illustrated map stands the course's real tree markers one tree each at their own
+ * size, so a playable package carries them: the overlay's single trees and the tree finder's
+ * trees at the layer's level, as lib/gd-course-single-trees.mjs reads them for the watch. */
+
+const PUPUKE_MAP = { course_id: "pupuke", published: true, geometry_version: "v1", objects_json: {
+  "green-1": { type: "green", holeNumber: 1, position: { lat: -36.8, lng: 174.7 }, greenShape: [{ lat: -36.8001, lng: 174.7001 }] },
+  "tee-1": { type: "tee", holeNumber: 1, position: { lat: -36.799, lng: 174.699 } }
+}, holes_json: {} };
+
+function ringAround(lat, lng, metres) {
+  const k = Math.cos(lat * Math.PI / 180);
+  return Array.from({ length: 12 }, (_, i) => {
+    const a = i / 12 * 2 * Math.PI;
+    return { lat: lat + Math.sin(a) * metres / 111320, lng: lng + Math.cos(a) * metres / (111320 * k) };
+  });
+}
+
+async function getPackage(courseId) {
+  const res = await coursePackage(new Request("https://caddy.test/api/course-package?courseId=" + courseId));
+  return res.json();
+}
+
+test("a playable package carries the course's real trees, one per marker at its own size", async () => {
+  stubFetch({
+    maps: [PUPUKE_MAP],
+    overlays: [{ features: [
+      { kind: "tree", points: ringAround(-36.8005, 174.7005, 12) },
+      { kind: "trees", points: ringAround(-36.801, 174.701, 40) }
+    ] }],
+    trees: [{ level: 2, trees: [[-36.8002, 174.7002, 4.4, 1, 0], [-36.8003, 174.7003, 5, 4, 0]] }]
+  });
+  const pkg = await getPackage("pupuke");
+  assert.strictEqual(pkg.status, "lite-geo-ready");
+  assert.strictEqual(pkg.singleTrees.length, 2, "the overlay's single tree and the finder's tree at the level - not its woods, not a tree above the level");
+  const [placed, found] = pkg.singleTrees;
+  assert.ok(Math.abs(placed[0] + 36.8005) < 1e-6 && Math.abs(placed[1] - 174.7005) < 1e-6, "the marker's middle");
+  assert.ok(Math.abs(placed[2] - 12) < 0.3, "the marker's crown radius in metres, got " + placed[2]);
+  assert.deepStrictEqual(found, [-36.8002, 174.7002, 4.4]);
+});
+
+test("a package with no real trees carries no singleTrees, and a processing one never reads them", async () => {
+  stubFetch({ maps: [PUPUKE_MAP] });
+  assert.ok(!("singleTrees" in (await getPackage("pupuke"))));
+  let treeReads = 0;
+  const world = { mapperJobs: [{ id: "j1", kind: "automap", status: "running" }] };
+  stubFetch(world);
+  const inner = global.fetch;
+  global.fetch = async (url) => { if (/course_trees|course_map_overlays/.test(String(url))) treeReads += 1; return inner(url); };
+  const pkg = await getPackage("pupuke");
+  assert.strictEqual(pkg.status, "processing");
+  assert.strictEqual(treeReads, 0, "a poll while processing pays nothing for trees");
+});
+
 (async function run() {
   process.env.SUPABASE_URL = "https://stub.supabase.co";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-role-stub";
   const mod = await import(path.join(root, "functions", "course-package.mjs"));
   buildCoursePackage = mod.buildCoursePackage;
+  coursePackage = mod.default;
   let failures = 0;
   for (const item of tests) {
     try {

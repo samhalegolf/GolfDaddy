@@ -14,20 +14,19 @@
  * for the run and dropped as soon as it has been read. Only the tree positions are kept.
  *
  * Pure apart from what is passed in (sharp, the fetchers), so dev/course-trees-core.test.js
- * runs it on synthetic pictures. */
+ * runs it on synthetic pictures. How a course_trees row is stored and read back is
+ * lib/gd-course-trees-store.mjs. */
 
 import shapes from "../../scripts/studio/courses/map-overlay/map-overlay-shapes.js";
 import { stitchPlan, stitch, georefFor, latLngToPixel, pixelToLatLng } from "./gd-tile-mosaic-core.mjs";
 import { fetchTileBytes } from "./gd-tile-fetch.mjs";
+import { TREE_DEFAULT_LEVEL } from "./gd-course-trees-store.mjs";
 
-export const TREES_TABLE = "course_trees";
 /* Bumped when the finder changes enough that an automatic run is worth doing again: the
    backfill re-runs every automatic layer from an older version (never an edited one).
    2: every sensitivity asks its own darkness and texture of a crown, and a tree seen only by
    its height stands from the middle sensitivity up - so More and Less really change things. */
 export const TREE_RUN_VERSION = 2;
-/* The sensitivity a fresh run goes live at - Studio's default (shapes.TREE_FINDER_LEVELS[2]). */
-export const TREE_DEFAULT_LEVEL = 2;
 /* Every picture is read at about Studio's near-play resolution, so a run here and a run in
    Studio find the same trees: a frame baked finer is scaled down to it. */
 export const TREE_PICTURE_MPP = 0.45;
@@ -195,21 +194,6 @@ export function mergeTrees(lists) {
   return out;
 }
 
-/* Stored as [lat, lng, radius, level, fromHeight] - about 30 bytes a tree. */
-export function packTrees(trees) {
-  return (trees || []).map(t => [Number(t.lat.toFixed(7)), Number(t.lng.toFixed(7)), Math.round(t.r * 10) / 10, t.l | 0, t.h ? 1 : 0]);
-}
-export function unpackTrees(packed) {
-  return (Array.isArray(packed) ? packed : []).filter(a => Array.isArray(a) && a.length >= 4 && Number.isFinite(Number(a[0])) && Number.isFinite(Number(a[1])) && Number(a[2]) > 0)
-    .map(a => ({ lat: Number(a[0]), lng: Number(a[1]), r: Number(a[2]), l: Number(a[3]) | 0, h: a[4] ? 1 : 0 }));
-}
-
-/* The trees a course_trees row puts on the watch: every one at or under its level. */
-export function liveTrees(row) {
-  if (!row) return [];
-  const level = Number.isFinite(Number(row.level)) ? Number(row.level) : TREE_DEFAULT_LEVEL;
-  return unpackTrees(row.trees).filter(t => t.l <= level);
-}
 
 /* A whole course: every hole with fairways or a green, on its published frame when it has
    one and on Esri otherwise. deps: {frames (Map hole -> {path, playSurface}), downloadFrame,
