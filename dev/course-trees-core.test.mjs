@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import sharp from "sharp";
 
 const lib = await import("../functions/lib/gd-course-trees-core.mjs");
+const store = await import("../functions/lib/gd-course-trees-store.mjs");
 const { pixelToLatLng } = await import("../functions/lib/gd-tile-mosaic-core.mjs");
 
 const tests = [];
@@ -58,7 +59,7 @@ test("a course's objects become each hole's play shapes and the course's surface
 test("a hole's picture: the crowns beside its fairway are found at every level, nothing on the turf, shadow or smooth rough", () => {
   const inputs = lib.courseTreeInputs(OBJECTS);
   const out = lib.findTreesOnPicture({ picture: picture(), play: inputs.play.get(1), inputs, bandM: 45 });
-  const at = out.trees.filter(t => t.l <= lib.TREE_DEFAULT_LEVEL);
+  const at = out.trees.filter(t => t.l <= store.TREE_DEFAULT_LEVEL);
   CROWNS.forEach(c => {
     const where = ll(c.x, c.y);
     assert.ok(at.some(t => Math.hypot((t.lat - where.lat) * 111320, (t.lng - where.lng) * 111320 * Math.cos(where.lat * Math.PI / 180)) < 3), "missed the crown at " + c.x + "," + c.y);
@@ -78,12 +79,12 @@ test("neighbouring holes' trees merge to one each, the stricter kept", () => {
 
 test("the stored layer is compact, reads back, and the watch takes the trees at its level", () => {
   const trees = [{ lat: -37.123456789, lng: 175.987654321, r: 4.44, l: 0, h: 0 }, { lat: -37.1, lng: 175.9, r: 5, l: 4, h: 0 }, { lat: -37.2, lng: 175.8, r: 5, l: 5, h: 1 }];
-  const packed = lib.packTrees(trees);
+  const packed = store.packTrees(trees);
   assert.ok(JSON.stringify(packed).length < 120, "a few dozen bytes a tree");
-  assert.deepStrictEqual(lib.unpackTrees(packed)[0], { lat: -37.1234568, lng: 175.9876543, r: 4.4, l: 0, h: 0 });
-  assert.strictEqual(lib.liveTrees({ trees: packed, level: 2 }).length, 1, "only the trees at or under the level");
-  assert.strictEqual(lib.liveTrees({ trees: packed, level: 5 }).length, 3, "a tree found from its height has a level like any other");
-  assert.deepStrictEqual(lib.liveTrees(null), []);
+  assert.deepStrictEqual(store.unpackTrees(packed)[0], { lat: -37.1234568, lng: 175.9876543, r: 4.4, l: 0, h: 0 });
+  assert.strictEqual(store.liveTrees({ trees: packed, level: 2 }).length, 1, "only the trees at or under the level");
+  assert.strictEqual(store.liveTrees({ trees: packed, level: 5 }).length, 3, "a tree found from its height has a level like any other");
+  assert.deepStrictEqual(store.liveTrees(null), []);
 });
 
 test("a whole course reads each hole off its own frame, scaled to the finder's resolution", async () => {
@@ -101,7 +102,7 @@ test("a whole course reads each hole off its own frame, scaled to the finder's r
   assert.deepStrictEqual(asked, ["c/h1.jpg"]);
   assert.strictEqual(out.holes[1].source, "frame");
   assert.strictEqual(out.imagery, "frames");
-  assert.strictEqual(out.trees.filter(t => t.l <= lib.TREE_DEFAULT_LEVEL).length, CROWNS.length, JSON.stringify(out.holes));
+  assert.strictEqual(out.trees.filter(t => t.l <= store.TREE_DEFAULT_LEVEL).length, CROWNS.length, JSON.stringify(out.holes));
 });
 
 test("a hole with no frame asks Esri, and says why when it cannot", async () => {
