@@ -316,6 +316,35 @@
     },
 
     {
+      id: "course-3d", label: "3D Course Viewer", parent: "courses",
+      function: "View-only 3D model of a hole with a camera you move freely: orbit round it, walk on it, or jump to overhead, from-the-tee and round-the-green views. Built from exactly what GPS Play stands up - the published hole frame (or the Illustrated map painted from the course package by the app's own painter), draped over the published terrain-RGB elevation, with the same tree placement - but drawn through a real perspective camera instead of the app's fixed tilt. Relief exaggeration is adjustable. Writes nothing.",
+      owner: "scripts/studio/courses/course-3d/course-3d-page.js",
+      runtime: { app: false, studio: true, server: true },
+      code: [
+        { role: "Page (owner): loading, perspective renderer, camera", path: "scripts/studio/courses/course-3d/course-3d-page.js" },
+        { role: "Illustrated picture + tree placement (the app's own, loaded not copied)", path: "app/js/gd-illustrated-surface.js" },
+        { role: "The app's mesh this mirrors (fixed camera, shear in frame)", path: "app/js/gd-terrain-mesh.js" },
+        { role: "Course package surfaces for Illustrated", path: "scripts/gd-bubble-hazard-core.js" },
+        { role: "Course selection (pick-only mode, app-facing owner)", path: "scripts/inline/gd-course-picker-search-v2.js" }
+      ],
+      inputs: ["Course selection from the real picker, or a typed course key", "GET /api/course-visuals (hole frames + elevation sidecars)", "GET /api/course-package (Illustrated only)"],
+      outputs: ["Display only - nothing is written"],
+      owns: ["The 3D viewer UI, its camera and its renderer"],
+      doesNotOwn: [
+        "The Play mesh (owned by app/js/gd-terrain-mesh.js)",
+        "The illustrated painter and tree placement (owned by app/js/gd-illustrated-surface.js)",
+        "The baked frames and elevation (owned by the visual worker)"
+      ],
+      connections: [
+        { target: "courses", direction: "child-of", label: "" },
+        { target: "course-visuals", direction: "reads-from", label: "Published hole frames + elevation" }
+      ],
+      keyFunctions: [],
+      status: "implemented", needsVerification: true,
+      warnings: ["Trees stand at real size while the ground is exaggerated by the Relief slider, as in Play."]
+    },
+
+    {
       id: "map-overlay", label: "Mapping Overlay", parent: "courses",
       function: "Places the fairways, greens, tees and bunkers OSM does not have, by eye, in two modes. Shapes: a line laid down a fairway becomes a fairway polygon with draggable corners, a click on a green or a bunker becomes its outline through the wand (the bunker wand's reach steps smaller or bigger, and bunker outlines that overlap merge into one), and a click drops a tee. Pins: the quick pass - a green, tee or bunker's centre, a fairway's start and end - which the mapper reads as default shapes and Shape pins turns into outlines later. The tool picked stays picked. Hole numbers are optional - set Hole and new shapes carry it, or renumber a selected shape. Shapes drag, reshape and go in the bin; every change autosaves as a draft the mapper ignores until it is marked ready. Opened from a Course Database row (Draw), it arrives with what OSM has here, the course's saved objects and the last mapper run's outcome, all as reference. So the mapper can resolve a course whose OSM data is greens and nothing else (Royal Belfast: 11 greens, 0 fairways, 0 hole lines). Saves one thing - the course's overlay row - which the mapper worker merges, once ready, into the Overpass payload as ordinary golf=fairway / golf=hole / golf=green / golf=tee / golf=bunker ways before it resolves. Nothing on the course changes until a mapper run is requested. Temporary by design: delete the overlay once OSM carries the real shapes.",
       owner: "scripts/studio/courses/map-overlay/map-overlay-page.js",
@@ -936,7 +965,7 @@
 
   var NAV_TREE = [
     { id: "overview" },
-    { id: "courses", children: ["course-database", "course-mapping", "mapping-queue", "region-scan", "map-viewport", "map-overlay", "course-usage", "course-visuals", "publishing"] },
+    { id: "courses", children: ["course-database", "course-mapping", "mapping-queue", "region-scan", "map-viewport", "course-3d", "map-overlay", "course-usage", "course-visuals", "publishing"] },
     { id: "shot-system", children: ["photo-scan", "practice-data", "practice-email", "bubble-geometry", "pattern-finder", "my-bubble", "shot-system-course-data", "conditions", "recommendations"] },
     { id: "gps-play", children: ["gps-course-selection", "gps-round-setup", "gps-hole-lifecycle", "gps-map-camera", "gps-garmin-preview", "gps-apple-preview", "gps-record-hub", "gps-shot-planning", "gps-shot-capture", "gps-scorecard", "gps-course-data-capture", "gps-sync-recovery", "gps-demo-mode"] },
     { id: "players-coaches" },
