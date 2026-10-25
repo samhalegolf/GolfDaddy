@@ -34,6 +34,7 @@ import { resolveImagerySource, unscannableReason, attributionFor } from "./lib/g
 import { renderHoleSurfaceMercator, renderOverview } from "./lib/gd-visual-export-core.mjs";
 import { reliefFromTerrainRgb, cropByBounds, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS, terrainRgbPngFromHeights, decodeElevation } from "./lib/gd-relief-core.mjs";
 import { ensureCourseTerrain, loadCourseTerrain, TERRAIN_BUCKET } from "./lib/terrain/gd-terrain-service.mjs";
+import { terrainForWindow } from "./lib/terrain/gd-terrain-window.mjs";
 import { createSupabaseStorage } from "./lib/gd-supabase-storage.mjs";
 import greenCore from "../scripts/gd-green-contours-core.js";
 import courseVersionLabel from "../scripts/gd-course-version-label.js";
@@ -991,6 +992,7 @@ async function runOpcdExportJob(job) {
     },
     upload: (path, buffer, contentType) => storageUpload(path, buffer, contentType, TERRAIN_BUCKET),
     encodePreviewPng: (grey, width, height) => sharp(grey, { raw: { width, height, channels: 1 }, limitInputPixels: false }).png({ compressionLevel: 9 }).toBuffer(),
+    readWindow: (grid, asset) => terrainForWindow({ grid, asset, env: process.env }, {}),
     readCanopy: bounds => readCanopy(bounds, { openTiff: openCanopyTile }),
     loadScorecardHoles: async p => {
       const card = await loadScorecard(p.courseName, scorecardCourseKey);

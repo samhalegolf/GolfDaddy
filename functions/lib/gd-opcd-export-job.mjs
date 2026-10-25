@@ -9,6 +9,9 @@
      decodeTerrainPng(buffer) -> {heights, width, height}
      upload(path, buffer, contentType)          into the export bucket
      encodePreviewPng(grey, width, height) -> Buffer | null   optional
+     readWindow(grid, {manifest, heights}) -> {heights, from, source, tried} | null
+                                                optional; terrainForWindow for the frame's
+                                                mercator window when the asset stops short
      readCanopy(bounds) -> {grids} | null        optional; tree heights
      loadScorecardHoles(pkg) -> [] | null        optional; par
      heartbeat(stage)                            optional
@@ -25,7 +28,7 @@ import { liveTrees } from "./gd-course-trees-core.mjs";
 import watchMapCore from "../../scripts/gd-watch-map-core.js";
 import {
   planOpcdFrame, sampleHeightmap, heightStats, rawEncoding, encodeRaw16, heightmapGeoTiff, previewGrey,
-  surfacesGeoJson, treesCsv, holesCsv, parByHole, opcdManifest, opcdReadme
+  surfacesGeoJson, treesCsv, holesCsv, parByHole, opcdManifest, opcdReadme, assetCovers, windowGridFor, rawFromWindow
 } from "./gd-opcd-export-core.mjs";
 
 export const OPCD_ROOT = "opcd";
@@ -92,8 +95,29 @@ export async function runOpcdExport({ courseId, pkg }, deps) {
   await beat("heightmap");
   const frame = planOpcdFrame(bounds);
   if (frame.clipped) warnings.push("course span " + Math.round(Math.max(frame.courseSpanM.east, frame.courseSpanM.north)) + " m exceeds the largest frame (" + frame.sideM + " m); edges are cut");
-  const sampled = sampleHeightmap(frame, raw);
-  if (sampled.outsideAssetFraction > 0.05) warnings.push(Math.round(sampled.outsideAssetFraction * 100) + "% of the frame is outside the terrain asset and was nearest-filled");
+  /* The asset is baked round the course with its own margin; a square frame round a narrow
+     course reaches past it. That ring is read for this export through the same window path
+     the live frame uses (asset first, then the resolver's providers), and only what no
+     source holds is nearest-filled. */
+  let fallback = null, beyondAsset = null;
+  if (!assetCovers(terrain, frame.bounds) && deps.readWindow) {
+    const grid = windowGridFor(frame, { zoom: terrain.grid.captureZoom });
+    await beat("terrain beyond the asset (" + grid.width + "x" + grid.height + " @z" + grid.zoom + ")");
+    try {
+      const win = await deps.readWindow(grid, { manifest: terrain, heights: decoded.heights });
+      if (win && win.heights && win.heights.length === grid.width * grid.height) {
+        fallback = rawFromWindow(grid, win.heights);
+        beyondAsset = (win.source && win.source.id || "terrain provider") + " (" + (win.from || "provider") + ", z" + grid.zoom + ")";
+      } else {
+        warnings.push("no terrain source could supply the frame beyond the asset (" + ((win && win.tried || []).join("; ") || "nothing tried") + "); edges nearest-filled");
+      }
+    } catch (error) {
+      warnings.push("terrain beyond the asset failed (" + String(error && error.message || error).slice(0, 120) + "); edges nearest-filled");
+    }
+  }
+  const sampled = sampleHeightmap(frame, raw, { fallback });
+  sampled.beyondAsset = beyondAsset;
+  if (sampled.filledFraction > 0.05) warnings.push(Math.round(sampled.filledFraction * 100) + "% of the frame has no ground from any source and was nearest-filled");
   const stats = heightStats(sampled.heights);
   const encoding = rawEncoding(stats);
   const quality = terrain.quality && terrain.quality.class;

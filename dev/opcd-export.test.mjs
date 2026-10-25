@@ -25,8 +25,10 @@ import { terrainRgbPngFromHeights, decodeElevation } from "../functions/lib/gd-r
 import { packTrees } from "../functions/lib/gd-course-trees-core.mjs";
 import {
   OPCD_EXPORT_KIND, planOpcdFrame, toLocal, insideFrame, sampleHeightmap, heightStats, rawEncoding, encodeRaw16,
-  heightmapGeoTiff, groundAt, surfacesGeoJson, treesCsv, holesCsv, parByHole, TREE_HEIGHT_PER_CROWN_RADIUS
+  heightmapGeoTiff, groundAt, surfacesGeoJson, treesCsv, holesCsv, parByHole, TREE_HEIGHT_PER_CROWN_RADIUS,
+  assetCovers, windowGridFor, rawFromWindow
 } from "../functions/lib/gd-opcd-export-core.mjs";
+import { gridPixelLatLng } from "../functions/lib/terrain/gd-terrain-normalise.mjs";
 import { runOpcdExport, canopySampler, loadCourseTrees } from "../functions/lib/gd-opcd-export-job.mjs";
 
 const MERC_R = 6378137;
@@ -139,7 +141,30 @@ const asset = syntheticAsset(frame.bounds, 17, plane);
   assert.ok(sampled.outsideAssetFraction > 0.2 && sampled.outsideAssetFraction < 0.95, "a good part of the frame is outside: " + sampled.outsideAssetFraction);
   assert.ok(sampled.filledFraction > 0);
   for (let i = 0; i < sampled.heights.length; i += 97) assert.ok(Number.isFinite(sampled.heights[i]), "no NaN survives");
-  console.log("5. outside-asset fraction", sampled.outsideAssetFraction.toFixed(3), "filled and reported");
+  assert.equal(sampled.fallbackFraction, 0);
+  assert.ok(!assetCovers(smallAsset.manifest, frame.bounds) && assetCovers(asset.manifest, frame.bounds));
+  /* With the frame's window read from a provider, the ring comes from it instead of a fill. */
+  const grid = windowGridFor(frame, { zoom: 17 });
+  assert.ok(grid.width <= 3072 && grid.height <= 3072 && grid.zoom === 17);
+  const nwBounds = gridPixelLatLng(grid, -0.5, -0.5), seBounds = gridPixelLatLng(grid, grid.width - 0.5, grid.height - 0.5);
+  assert.ok(nwBounds.lat > frame.bounds.north && nwBounds.lng < frame.bounds.west && seBounds.lat < frame.bounds.south && seBounds.lng > frame.bounds.east, "window surrounds the frame");
+  const winHeights = new Float32Array(grid.width * grid.height);
+  for (let j = 0; j < grid.height; j++) for (let i = 0; i < grid.width; i++) {
+    const ll = gridPixelLatLng(grid, i, j), m = mercator(ll.lat, ll.lng);
+    winHeights[j * grid.width + i] = plane(m.x, m.y);
+  }
+  const withFallback = sampleHeightmap(frame, assetAsRaw(smallAsset.manifest, smallAsset.heights), { fallback: rawFromWindow(grid, winHeights) });
+  assert.equal(withFallback.filledFraction, 0, "nothing left to invent");
+  near(withFallback.fallbackFraction, withFallback.outsideAssetFraction, 1e-9, "every missing sample came from the window");
+  const S = frame.samples;
+  for (const [i, j] of [[0, 0], [S - 1, S - 1], [3, 200]]) {
+    const ll = toLngLat(frame.crs, frame.originE + i, frame.originN + frame.sideM - j), m = mercator(ll.lat, ll.lng);
+    near(withFallback.heights[j * S + i], plane(m.x, m.y), 0.02, "fallback sample " + i + "," + j);
+  }
+  const big = planOpcdFrame({ north: -45.00, south: -45.034, west: 168.70, east: 168.75 });
+  const bigGrid = windowGridFor(big, { zoom: 17 });
+  assert.ok(bigGrid.zoom < 17 && bigGrid.width <= 3072, "a 4096 m frame steps the window coarser rather than past maxSidePx: z" + bigGrid.zoom + " " + bigGrid.width + "px");
+  console.log("5. outside-asset fraction", sampled.outsideAssetFraction.toFixed(3), "filled when alone, read from the window when one is given");
 }
 
 // ---- 6. RAW16
@@ -295,6 +320,7 @@ const sampledWide = sampleHeightmap(wide, assetAsRaw(wideAsset.manifest, wideAss
     },
     upload: async (path, buffer, contentType) => { uploads.set(path, { buffer, contentType }); },
     encodePreviewPng: (grey, w, h) => sharp(grey, { raw: { width: w, height: h, channels: 1 } }).png().toBuffer(),
+    readWindow: async () => { throw new Error("the asset covers the frame - no window read expected"); },
     readCanopy: async () => ({ grids: [{ crs: "EPSG:4326", x0: 168.70, y0: -45.00, dx: 0.001, dy: -0.001, width: 50, height: 50, heights: new Uint8Array(2500).fill(11) }] }),
     loadScorecardHoles: async () => [{ holeNumber: 1, par: 4 }, { holeNumber: 2, par: 3 }],
     heartbeat: async stage => { beats.push(stage); },
@@ -339,6 +365,52 @@ const sampledWide = sampleHeightmap(wide, assetAsRaw(wideAsset.manifest, wideAss
   near(values[1000 * S + 1000], plane(m.x, m.y), 0.12, "exported ground vs the plane through the real decode");
   assert.ok(result.warnings.every(w => !/outside the terrain asset/.test(w)), "no coverage warning: " + JSON.stringify(result.warnings));
   console.log("11. job wrote", result.files.length, "files;", (result.files.reduce((n, f) => n + f.bytes, 0) / 1048576).toFixed(1), "MB; warnings:", result.warnings.length);
+}
+
+// ---- 12. the job when the asset stops short of the frame: the window read fills the ring
+{
+  const shortAsset = syntheticAsset({ north: course.north + 0.001, south: course.south - 0.001, west: course.west - 0.0015, east: course.east + 0.0015 }, 17, plane, 2);
+  const png = await terrainRgbPngFromHeights(shortAsset.heights, shortAsset.manifest.grid.width, shortAsset.manifest.grid.height);
+  const uploads = new Map();
+  let windowCalls = 0;
+  const deps = {
+    supabaseFetch: async () => [],
+    loadTerrain: async () => shortAsset.manifest,
+    download: async () => png,
+    decodeTerrainPng: async buffer => {
+      const raw = await sharp(buffer).raw().toBuffer({ resolveWithObject: true });
+      const d = decodeElevation(raw.data, raw.info.width, raw.info.height, raw.info.channels, "terrain-rgb");
+      return { heights: d.heights, width: raw.info.width, height: raw.info.height };
+    },
+    upload: async (path, buffer) => { uploads.set(path, buffer); },
+    readWindow: async (grid, asset) => {
+      windowCalls++;
+      assert.ok(asset && asset.manifest && asset.heights, "the asset is offered to the window reader first");
+      const heights = new Float32Array(grid.width * grid.height);
+      for (let j = 0; j < grid.height; j++) for (let i = 0; i < grid.width; i++) {
+        const ll = gridPixelLatLng(grid, i, j), m = mercator(ll.lat, ll.lng);
+        heights[j * grid.width + i] = plane(m.x, m.y);
+      }
+      return { heights, from: "provider", source: { id: "linz-nz-elevation" }, tried: [] };
+    },
+    now: () => new Date("2026-10-25T04:00:00Z")
+  };
+  const result = await runOpcdExport({ courseId: "test-course", pkg }, deps);
+  assert.equal(windowCalls, 1);
+  assert.ok(result.heightmap.outsideAssetFraction > 0.1, "a real ring lay outside: " + result.heightmap.outsideAssetFraction);
+  assert.equal(result.heightmap.filledFraction, 0, "and none of it was invented");
+  near(result.heightmap.fallbackFraction, result.heightmap.outsideAssetFraction, 1e-9);
+  assert.ok(/linz-nz-elevation \(provider, z17\)/.test(result.heightmap.groundBeyondAsset), result.heightmap.groundBeyondAsset);
+  assert.ok(result.warnings.every(w => !/nearest-filled/.test(w)), JSON.stringify(result.warnings));
+  const readme = uploads.get(result.root + "/README.md").toString("utf8");
+  assert.ok(readme.includes("read for this export from linz-nz-elevation"), "README names where the ring came from");
+  const S = result.frame.samples;
+  const raw16 = uploads.get(result.root + "/heightmap.raw");
+  const enc = result.heightmap;
+  const corner = enc.baseElevationM + raw16.readUInt16LE(0) * enc.heightRangeM / 65535;
+  const ll = toLngLat(result.frame.crs, result.frame.originEasting, result.frame.originNorthing + result.frame.sideM), m = mercator(ll.lat, ll.lng);
+  near(corner, plane(m.x, m.y), 0.15, "the north-west corner (outside the asset) carries real ground");
+  console.log("12. asset short of the frame: window read once, ring", (result.heightmap.fallbackFraction * 100).toFixed(1) + "% from the provider, nothing filled");
 }
 
 console.log("opcd-export: all checks passed");

@@ -31,9 +31,14 @@ A course wider than 4096 m is exported clipped and the manifest says so.
 
 The course's baked terrain asset (`functions/lib/terrain/`), sampled Catmull-Rom onto the
 metre grid. It is the same heights the phone's mesh and green contours read. A course with no
-asset gets one baked as the job's first step. Ground the asset does not cover is
-nearest-filled and the fraction reported; a course on the global 30 m fallback exports, but
-the manifest and the Studio row flag that it is not LiDAR.
+asset gets one baked as the job's first step.
+
+The asset is baked round the course with a 450 m margin; a 2048 m square round a narrow
+course reaches past it (Poppy Hills: 17% of the frame). That ring is read for the export
+through the live frame's window path (`terrainForWindow`: the asset first, then the
+resolver's providers), and the manifest names where it came from. Only ground no source holds
+is nearest-filled, and that fraction is reported. A course on the global 30 m fallback
+exports, but the manifest and the Studio row flag that it is not LiDAR.
 
 ## Unity import
 

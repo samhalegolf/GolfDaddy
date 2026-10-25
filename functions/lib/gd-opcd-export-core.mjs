@@ -33,6 +33,7 @@
 
 import { fromLngLat, toLngLat, utmCrsFor } from "./terrain/gd-terrain-crs.mjs";
 import { sampleRaw, fillGaps } from "./terrain/gd-terrain-normalise.mjs";
+import { lngLatToWorldPx, mercMetresPerPixel } from "./terrain/gd-terrain-adapters.mjs";
 import { packageHoleData } from "./gd-visual-plan-core.mjs";
 
 /* The course_visual_jobs kind. Mirrored as a literal in functions/course-visual-jobs.mjs
@@ -50,6 +51,7 @@ export const OPCD_MARGIN_M = 100;
 export const TREE_HEIGHT_PER_CROWN_RADIUS = 2.4;
 
 const MERC_R = 6378137;
+const MERC_HALF = 20037508.342789244;
 const DEG = Math.PI / 180;
 
 function mercator(lat, lng) {
@@ -118,13 +120,46 @@ export function insideFrame(frame, local) {
 
 /* ---------- the ground ------------------------------------------------------------------ */
 
+/* Whether a terrain asset's grid holds the whole frame. A bake pads the course by its own
+   margin (450 m today); a 2048 m square round a narrow course reaches past that. */
+export function assetCovers(manifest, bounds) {
+  const b = manifest && manifest.grid && manifest.grid.bounds;
+  return !!b && bounds.south >= b.south && bounds.north <= b.north && bounds.west >= b.west && bounds.east <= b.east;
+}
+
+/* The web-mercator window (gd-terrain-window's grid shape) that covers the frame with a few
+   pixels to spare, at the asset's zoom or the first coarser one that fits maxSidePx. */
+export function windowGridFor(frame, { zoom = 17, maxSidePx = 3072, padPx = 3 } = {}) {
+  let z = Math.max(1, Math.round(zoom));
+  for (;;) {
+    const nw = lngLatToWorldPx(frame.bounds.north, frame.bounds.west, z);
+    const se = lngLatToWorldPx(frame.bounds.south, frame.bounds.east, z);
+    const left = Math.floor(nw.x) - padPx, top = Math.floor(nw.y) - padPx;
+    const width = Math.ceil(se.x) + padPx - left, height = Math.ceil(se.y) + padPx - top;
+    if ((width <= maxSidePx && height <= maxSidePx) || z <= 1) return { zoom: z, originPx: { x: left, y: top }, width, height };
+    z -= 1;
+  }
+}
+
+/* Heights read for such a window, as a raw grid sampleHeightmap can take. */
+export function rawFromWindow(grid, heights) {
+  const mpp = mercMetresPerPixel(grid.zoom);
+  return {
+    sourceId: "window", crs: "EPSG:3857", width: grid.width, height: grid.height, heights,
+    transform: { originX: grid.originPx.x * mpp - MERC_HALF, originY: MERC_HALF - grid.originPx.y * mpp, pixelSize: mpp }
+  };
+}
+
 /* sampleHeightmap(frame, raw) - raw is a RawTerrainData in EPSG:3857 (the baked asset through
    gd-terrain-window's assetAsRaw). Row 0 is the frame's NORTH edge, column 0 its west edge,
    one sample a metre. Projected positions are computed on a lattice every `lattice` samples
    and interpolated between (the normaliser's trick: over 16 m the projection is linear to
-   well under a centimetre). Samples outside the asset are nearest-filled and counted. */
-export function sampleHeightmap(frame, raw, { lattice = 16 } = {}) {
+   well under a centimetre). A sample the asset does not hold is taken from `fallback` (the
+   same ground read for the whole frame, when the job could get it) and counted in
+   fallbackFraction; what neither holds is nearest-filled and counted in filledFraction. */
+export function sampleHeightmap(frame, raw, { lattice = 16, fallback = null } = {}) {
   if (!raw || raw.crs !== "EPSG:3857") throw new Error("sampleHeightmap reads an EPSG:3857 raw grid");
+  if (fallback && fallback.crs !== "EPSG:3857") throw new Error("the fallback grid must be EPSG:3857 too");
   const S = frame.samples;
   const heights = new Float32Array(S * S);
   const L = Math.ceil((S - 1) / lattice) + 1;
@@ -138,8 +173,8 @@ export function sampleHeightmap(frame, raw, { lattice = 16 } = {}) {
       mx[b * L + a] = m.x; my[b * L + a] = m.y;
     }
   }
-  const t = raw.transform;
-  let missing = 0;
+  const t = raw.transform, f = fallback && fallback.transform;
+  let missing = 0, fromFallback = 0;
   for (let j = 0; j < S; j++) {
     const gy = j / lattice, b = Math.min(L - 2, Math.floor(gy)), v = gy - b;
     for (let i = 0; i < S; i++) {
@@ -147,14 +182,20 @@ export function sampleHeightmap(frame, raw, { lattice = 16 } = {}) {
       const k00 = b * L + a, k10 = k00 + 1, k01 = k00 + L, k11 = k01 + 1;
       const X = (mx[k00] * (1 - u) + mx[k10] * u) * (1 - v) + (mx[k01] * (1 - u) + mx[k11] * u) * v;
       const Y = (my[k00] * (1 - u) + my[k10] * u) * (1 - v) + (my[k01] * (1 - u) + my[k11] * u) * v;
-      const h = sampleRaw(raw, (X - t.originX) / t.pixelSize - 0.5, (t.originY - Y) / t.pixelSize - 0.5);
+      let h = sampleRaw(raw, (X - t.originX) / t.pixelSize - 0.5, (t.originY - Y) / t.pixelSize - 0.5);
+      if (!Number.isFinite(h)) {
+        missing++;
+        if (f) {
+          h = sampleRaw(fallback, (X - f.originX) / f.pixelSize - 0.5, (f.originY - Y) / f.pixelSize - 0.5);
+          if (Number.isFinite(h)) fromFallback++;
+        }
+      }
       heights[j * S + i] = h;
-      if (!Number.isFinite(h)) missing++;
     }
   }
   let filledFraction = 0;
-  if (missing) filledFraction = fillGaps(heights, new Uint8Array(S * S), S, S).filledFraction;
-  return { heights, filledFraction, outsideAssetFraction: missing / (S * S) };
+  if (missing > fromFallback) filledFraction = fillGaps(heights, new Uint8Array(S * S), S, S).filledFraction;
+  return { heights, filledFraction, outsideAssetFraction: missing / (S * S), fallbackFraction: fromFallback / (S * S) };
 }
 
 export function heightStats(heights) {
@@ -385,7 +426,8 @@ export function opcdManifest({ courseId, courseName, frame, encoding, stats, sam
       unityImportRaw: { depth: "Bit 16", byteOrder: "Windows", flipVertically: true, resolution: frame.samples, width: frame.sideM, length: frame.sideM, height: encoding.heightRangeM },
       baseElevationM: encoding.baseElevationM, heightRangeM: encoding.heightRangeM, stepM: round(encoding.stepM, 5),
       groundMinM: round(stats.min, 2), groundMaxM: round(stats.max, 2),
-      outsideAssetFraction: round(sampled.outsideAssetFraction, 4), filledFraction: round(sampled.filledFraction, 4),
+      outsideAssetFraction: round(sampled.outsideAssetFraction, 4), fallbackFraction: round(sampled.fallbackFraction || 0, 4), filledFraction: round(sampled.filledFraction, 4),
+      groundBeyondAsset: sampled.beyondAsset || (sampled.outsideAssetFraction > 0 ? "nearest-filled" : "none needed"),
       geotiff: "heightmap.tif (float32 metres, pixel centres on the metre grid, " + frame.crs + ")"
     },
     terrain: terrain ? {
@@ -446,7 +488,8 @@ export function opcdReadme(m) {
   }
   lines.push("- Surfaces and holes: the course's published Clarity geometry (OpenStreetMap contributors, ODbL, plus Studio edits)");
   lines.push("- Tree heights: Meta & World Resources Institute global canopy height, CC BY 4.0, where used");
-  if (h.outsideAssetFraction > 0) lines.push("- " + round(h.outsideAssetFraction * 100, 1) + "% of the frame lies outside Clarity's terrain asset and was nearest-filled; treat those edges as approximate.");
+  if (h.fallbackFraction > 0) lines.push("- " + round(h.fallbackFraction * 100, 1) + "% of the frame lies outside Clarity's terrain asset and was read for this export from " + h.groundBeyondAsset + ".");
+  if (h.filledFraction > 0) lines.push("- " + round(h.filledFraction * 100, 1) + "% of the frame had no ground from any source and was nearest-filled; treat those edges as approximate.");
   (m.warnings || []).forEach(w => lines.push("- WARNING: " + w));
   return lines.join("\n") + "\n";
 }
