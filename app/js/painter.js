@@ -2315,7 +2315,7 @@
         metresPerPixel: metresX / picture.width,
         imageWidth: picture.width,
         imageHeight: picture.height
-      });
+      }, packageSingleTrees(pkg));
       var shapes = lib.paint(picture.getContext("2d"), {
         width: picture.width,
         height: picture.height,
@@ -2333,6 +2333,17 @@
     } catch (e) {
       return null;
     }
+  }
+
+  /* The course's real tree markers from the package (course-package.mjs singleTrees,
+     [lat, lng, r] each, r the crown radius in metres): each stands where it is at its own size,
+     one tree per marker. A package from before they were carried has none, and the woods are
+     filled as they always were. */
+  function packageSingleTrees(pkg) {
+    var list = pkg && Array.isArray(pkg.singleTrees) ? pkg.singleTrees : [];
+    return list.filter(function (t) {
+      return Array.isArray(t) && Number.isFinite(Number(t[0])) && Number.isFinite(Number(t[1])) && Number(t[2]) > 0;
+    }).map(function (t) { return { lat: Number(t[0]), lng: Number(t[1]), r: Number(t[2]) }; });
   }
 
   /* The player's Terrain relief setting. 0 means no mesh at all. */

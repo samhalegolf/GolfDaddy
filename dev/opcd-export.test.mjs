@@ -22,7 +22,7 @@ import { fromLngLat, toLngLat, utmCrsFor, supportedCrs } from "../functions/lib/
 import { lngLatToWorldPx, mercMetresPerPixel } from "../functions/lib/terrain/gd-terrain-adapters.mjs";
 import { assetAsRaw } from "../functions/lib/terrain/gd-terrain-window.mjs";
 import { terrainRgbPngFromHeights, decodeElevation } from "../functions/lib/gd-relief-core.mjs";
-import { packTrees } from "../functions/lib/gd-course-trees-core.mjs";
+import { packTrees } from "../functions/lib/gd-course-trees-store.mjs";
 import {
   OPCD_EXPORT_KIND, planOpcdFrame, toLocal, insideFrame, sampleHeightmap, heightStats, rawEncoding, encodeRaw16,
   heightmapGeoTiff, groundAt, surfacesGeoJson, treesCsv, holesCsv, parByHole, TREE_HEIGHT_PER_CROWN_RADIUS,

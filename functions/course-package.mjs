@@ -33,6 +33,7 @@ import { courseCentre } from "./lib/gd-course-centre.mjs";
 import { enqueueMapperJob, mapperActorKey, promoteNearbyJob, NEARBY_AUTOMAP_KIND } from "./course-mapper-jobs.mjs";
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
+import { courseSingleTrees, packSingleTrees } from "./lib/gd-course-single-trees.mjs";
 import { courseSlug } from "./lib/gd-course-slug.mjs";
 const MAPS_TABLE = "course_maps";
 const VISUALS_TABLE = "course_visuals";
@@ -216,7 +217,18 @@ export default async function coursePackage(req) {
      mapping budget. Forging one buys nothing an attacker could not get by clearing storage. */
   const guestId = url.searchParams.get("guestId") || url.searchParams.get("guest_id") || "";
   const result = await buildCoursePackageWithTrigger(courseId, { center, courseName, userId, guestId, origin: url.origin });
-  return json(200, result);
+  return json(200, await withSingleTrees(result));
+}
+
+/* A playable package carries the course's real trees (lib/gd-course-single-trees.mjs) as
+   singleTrees, [lat, lng, r] each, for the illustrated map: one tree per marker at its own size.
+   Added here rather than in buildCoursePackage so only the app's request pays the reads - not
+   the notify sweeper, and not a poll while the course is still processing. The course the
+   package answers for, which a duplicate redirect may have changed. */
+async function withSingleTrees(pkg) {
+  if (!pkg || (pkg.status !== "full-map-ready" && pkg.status !== "lite-geo-ready") || !pkg.courseId) return pkg;
+  const trees = packSingleTrees(await courseSingleTrees(supabaseFetch, pkg.courseId).catch(() => []));
+  return trees.length ? Object.assign({}, pkg, { singleTrees: trees }) : pkg;
 }
 
 export const config = {

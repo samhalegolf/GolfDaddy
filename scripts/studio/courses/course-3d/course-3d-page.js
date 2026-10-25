@@ -1125,42 +1125,13 @@
       }, singleTrees);
     }
 
-    /* The course's real tree markers, {lat, lng, r} with r the crown radius in metres, as the
-       watch bake reads them (course-watch-maps.mjs courseSingleTrees): the single trees placed
-       in the Mapping Overlay, and the tree finder's trees live at its layer's level. Both are
-       admin reads; either failing just leaves the woods to be filled as before. */
-    var TREE_DEFAULT_LEVEL = 2;   // gd-course-trees-core.mjs TREE_DEFAULT_LEVEL
-    var markersPromise = null, markersKey = "";
-    function adminGet(url) {
-      var token = typeof window.gdAdminCourseDbAccessToken === "function" ? window.gdAdminCourseDbAccessToken()
-        : Promise.resolve((function () {
-          try {
-            var auth = window.ClaritySupabaseAuth, s = auth && typeof auth.session === "function" ? auth.session() : null;
-            return String(s && (s.access_token || s.accessToken) || "");
-          } catch (e) { return ""; }
-        })());
-      return token.then(function (t) {
-        return fetch(url, { headers: { Accept: "application/json", Authorization: "Bearer " + t }, cache: "no-store" });
-      }).then(function (res) { return res.ok ? res.json() : null; });
-    }
-    function treeMarkers() {
-      if (markersKey === session.courseKey && markersPromise) return markersPromise;
-      markersKey = session.courseKey;
-      var id = encodeURIComponent(session.courseKey);
-      var placed = adminGet("/api/course-map-overlay?courseId=" + id).then(function (data) {
-        var core = window.GDWatchMapCore;
-        return core && core.singleTreesFromOverlay ? core.singleTreesFromOverlay(data && data.overlay && data.overlay.features) : [];
-      }).catch(function () { return []; });
-      var found = adminGet("/api/course-trees?courseId=" + id).then(function (data) {
-        var row = data && data.row;
-        if (!row || !Array.isArray(row.trees)) return [];
-        var level = Number.isFinite(Number(row.level)) ? Number(row.level) : TREE_DEFAULT_LEVEL;
-        return row.trees.filter(function (a) {
-          return Array.isArray(a) && a.length >= 4 && Number.isFinite(Number(a[0])) && Number.isFinite(Number(a[1])) && Number(a[2]) > 0 && (Number(a[3]) | 0) <= level;
-        }).map(function (a) { return { lat: Number(a[0]), lng: Number(a[1]), r: Number(a[2]) }; });
-      }).catch(function () { return []; });
-      markersPromise = Promise.all([placed, found]).then(function (res) { return res[0].concat(res[1]); });
-      return markersPromise;
+    /* The course's real tree markers from the package (course-package.mjs singleTrees, [lat,
+       lng, r] each, r the crown radius in metres) - the same list GPS Play stands. */
+    function packageSingleTrees(pkg) {
+      var list = pkg && Array.isArray(pkg.singleTrees) ? pkg.singleTrees : [];
+      return list.filter(function (t) {
+        return Array.isArray(t) && Number.isFinite(Number(t[0])) && Number.isFinite(Number(t[1])) && Number(t[2]) > 0;
+      }).map(function (t) { return { lat: Number(t[0]), lng: Number(t[1]), r: Number(t[2]) }; });
     }
 
     /* Canvas-pixel trees as the renderer takes them: frame uv, crown radius in metres, species. */
@@ -1212,8 +1183,8 @@
       var space = frameSpace(entry, ILLUSTRATED_PX);
       if (!space) return Promise.reject(new Error("this frame has no projection to paint in"));
       var photoImage = loadImage(assetUrl(entry.path)).catch(function () { return null; });
-      return Promise.all([packageSurfaces(), treeMarkers(), photoImage]).then(function (res) {
-        var course = res[0], markers = res[1];
+      return Promise.all([packageSurfaces(), photoImage]).then(function (res) {
+        var course = res[0];
         var surfaces = course.surfaces;
         if (!core.hasAnySurface(surfaces) || !lib.holeIsMapped(surfaces, entry.holeNumber)) {
           throw new Error("this hole has no green or fairway on the map, so Play shows the photo");
@@ -1221,7 +1192,7 @@
         var picture = document.createElement("canvas");
         picture.width = space.width;
         picture.height = space.height;
-        var trees = placeTrees(space, surfaces, metresX, markers);
+        var trees = placeTrees(space, surfaces, metresX, packageSingleTrees(course.pkg));
         var drawn = lib.paint(picture.getContext("2d"), {
           width: space.width,
           height: space.height,
@@ -1233,7 +1204,7 @@
           trees: trees
         });
         if (!drawn) throw new Error("nothing mapped falls inside this frame");
-        var standing = withSpecies(trees, space, metresX, res[2], surfaces, entry);
+        var standing = withSpecies(trees, space, metresX, res[1], surfaces, entry);
         return { picture: picture, illustrated: true, trees: treesInMetres(standing, space, metresX) };
       });
     }
@@ -1247,11 +1218,10 @@
       var imagePromise = loadImage(assetUrl(entry.path));
       var treesPromise = space ? Promise.all([
         packageSurfaces().catch(function () { return { surfaces: {} }; }),
-        treeMarkers(),
         imagePromise.catch(function () { return null; })
       ]).then(function (res) {
-        var surfaces = res[0].surfaces, trees = placeTrees(space, surfaces, metresX, res[1]);
-        return treesInMetres(withSpecies(trees, space, metresX, res[2], surfaces, entry), space, metresX);
+        var surfaces = res[0].surfaces, trees = placeTrees(space, surfaces, metresX, packageSingleTrees(res[0].pkg));
+        return treesInMetres(withSpecies(trees, space, metresX, res[1], surfaces, entry), space, metresX);
       }).catch(function () { return []; }) : Promise.resolve([]);
       var picturePromise = imagePromise.then(function (img) {
         var max = Math.min(MAX_PICTURE_PX, scene.maxTexture || MAX_PICTURE_PX);

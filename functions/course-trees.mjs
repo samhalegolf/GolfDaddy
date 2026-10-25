@@ -1,4 +1,4 @@
-/* A course's trees (course_trees, see lib/gd-course-trees-core.mjs) for Studio. Admin only.
+/* A course's trees (course_trees, see lib/gd-course-trees-store.mjs) for Studio. Admin only.
  *
  * GET  ?courseId=          -> {courseId, row: {trees, level, status, imagery, run, publishedAt,
  *                             publishedBy} | null, job: the latest tree run {status, error,
@@ -13,7 +13,7 @@
  * Starting a run is the mapper queue's: POST /api/course-mapper-jobs {courseId, kind:
  * "find_trees"}. */
 
-import { packTrees, unpackTrees, TREES_TABLE } from "./lib/gd-course-trees-core.mjs";
+import { packTrees, unpackTrees, TREES_TABLE } from "./lib/gd-course-trees-store.mjs";
 import { TREE_KIND } from "./lib/gd-tree-queue.mjs";
 import { wakeGarminBuild } from "./lib/gd-garmin-build-wake.mjs";
 import { hasSupabase, slug, verifiedAdminEmail, supabaseFetch, json } from "./lib/gd-map-overlay-store.mjs";

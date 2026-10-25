@@ -24,7 +24,7 @@
 
 import { courseBoundsFor } from "./gd-visual-plan-core.mjs";
 import { assetAsRaw } from "./terrain/gd-terrain-window.mjs";
-import { liveTrees } from "./gd-course-trees-core.mjs";
+import { liveTrees, TREES_TABLE } from "./gd-course-trees-store.mjs";
 import watchMapCore from "../../scripts/gd-watch-map-core.js";
 import {
   planOpcdFrame, sampleHeightmap, heightStats, rawEncoding, encodeRaw16, heightmapGeoTiff, previewGrey,
@@ -32,7 +32,6 @@ import {
 } from "./gd-opcd-export-core.mjs";
 
 export const OPCD_ROOT = "opcd";
-const TREES_TABLE = "course_trees";
 const OVERLAYS_TABLE = "course_map_overlays";
 const MERC_R = 6378137;
 
