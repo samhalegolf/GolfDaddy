@@ -26,7 +26,7 @@ import { packTrees } from "../functions/lib/gd-course-trees-store.mjs";
 import {
   OPCD_EXPORT_KIND, planOpcdFrame, toLocal, insideFrame, sampleHeightmap, heightStats, rawEncoding, encodeRaw16,
   heightmapGeoTiff, groundAt, surfacesGeoJson, treesCsv, holesCsv, parByHole, TREE_HEIGHT_PER_CROWN_RADIUS,
-  assetCovers, windowGridFor, rawFromWindow
+  assetCovers, windowGridFor, rawFromWindow, opcdSvg, OPCD_CLASSES, TEE_PAD_M
 } from "../functions/lib/gd-opcd-export-core.mjs";
 import { gridPixelLatLng } from "../functions/lib/terrain/gd-terrain-normalise.mjs";
 import { runOpcdExport, canopySampler, loadCourseTrees } from "../functions/lib/gd-opcd-export-job.mjs";
@@ -333,7 +333,7 @@ const sampledWide = sampleHeightmap(wide, assetAsRaw(wideAsset.manifest, wideAss
   assert.equal(result.version, "20261025-030405Z");
   assert.equal(result.root, "test-course/opcd/20261025-030405Z");
   const names = result.files.map(f => f.name).sort();
-  assert.deepEqual(names, ["README.md", "heightmap-preview.png", "heightmap.raw", "heightmap.tif", "holes.csv", "manifest.json", "surfaces.geojson", "trees.csv"]);
+  assert.deepEqual(names, ["README.md", "heightmap-preview.png", "heightmap.raw", "heightmap.tif", "holes.csv", "manifest.json", "surfaces-opcd.svg", "surfaces.geojson", "trees.csv"]);
   assert.deepEqual(beats, ["terrain", "heightmap", "trees", "surfaces", "writing"]);
   const S = result.frame.samples;
   assert.equal(S, 2049, "the real frame for this course");
@@ -355,6 +355,9 @@ const sampledWide = sampleHeightmap(wide, assetAsRaw(wideAsset.manifest, wideAss
   assert.equal(uploads.get(result.root + "/surfaces.geojson").contentType, "application/geo+json");
   const preview = await sharp(uploads.get(result.root + "/heightmap-preview.png").buffer).metadata();
   assert.equal(preview.width, S);
+  assert.equal(uploads.get(result.root + "/surfaces-opcd.svg").contentType, "image/svg+xml");
+  assert.ok(manifest.opcdSvg && manifest.opcdSvg.layers["golf.green"] && manifest.opcdSvg.teePadsDrawn === 2, JSON.stringify(manifest.opcdSvg));
+  assert.ok(readme.includes("surfaces-opcd.svg") && readme.includes("1 mm = 1 m"));
   /* The asset's decoded heights carry terrain-RGB's 0.1 m quantisation, so the exported
      ground sits within that of the plane. */
   const tif = uploads.get(result.root + "/heightmap.tif").buffer;
@@ -411,6 +414,60 @@ const sampledWide = sampleHeightmap(wide, assetAsRaw(wideAsset.manifest, wideAss
   const ll = toLngLat(result.frame.crs, result.frame.originEasting, result.frame.originNorthing + result.frame.sideM), m = mercator(ll.lat, ll.lng);
   near(corner, plane(m.x, m.y), 0.15, "the north-west corner (outside the asset) carries real ground");
   console.log("12. asset short of the frame: window read once, ring", (result.heightmap.fallbackFraction * 100).toFixed(1) + "% from the provider, nothing filled");
+}
+
+// ---- 13. the OPCD SVG: document, palette, layers in order, union of same-class shapes, clip, y-flip
+{
+  const out = opcdSvg(pkg, wide, { courseName: "Test Course", generatedAt: "2026-10-25T00:00:00Z" });
+  const svg = out.svg;
+  assert.ok(svg.startsWith('<?xml version="1.0" encoding="UTF-8"?>'));
+  assert.ok(svg.includes('width="' + wide.sideM + 'mm" height="' + wide.sideM + 'mm" viewBox="0 0 ' + wide.sideM + " " + wide.sideM + '"'), "1 mm = 1 m over the frame");
+  assert.ok(svg.includes('xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"') && svg.includes('inkscape:document-units="mm"'));
+  const labels = [...svg.matchAll(/inkscape:label="([^"]+)"/g)].map(m => m[1]);
+  assert.deepEqual(labels, ["leisure.golf_course", "golf.fairway", "golf.tee", "natural.wood", "golf.green", "golf.bunker", "golf.water_hazard"], labels.join(","));
+  for (const def of Object.values(OPCD_CLASSES)) if (labels.includes(def.cls)) assert.ok(svg.includes('fill="' + def.fill + '"'), def.cls + " colour");
+  assert.ok(/<rect id="rough" x="0" y="0" width="1024" height="1024" fill="#278438"/.test(svg), "rough background under everything");
+  const layer = cls => svg.split('inkscape:label="' + cls + '"')[1].split("</g>")[0];
+  assert.equal((layer("golf.bunker").match(/<path /g) || []).length, 1, "the bunker stored on two holes is one shape");
+  assert.equal((layer("golf.tee").match(/<path /g) || []).length, 2, "a pad per tee point");
+  assert.equal(out.teePadsDrawn, 2);
+  assert.ok(out.warnings.some(w => /tee pad/.test(w)));
+  /* y grows southward: green 1 lies north of tee 1, so its path sits higher on the page. */
+  const ys = d => [...d.matchAll(/[\d.]+,([\d.]+)/g)].map(m => Number(m[1]));
+  const greenY = Math.min(...ys(layer("golf.green"))), teeY = Math.max(...ys(layer("golf.tee")));
+  assert.ok(greenY < teeY, "north is up: green y " + greenY + " < tee y " + teeY);
+  const allNums = [...svg.matchAll(/ d="([^"]+)"/g)].flatMap(m => m[1].match(/[\d.]+/g).map(Number));
+  assert.ok(allNums.every(v => v >= 0 && v <= wide.sideM), "every coordinate inside the square");
+  /* tee pad: the right size, long side along the line of play. Tee 1 sits a metre inside the
+     frame's south edge and is clipped (as it should be); tee 2's pad is whole. */
+  const padDs = [...layer("golf.tee").matchAll(/ d="([^"]+)"/g)].map(m => m[1]);
+  const pairsOf = d => [...d.matchAll(/([\d.]+),([\d.]+)/g)].map(m => [Number(m[1]), Number(m[2])]);
+  const padD = padDs.find(d => pairsOf(d).length === 5 && pairsOf(d).every(([x, y]) => x > 0 && y > 0 && x < wide.sideM && y < wide.sideM));
+  assert.ok(padD, "one whole rectangular pad away from the edge: " + padDs.join(" | "));
+  const pts = pairsOf(padD);
+  const sides = [0, 1, 2].map(i => Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1])).sort((a, b) => a - b);
+  near(sides[0], TEE_PAD_M.width, 0.05); near(sides[2], TEE_PAD_M.length, 0.05);
+  /* overlapping same-class shapes merge; a shape over the edge is clipped; a sliver is dropped */
+  const q = (c, d) => quad(c, d);
+  const edgeLL = toLngLat(wide.crs, wide.originE + 5, wide.originN + 500);
+  const tiny = { courseId: "t", objects: {
+    a: { type: "bunker", holeNumber: 1, shape: q({ lat: -45.021, lng: 168.733 }, 0.0002) },
+    b: { type: "bunker", holeNumber: 1, shape: q({ lat: -45.0208, lng: 168.7332 }, 0.0002) },
+    c: { type: "bunker", holeNumber: 2, shape: q({ lat: -45.018, lng: 168.738 }, 0.0001) },
+    e: { type: "water", holeNumber: 1, shape: q({ lat: edgeLL.lat, lng: edgeLL.lng }, 0.0004) },
+    s: { type: "water", holeNumber: 1, shape: q({ lat: -45.02, lng: 168.735 }, 0.000002) }
+  } };
+  const o2 = opcdSvg(tiny, wide);
+  assert.equal(o2.layers["golf.bunker"].shapes, 2, "a+b overlap into one shape, c stays apart");
+  assert.equal(o2.layers["golf.water_hazard"].shapes, 1, "the sliver is dropped");
+  assert.equal(o2.layers["golf.water_hazard"].dropped, 1);
+  const waterNums = o2.svg.split('inkscape:label="golf.water_hazard"')[1].match(/[\d.]+,[\d.]+/g).map(p => Number(p.split(",")[0]));
+  assert.ok(Math.min(...waterNums) >= 0, "clipped at the west edge, not negative");
+  /* and it rasterises */
+  const png = await sharp(Buffer.from(svg)).resize(256).png().toBuffer();
+  const st = await sharp(png).stats();
+  assert.ok(st.channels[1].mean > 60, "the page is mostly green, not blank");
+  console.log("13. OPCD SVG:", labels.length, "layers", JSON.stringify(out.layers));
 }
 
 console.log("opcd-export: all checks passed");

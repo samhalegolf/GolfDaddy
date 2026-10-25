@@ -15,6 +15,8 @@
      trees.csv          every tree the course holds (Studio-placed and finder-found): position,
                         local metres, ground height, crown radius, height
      holes.csv          tee and green per hole with par and length where known
+     surfaces-opcd.svg  the surfaces as the Inkscape SVG OPCD's mesher (Clender) takes: one
+                        layer per OPCD class in its palette, 1 mm = 1 m over the frame
      manifest.json      the frame, the encoding, provenance and attributions
      README.md          how to import it
 
@@ -35,6 +37,7 @@ import { fromLngLat, toLngLat, utmCrsFor } from "./terrain/gd-terrain-crs.mjs";
 import { sampleRaw, fillGaps } from "./terrain/gd-terrain-normalise.mjs";
 import { lngLatToWorldPx, mercMetresPerPixel } from "./terrain/gd-terrain-adapters.mjs";
 import { packageHoleData } from "./gd-visual-plan-core.mjs";
+import polygonClipping from "polygon-clipping";
 
 /* The course_visual_jobs kind. Mirrored as a literal in functions/course-visual-jobs.mjs
    (which must not load this module's imports on a player poll); dev/opcd-export.test.mjs
@@ -409,9 +412,168 @@ export function holesCsv(pkg, frame, heights, { par } = {}) {
   return { csv: lines.join("\n") + "\n", count: lines.length - 1 };
 }
 
+/* ---------- the OPCD SVG ---------------------------------------------------------------- */
+
+/* OPCD's V4 palette as Clender reads it - the golf entries of osm2svg4opcd's styles.json,
+   which is what the community pipelines that pass Clender write. Layer label = the class
+   string; fill = the colour; `order` = stacking, low first. A fill Clender does not know is
+   dropped on its side, so nothing here invents a colour. natural.scrub shares the wood
+   colour on purpose: Clender turns both into OPCD's "Deep" rough. */
+export const OPCD_CLASSES = {
+  rough:   { cls: "leisure.golf_course", fill: "#278438", order: 0 },
+  scrub:   { cls: "natural.scrub",       fill: "#164B20", order: 55 },
+  fairway: { cls: "golf.fairway",        fill: "#43E561", order: 60 },
+  tee:     { cls: "golf.tee",            fill: "#A0E5B8", order: 70 },
+  wood:    { cls: "natural.wood",        fill: "#164B20", order: 80 },
+  green:   { cls: "golf.green",          fill: "#BCE5A4", order: 90 },
+  bunker:  { cls: "golf.bunker",         fill: "#E5E5AA", order: 100 },
+  water:   { cls: "golf.water_hazard",   fill: "#0000C0", order: 110 }
+};
+const OBJECT_CLASS = { fairway_area: "fairway", bunker: "bunker", water: "water", trees: "wood", hazard: "scrub", waste: "scrub" };
+/* Clarity stores a tee as a point. OPCD wants a pad to mesh, so one is drawn: this big,
+   its long side along the line of play. A real tee shape in the overlay (tee_area) wins. */
+export const TEE_PAD_M = { width: 8, length: 14 };
+/* A green with a centre and no outline (never from the resolver, but allowed by the data). */
+export const GREEN_DISC_RADIUS_M = 12;
+export const SVG_MIN_AREA_M2 = 1;
+
+function svgPoint(frame, lat, lng) {
+  const [e, n] = fromLngLat(frame.crs, lat, lng);
+  return [round(e - frame.originE, 2), round(frame.originN + frame.sideM - n, 2)];
+}
+function svgRing(frame, r) {
+  const pts = r.map(p => svgPoint(frame, p.lat, p.lng));
+  const a = pts[0], z = pts[pts.length - 1];
+  if (a[0] !== z[0] || a[1] !== z[1]) pts.push([a[0], a[1]]);
+  return pts;
+}
+function ringArea(ring) {
+  let a = 0;
+  for (let i = 0; i < ring.length - 1; i++) a += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
+  return Math.abs(a) / 2;
+}
+function discRing(cx, cy, r, n = 16) {
+  const pts = [];
+  for (let i = 0; i < n; i++) pts.push([round(cx + r * Math.cos(2 * Math.PI * i / n), 2), round(cy + r * Math.sin(2 * Math.PI * i / n), 2)]);
+  pts.push([pts[0][0], pts[0][1]]);
+  return pts;
+}
+function padRing(c, towards, pad) {
+  let dx = towards ? towards[0] - c[0] : 0, dy = towards ? towards[1] - c[1] : 0;
+  const len = Math.hypot(dx, dy);
+  if (!(len > 1)) return discRing(c[0], c[1], Math.max(pad.width, pad.length) / 2, 12);
+  dx /= len; dy /= len;
+  const px = -dy, py = dx, L = pad.length / 2, W = pad.width / 2;
+  const corner = (sl, sw) => [round(c[0] + dx * sl * L + px * sw * W, 2), round(c[1] + dy * sl * L + py * sw * W, 2)];
+  const pts = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
+  pts.push([pts[0][0], pts[0][1]]);
+  return pts;
+}
+function pathD(poly) {
+  return poly.map(ring => "M" + ring.map(p => p[0] + "," + p[1]).join(" L") + " Z").join(" ");
+}
+function xmlEscape(v) { return String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
+
+/* opcdSvg(pkg, frame, {courseName, generatedAt}) -> { svg, layers: {cls: {shapes, areaM2}},
+   teePadsDrawn, greenDiscsDrawn, warnings }
+   Clender's rules, as the pipelines that pass it apply them: shapes closed; no two shapes of
+   one colour overlapping or touching (same-class shapes are unioned, so a bunker stored on
+   two holes or two fairways that share an edge become one shape); everything clipped to the
+   square; slivers under SVG_MIN_AREA_M2 dropped; holes kept, filled even-odd. Different
+   classes may overlap (a bunker sits on its fairway) - OPCD blends surfaces, it does not
+   expect them cut out of one another. */
+export function opcdSvg(pkg, frame, { courseName, generatedAt } = {}) {
+  const S = frame.sideM;
+  const square = [[[0, 0], [S, 0], [S, S], [0, S], [0, 0]]];
+  const byClass = {};
+  const add = (key, ring) => { (byClass[key] = byClass[key] || []).push([ring]); };
+  const warnings = [];
+  const seen = new Set();
+  let teePadsDrawn = 0, greenDiscsDrawn = 0;
+  const teeAreas = new Set();
+  Object.values(pkg && pkg.objects || {}).forEach(o => {
+    if (!o) return;
+    if (OBJECT_CLASS[o.type]) {
+      const r = ring(o.shape);
+      if (!r) return;
+      const key = o.type + ":" + ringKey(r);
+      if (seen.has(key)) return;
+      seen.add(key);
+      add(OBJECT_CLASS[o.type], svgRing(frame, r));
+    } else if (o.type === "green") {
+      const hole = holeOf(o);
+      const r = ring(o.greenShape || o.shape);
+      const c = point(o.greenCenter) || point(o.position);
+      /* One green per hole (the first stored, as packageHoleData reads it); an unassigned
+         green is kept once per outline or centre. */
+      const key = "green:" + (hole ? "h" + hole : r ? ringKey(r) : c ? c.lat.toFixed(6) + "," + c.lng.toFixed(6) : "");
+      if (!key.endsWith(":") && seen.has(key)) return;
+      seen.add(key);
+      if (r) add("green", svgRing(frame, r));
+      else if (c) { const q = svgPoint(frame, c.lat, c.lng); add("green", discRing(q[0], q[1], GREEN_DISC_RADIUS_M)); greenDiscsDrawn++; }
+    } else if (o.type === "tee") {
+      const r = ring(o.shape), hole = holeOf(o);
+      if (r) { add("tee", svgRing(frame, r)); if (hole) teeAreas.add(hole); }
+    }
+  });
+  const holeData = packageHoleData(pkg);
+  Object.keys(holeData).map(Number).sort((a, b) => a - b).forEach(h => {
+    const d = holeData[h];
+    if (teeAreas.has(h) || !d.tee) return;
+    const c = svgPoint(frame, d.tee.position.lat, d.tee.position.lng);
+    const next = d.route[1] ? svgPoint(frame, d.route[1].lat, d.route[1].lng) : null;
+    add("tee", padRing(c, next, TEE_PAD_M));
+    teePadsDrawn++;
+  });
+  if (teePadsDrawn) warnings.push(teePadsDrawn + " tee pad(s) are drawn from tee points (" + TEE_PAD_M.width + "x" + TEE_PAD_M.length + " m along the line of play) - size them to the real tee in Inkscape");
+  if (greenDiscsDrawn) warnings.push(greenDiscsDrawn + " green(s) had no outline and are drawn as " + GREEN_DISC_RADIUS_M + " m discs");
+
+  const layers = {};
+  const order = Object.keys(OPCD_CLASSES).filter(k => k !== "rough").sort((a, b) => OPCD_CLASSES[a].order - OPCD_CLASSES[b].order);
+  const groups = [];
+  const rough = OPCD_CLASSES.rough;
+  groups.push('  <g inkscape:groupmode="layer" id="layer-' + rough.cls + '" inkscape:label="' + rough.cls + '">\n'
+    + '    <rect id="rough" x="0" y="0" width="' + S + '" height="' + S + '" fill="' + rough.fill + '" stroke="none"/>\n  </g>');
+  for (const key of order) {
+    const def = OPCD_CLASSES[key];
+    const polys = byClass[key] || [];
+    if (!polys.length) continue;
+    let merged;
+    try {
+      merged = polygonClipping.intersection(polygonClipping.union(...polys), square);
+    } catch (error) {
+      warnings.push(def.cls + ": union failed (" + String(error && error.message || error).slice(0, 80) + "); shapes written unmerged");
+      merged = polys;
+    }
+    const paths = [];
+    let area = 0, dropped = 0;
+    merged.forEach(poly => {
+      const outer = poly[0];
+      const a = ringArea(outer);
+      if (!(a >= SVG_MIN_AREA_M2) || outer.length < 4) { dropped++; return; }
+      area += a - poly.slice(1).reduce((n, r) => n + ringArea(r), 0);
+      const rounded = poly.map(r => r.map(pt => [round(pt[0], 2), round(pt[1], 2)]));
+      paths.push('    <path id="' + def.cls + "-" + (paths.length + 1) + '" d="' + pathD(rounded) + '" fill="' + def.fill + '" stroke="none"' + (poly.length > 1 ? ' fill-rule="evenodd"' : "") + "/>");
+    });
+    if (!paths.length) continue;
+    layers[def.cls] = { shapes: paths.length, areaM2: Math.round(area), dropped };
+    groups.push('  <g inkscape:groupmode="layer" id="layer-' + def.cls + '" inkscape:label="' + def.cls + '">\n' + paths.join("\n") + "\n  </g>");
+  }
+  const name = String(courseName || pkg && (pkg.courseName || pkg.courseId) || "course");
+  const svg = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    + "<!-- " + xmlEscape(name) + " for OPCD / Clender. 1 mm = 1 m. Top-left = (E " + frame.originE + ", N " + (frame.originN + S) + ") in " + frame.crs
+    + "; north up; the square is the terrain frame in manifest.json. Written by Clarity Studio" + (generatedAt ? " " + generatedAt : "") + ". -->\n"
+    + '<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"'
+    + ' version="1.1" width="' + S + 'mm" height="' + S + 'mm" viewBox="0 0 ' + S + " " + S + '">\n'
+    + "  <title>" + xmlEscape(name) + " - OPCD surfaces</title>\n"
+    + '  <sodipodi:namedview id="namedview" inkscape:document-units="mm" units="mm"/>\n'
+    + groups.join("\n") + "\n</svg>\n";
+  return { svg, layers, teePadsDrawn, greenDiscsDrawn, warnings };
+}
+
 /* ---------- manifest + readme ----------------------------------------------------------- */
 
-export function opcdManifest({ courseId, courseName, frame, encoding, stats, sampled, terrain, trees, holes, surfaces, files, generatedAt, warnings }) {
+export function opcdManifest({ courseId, courseName, frame, encoding, stats, sampled, terrain, trees, holes, surfaces, svg, files, generatedAt, warnings }) {
   return {
     formatVersion: OPCD_FORMAT_VERSION,
     courseId, courseName, generatedAt,
@@ -436,7 +598,9 @@ export function opcdManifest({ courseId, courseName, frame, encoding, stats, sam
       greenDetail: terrain.quality && terrain.quality.greenDetail, verticalDatum: terrain.verticalDatum,
       attribution: (terrain.sources || []).map(s => s.attribution && s.attribution.text).filter(Boolean)
     } : null,
-    trees, holes, surfaces, files, warnings: warnings || []
+    trees, holes, surfaces,
+    opcdSvg: svg ? { file: "surfaces-opcd.svg", scale: "1 mm = 1 m", layers: svg.layers, teePadsDrawn: svg.teePadsDrawn, greenDiscsDrawn: svg.greenDiscsDrawn, palette: Object.fromEntries(Object.values(OPCD_CLASSES).map(c => [c.cls, c.fill])) } : null,
+    files, warnings: warnings || []
   };
 }
 
@@ -478,6 +642,13 @@ export function opcdReadme(m) {
     "## holes.csv",
     "",
     m.holes.count + " holes: tee and green with frame metres and ground heights, par and route length where the scorecard is known.",
+    "",
+    "## surfaces-opcd.svg",
+    "",
+    "The surfaces as the Inkscape SVG OPCD's mesher (Clender) takes: " + f.sideM + " x " + f.sideM + " mm at 1 mm = 1 m, top-left = the frame's north-west corner, one layer per OPCD class in the V4 palette ("
+      + (m.opcdSvg ? Object.keys(m.opcdSvg.layers).join(", ") : "") + "). Same-class shapes are merged and clipped to the square; different classes may overlap, as OPCD blends them."
+      + (m.opcdSvg && m.opcdSvg.teePadsDrawn ? " " + m.opcdSvg.teePadsDrawn + " tee pads are drawn from Clarity's tee points (" + TEE_PAD_M.width + "x" + TEE_PAD_M.length + " m along the line of play): size them to the real tees in Inkscape before submitting." : "")
+      + " Rough, semi-rough, fringe and cart paths are not mapped in Clarity, so the background layer is plain rough. Use it with the OPCD web app's terrain square set to this frame's centre and side.",
     "",
     "## Provenance",
     ""
