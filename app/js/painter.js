@@ -2200,12 +2200,14 @@
     if (!frameW || !frameH) { noMesh(""); return; }
 
     /* Illustrated: the hole drawn from the course map replaces the photo as the mesh's
-       picture. Null (photo style, or nothing mapped here) keeps the photo. */
+       picture. Null (photo style, or nothing mapped here) keeps the photo. Hybrid keeps the
+       photo and lays the drawn map over it (scripts/gd-hybrid-look.js), as the Studio saved. */
     var drawn = illustratedPicture(meta, frameW, frameH);
+    var hybrid = drawn && mapStyle() === "hybrid" ? hybridSettings() : null;
     /* 3D mode draws the same frame through gd-course-3d.js: every tree a 3D model of its
        species, which it reads off the photo - so the photo is wanted under Illustrated too. */
     var threeD = view3d();
-    var loaded = 0, needed = drawn && !threeD ? 1 : 2, aerialImg = new Image(), elevationImg = new Image();
+    var loaded = 0, needed = drawn && !threeD && !hybrid ? 1 : 2, aerialImg = new Image(), elevationImg = new Image();
     aerialImg.crossOrigin = elevationImg.crossOrigin = "anonymous";
 
     function ready() {
@@ -2220,7 +2222,7 @@
         var metresY = Number(elevation.metresPerPixel) * Number(elevation.height) || 0;
         if (!metresX || !metresY) { noMesh(""); return; }
         var meshOptions = {
-          aerial: drawn ? drawn.picture : aerialImg,
+          aerial: drawn && !hybrid ? drawn.picture : aerialImg,
           trees: drawn ? drawn.trees : null,
           elevation: elevationImg,
           metres: [metresX, metresY],
@@ -2229,8 +2231,17 @@
           framePx: [frameW, frameH],
           seaLevel: elevation.elevationRange ? Number(elevation.elevationRange.min) : 0
         };
+        var look = null;
+        if (hybrid) {
+          look = window.GDHybridLook.look(hybrid);
+          meshOptions.overlay = drawn.picture;
+          meshOptions.mask = window.GDHybridLook.drawMask(drawn.space, hybrid);
+          meshOptions.lumaMean = window.GDHybridLook.meanLuma(aerialImg);
+          meshOptions.look = look;
+          meshOptions.treeModels = hybrid.trees;
+        }
         if (threeD) {
-          meshOptions.illustrated = !!drawn;
+          meshOptions.illustrated = !!drawn && !hybrid;
           meshOptions.trees = window.GDCourse3D.frameTrees({
             meta: meta, photo: aerialImg, surfaces: courseHazardSurfaces(), pkg: marshal && marshal.pkg ? marshal.pkg() : null
           });
@@ -2246,6 +2257,8 @@
         if (meta.liveTerrain) mesh.state.ambient = LIVE_MESH_AMBIENT;
         /* The drawn map is flat colour with no relief painted in, so the same holds for it. */
         if (drawn) mesh.state.ambient = ILLUSTRATED_MESH_AMBIENT;
+        /* A hybrid is lit between the two, by its blend, unless the Studio set the shading. */
+        if (hybrid) mesh.state.ambient = window.GDHybridLook.ambient(look, meta.liveTerrain ? LIVE_MESH_AMBIENT : 0.78, ILLUSTRATED_MESH_AMBIENT);
         /* The style asked for, not the one drawn: an unmapped hole on Illustrated is still
            answered, and must not be rebuilt on every settings change. */
         meshStyle = meshLook();
@@ -2285,13 +2298,26 @@
     }
     aerialImg.onload = elevationImg.onload = ready;
     aerialImg.onerror = elevationImg.onerror = failed;
-    if (!drawn || threeD) aerialImg.src = surfaceUrlValue;
+    if (!drawn || threeD || hybrid) aerialImg.src = surfaceUrlValue;
     elevationImg.src = elevationUrl;
   }
 
+  /* The map style for the hole in front of you. Auto, the default, is the hybrid on a hole
+     that meets the watch maps' criteria (GDHybridLook.holeQualifies: a published map, and a
+     green on this hole) and the photo everywhere else. */
   function mapStyle() {
     var s = settings();
-    return s && s.mapStyle ? s.mapStyle() : "photo";
+    var chosen = s && s.mapStyle ? s.mapStyle() : "photo";
+    if (chosen !== "auto") return chosen;
+    var lib = window.GDHybridLook;
+    var pkg = marshal && marshal.pkg ? marshal.pkg() : null;
+    return lib && lib.holeQualifies(pkg, loadedHole) ? "hybrid" : "photo";
+  }
+
+  /* The hybrid look saved in the Studio (play-view.js), or null without it. */
+  function hybridSettings() {
+    var view = app.playView;
+    return view && view.hybrid && window.GDHybridLook ? view.hybrid() : null;
   }
 
   /* The 3D mode switch (the rail's cube). Needs the scene library; without it the plain mesh
@@ -2301,13 +2327,16 @@
     return !!(s && s.view3d && s.view3d() && window.GDCourse3D && window.GDCourse3D.createFramed);
   }
 
-  /* What a mesh is built for: a change of either is a new mesh, not a re-light. */
+  /* What a mesh is built for: a change of any of these is a new mesh, not a re-light - the
+     style, 3D on or off, and for a hybrid the look itself. */
   function meshLook() {
-    return mapStyle() + (view3d() ? ":3d" : "");
+    var style = mapStyle();
+    return style + (view3d() ? ":3d" : "") + (style === "hybrid" ? ":" + JSON.stringify(hybridSettings()) : "");
   }
 
-  /* The illustrated picture for this frame and the trees that stand on it, {picture, trees},
-     or null for the photo.
+  /* The illustrated picture for this frame and the trees that stand on it, {picture, trees,
+     space} - space is what a hybrid's mask is drawn in (GDHybridLook.drawMask) - or null for
+     the photo.
 
      Painted in the frame's own pixel space - the same mercator origin and zoom the projector
      uses - so it lines up with the bubble, the dot and the pin exactly as the photo does. Capped
@@ -2316,7 +2345,8 @@
      tells the player less than the picture it would replace. */
   function illustratedPicture(meta, frameW, frameH) {
     var lib = window.GDIllustratedSurface;
-    if (mapStyle() !== "illustrated" || !lib || !meta.originPx) return null;
+    var style = mapStyle();
+    if ((style !== "illustrated" && style !== "hybrid") || !lib || !meta.originPx) return null;
     var zoom = Number(meta.captureZoom);
     var elevation = meta.elevation || {};
     var metresX = Number(elevation.metresPerPixel) * Number(elevation.width) || 0;
@@ -2338,7 +2368,7 @@
         imageWidth: picture.width,
         imageHeight: picture.height
       }, lib.singleTrees(pkg));
-      var shapes = lib.paint(picture.getContext("2d"), {
+      var space = {
         width: picture.width,
         height: picture.height,
         pxPerMetre: picture.width / metresX,
@@ -2347,11 +2377,10 @@
           return { x: (w.x - ox) * scale, y: (w.y - oy) * scale };
         },
         surfaces: surfaces,
-        holes: lib.packageHoles(pkg),
-        seed: Number(loadedHole) || 1,
-        trees: trees
-      });
-      return shapes ? { picture: picture, trees: trees } : null;
+        holes: lib.packageHoles(pkg)
+      };
+      var shapes = lib.paint(picture.getContext("2d"), Object.assign({ seed: Number(loadedHole) || 1, trees: trees }, space));
+      return shapes ? { picture: picture, trees: trees, space: space } : null;
     } catch (e) {
       return null;
     }
@@ -3133,6 +3162,8 @@
       if (marshal) repaint("VIEWPORT_CHANGED", function () { render(marshal.scene()); });
     });
 
+    /* A new look saved in the Studio, read after the hole was already up. */
+    if (app.playView) app.playView.onChange(function () { syncMeshRelief(); });
     if (app.gpsSettings) app.gpsSettings.onChange(function () {
       syncLiveTerrain("relief");
       syncMeshRelief();

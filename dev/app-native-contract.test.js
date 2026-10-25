@@ -152,7 +152,8 @@ assert.ok(durableKeys.length >= 8, "DURABLE_KEYS looks truncated: " + durableKey
    silently. Re-fetchable or cosmetic only. */
 const EXCLUDED = {
   "clarity:course-library:v1": "large, and re-pulls from the server per course",
-  "clarity:shot-card-boxes:v1": "cosmetic box positions"
+  "clarity:shot-card-boxes:v1": "cosmetic box positions",
+  "clarity:play-view:v1": "the Studio's hybrid look, re-read every launch; the defaults stand in until it is"
 };
 
 const declaredKeys = new Set();

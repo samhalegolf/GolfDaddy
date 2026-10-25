@@ -317,12 +317,14 @@
 
     {
       id: "course-3d", label: "3D Course Viewer", parent: "courses",
-      function: "View-only 3D model of a hole with a camera you move freely: orbit round it, walk on it, or jump to overhead, from-the-tee and round-the-green views. Built from exactly what GPS Play stands up - the published hole frame (or the Illustrated map painted from the course package by the app's own painter), draped over the published terrain-RGB elevation, with the same tree placement - but drawn through a real perspective camera instead of the app's fixed tilt. Every tree stands as a 3D model of its species (guessed from the photo under its crown, mapped water and latitude - nobody tags trees): realistic models for the nearest trees on the photo, low-poly for the rest and for Illustrated. Relief exaggeration is adjustable. A third style, Hybrid, blends the Illustrated map over the photo to find how far the two can be mixed: blend amount, method (mix, illustrated colour with the photo's detail, overlay), detail, photo colour, shading, where it applies (whole frame or chosen surfaces - greens, fairways, bunkers, water, woods, tees - with a feathered edge) and tree models; Copy settings puts a blend worth keeping on the clipboard as JSON. The scene is app/js/gd-course-3d.js, the same one GPS Play's 3D mode (the cube on its tool rail) draws its terrain with - there through Play's own framing and lock tilt, never a free camera - so the trees and ground here are exactly what a player sees. Writes nothing.",
+      function: "View-only 3D model of a hole with a camera you move freely: orbit round it, walk on it, or jump to overhead, from-the-tee and round-the-green views. Built from exactly what GPS Play stands up - the published hole frame (or the Illustrated map painted from the course package by the app's own painter), draped over the published terrain-RGB elevation, with the same tree placement - but drawn through a real perspective camera instead of the app's fixed tilt. Every tree stands as a 3D model of its species (guessed from the photo under its crown, mapped water and latitude - nobody tags trees): realistic models for the nearest trees on the photo, low-poly for the rest and for Illustrated. Relief exaggeration is adjustable. A third style, Hybrid, blends the Illustrated map over the photo to find how far the two can be mixed: blend amount, method (mix, illustrated colour with the photo's detail, overlay), detail, photo colour, shading, where it applies (whole frame or chosen surfaces - greens, fairways, bunkers, water, woods, tees - with a feathered edge) and tree models; Save for Play stores the blend (scripts/gd-hybrid-look.js shape, through /api/play-view): it is the look GPS Play's Auto map style - the default - draws on every hole that meets the watch maps' criteria (a published map and a green on the hole); Copy settings puts it on the clipboard as JSON. The scene is app/js/gd-course-3d.js, the same one GPS Play's 3D mode (the cube on its tool rail) draws its terrain with - there through Play's own framing and lock tilt, never a free camera - so the trees and ground here are exactly what a player sees. Writes nothing.",
       owner: "scripts/studio/courses/course-3d/course-3d-page.js",
       runtime: { app: false, studio: true, server: true },
       code: [
         { role: "Page (owner): course and hole pickers, style, relief, view buttons", path: "scripts/studio/courses/course-3d/course-3d-page.js" },
         { role: "The scene and its free-camera viewer; also GPS Play's 3D mode (createFramed)", path: "app/js/gd-course-3d.js" },
+        { role: "The hybrid look: its settings, blend shader code, mask and Auto's watch-map rule", path: "scripts/gd-hybrid-look.js" },
+        { role: "Where Save stores the hybrid look and Play reads it", path: "functions/play-view.mjs" },
         { role: "Illustrated picture + tree placement (the app's own, loaded not copied)", path: "app/js/gd-illustrated-surface.js" },
         { role: "Low-poly tree models, one per NZ species", path: "scripts/trees/nz-trees.js" },
         { role: "Realistic tree models (bark + leaf cards) for the photo", path: "scripts/trees/nz-trees-real.js" },
@@ -331,8 +333,8 @@
         { role: "Course package surfaces for Illustrated", path: "scripts/gd-bubble-hazard-core.js" },
         { role: "Course selection (pick-only mode, app-facing owner)", path: "scripts/inline/gd-course-picker-search-v2.js" }
       ],
-      inputs: ["Course selection from the real picker, or a typed course key", "GET /api/course-visuals (hole frames + elevation sidecars)", "GET /api/course-package (Illustrated only)"],
-      outputs: ["Display only - nothing is written"],
+      inputs: ["Course selection from the real picker, or a typed course key", "GET /api/course-visuals (hole frames + elevation sidecars)", "GET /api/course-package (Illustrated and Hybrid)", "GET /api/play-view (the hybrid look Play has now)"],
+      outputs: ["POST /api/play-view: the hybrid look, admin only (play_view_settings row 'hybrid'). Nothing else is written."],
       owns: ["The Studio controls round the 3D viewer"],
       doesNotOwn: [
         "The 3D scene, the viewer's camera and its renderer (owned by app/js/gd-course-3d.js, shared with GPS Play's 3D mode)",

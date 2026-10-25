@@ -188,22 +188,35 @@ function launch(store) {
   const data = {};
   const store = { getItem: (k) => (k in data ? data[k] : null), setItem: (k, v) => { data[k] = String(v); } };
   const first = launch(store);
-  assert.strictEqual(first.settings.mapStyle(), 'photo', 'a fresh device gets the photo');
+  assert.strictEqual(first.settings.mapStyle(), 'auto', 'a fresh device gets auto: hybrid where the hole qualifies');
   first.nodes.setMapStyle.listeners.click();
-  assert.strictEqual(first.settings.mapStyle(), 'illustrated');
-  assert.strictEqual(first.nodes.setMapStyle.textContent, 'gpsSettings.mapStyleIllustrated');
-  assert.strictEqual(launch(store).settings.mapStyle(), 'illustrated', 'survives a relaunch');
+  assert.strictEqual(first.settings.mapStyle(), 'photo');
+  assert.strictEqual(first.nodes.setMapStyle.textContent, 'gpsSettings.mapStylePhoto');
+  assert.strictEqual(launch(store).settings.mapStyle(), 'photo', 'a photo picked since auto survives a relaunch');
   launch(store).nodes.setMapStyle.listeners.click();
-  assert.strictEqual(launch(store).settings.mapStyle(), 'photo', 'cycles back');
+  assert.strictEqual(launch(store).settings.mapStyle(), 'illustrated');
+  launch(store).nodes.setMapStyle.listeners.click();
+  assert.strictEqual(launch(store).settings.mapStyle(), 'hybrid');
+  launch(store).nodes.setMapStyle.listeners.click();
+  assert.strictEqual(launch(store).settings.mapStyle(), 'auto', 'cycles back to auto');
   data['clarity:gps-settings:v1'] = JSON.stringify({ mapStyle: 'cartoon' });
-  assert.strictEqual(launch(store).settings.mapStyle(), 'photo', 'unknown value falls back');
+  assert.strictEqual(launch(store).settings.mapStyle(), 'auto', 'unknown value falls back');
+  /* Before auto, every save wrote mapStyle "photo" along with whatever had changed. */
+  data['clarity:gps-settings:v1'] = JSON.stringify({ mapStyle: 'photo', units: 'yd' });
+  assert.strictEqual(launch(store).settings.mapStyle(), 'auto', 'the old default photo riding along becomes auto');
+  data['clarity:gps-settings:v1'] = JSON.stringify({ mapStyle: 'illustrated' });
+  assert.strictEqual(launch(store).settings.mapStyle(), 'illustrated', 'illustrated was only ever a choice: kept');
+  data['clarity:gps-settings:v1'] = JSON.stringify({ mapStyle: 'photo', mapStyleChosen: true });
+  assert.strictEqual(launch(store).settings.mapStyle(), 'photo', 'a photo picked since auto is kept');
 }
 
 // painter wiring
-assert.ok(/aerial: drawn \? drawn\.picture : aerialImg/.test(PAINTER_SRC), 'the drawn map replaces the photo on the mesh');
+assert.ok(/aerial: drawn && !hybrid \? drawn\.picture : aerialImg/.test(PAINTER_SRC), 'the drawn map replaces the photo on the mesh (a hybrid keeps the photo under it)');
+assert.ok(/meshOptions\.overlay = drawn\.picture/.test(PAINTER_SRC), 'a hybrid lays the drawn map over the photo');
 assert.ok(/trees: drawn \? drawn\.trees : null/.test(PAINTER_SRC), 'its trees go to the mesh');
-assert.ok(/if \(!drawn \|\| threeD\) aerialImg\.src/.test(PAINTER_SRC), 'the photo is not fetched for the plain mesh when drawn (3D mode reads species off it)');
-assert.ok(/mapStyle\(\) !== "illustrated"/.test(PAINTER_SRC), 'photo style never paints');
-assert.ok(/meshStyle === meshLook\(\)/.test(PAINTER_SRC) && /return mapStyle\(\) \+ \(view3d\(\)/.test(PAINTER_SRC), 'a style change, or 3D on or off, rebuilds the mesh');
+assert.ok(/if \(!drawn \|\| threeD \|\| hybrid\) aerialImg\.src/.test(PAINTER_SRC), 'the photo is not fetched for the plain mesh when drawn (3D mode reads species off it, hybrid blends over it)');
+assert.ok(/style !== "illustrated" && style !== "hybrid"/.test(PAINTER_SRC), 'photo style never paints');
+assert.ok(/if \(chosen !== "auto"\) return chosen;/.test(PAINTER_SRC) && /lib\.holeQualifies\(pkg, loadedHole\) \? "hybrid" : "photo"/.test(PAINTER_SRC), 'auto is hybrid on a qualifying hole, the photo elsewhere');
+assert.ok(/meshStyle === meshLook\(\)/.test(PAINTER_SRC) && /return style \+ \(view3d\(\) \? ":3d" : ""\) \+ \(style === "hybrid"/.test(PAINTER_SRC), 'a style change, 3D on or off, or a new hybrid look rebuilds the mesh');
 
 console.log('illustrated-surface: all assertions passed');
