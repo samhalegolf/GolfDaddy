@@ -1,5 +1,5 @@
 /* Writes one .glb per tree from nz-trees.js.
- *   node build-glb.mjs [outDir]      (default: ./glb)
+ *   node scripts/trees/build-glb.mjs <output folder>
  * No dependencies. Each file: one node, one mesh, one double-sided vertex-colour material,
  * POSITION / NORMAL / COLOR_0 as a plain triangle list. The mesh's `extras` carry the
  * species, height and crown radius, so a renderer can scale a model to a tree marker's
@@ -14,7 +14,11 @@ const lib = {};
 new Function("self", readFileSync(join(here, "nz-trees.js"), "utf8"))(lib);
 const NZTrees = lib.NZTrees;
 
-const outDir = process.argv[2] || join(here, "glb");
+const outDir = process.argv[2];
+if (!outDir) {
+  console.error("usage: node scripts/trees/build-glb.mjs <output folder>");
+  process.exit(1);
+}
 mkdirSync(outDir, { recursive: true });
 
 function pad4(buf, fill) {

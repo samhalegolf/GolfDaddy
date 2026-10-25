@@ -760,6 +760,48 @@
     };
   }
 
+  /* Smaller copies of a leaf atlas for drawing at a distance (mip levels), each holding the
+     same share of solid leaf as the full size. A plain average thins every cut-out edge, so
+     far away fine leaves - willow strands, needles - fade under the alpha cut-off and the tree
+     goes bald; here each level's alpha is lifted until as much of it passes the cut-off as at
+     full size. Returns [level0, level1, ... 1x1], each {width, height, data}. */
+  function mipLevels(img, cutoff) {
+    cutoff = cutoff == null ? 0.45 : cutoff;
+    var c255 = cutoff * 255;
+    function coverage(d) {
+      var n = 0;
+      for (var i = 3; i < d.length; i += 4) if (d[i] >= c255) n++;
+      return n / (d.length / 4);
+    }
+    var want = coverage(img.data), levels = [img], cur = img;
+    while (cur.width > 1 || cur.height > 1) {
+      var w = Math.max(1, cur.width >> 1), h = Math.max(1, cur.height >> 1), out = new Uint8Array(w * h * 4), src = cur.data;
+      var alpha = new Float32Array(w * h);
+      for (var y = 0; y < h; y++) for (var x = 0; x < w; x++) {
+        var r = 0, g = 0, b = 0, a = 0;
+        for (var dy = 0; dy < 2; dy++) for (var dx = 0; dx < 2; dx++) {
+          var sx = Math.min(cur.width - 1, x * 2 + dx), sy = Math.min(cur.height - 1, y * 2 + dy), i = (sy * cur.width + sx) * 4, wa = src[i + 3] + 1;
+          r += src[i] * wa; g += src[i + 1] * wa; b += src[i + 2] * wa; a += src[i + 3];
+        }
+        var k = (y * w + x) * 4, sum = 0;
+        for (var q = 0; q < 4; q++) sum += src[(Math.min(cur.height - 1, y * 2 + (q >> 1)) * cur.width + Math.min(cur.width - 1, x * 2 + (q & 1))) * 4 + 3] + 1;
+        out[k] = r / sum; out[k + 1] = g / sum; out[k + 2] = b / sum;
+        alpha[y * w + x] = a / 4;
+      }
+      /* The smallest lift that brings coverage back up to the full-size share. */
+      var lo = 1, hi = 8;
+      for (var it = 0; it < 14; it++) {
+        var mid = (lo + hi) / 2, n = 0;
+        for (var j = 0; j < alpha.length; j++) if (alpha[j] * mid >= c255) n++;
+        if (n / alpha.length < want) lo = mid; else hi = mid;
+      }
+      for (var m = 0; m < alpha.length; m++) out[m * 4 + 3] = Math.min(255, Math.round(alpha[m] * hi));
+      cur = { width: w, height: h, data: out };
+      levels.push(cur);
+    }
+    return levels;
+  }
+
   /* A mown-fairway texture for previews: tiling, with stripes. Not exported. */
   function fairway() {
     var N = 256, img = new Img(N, N, [0, 0, 0]), d = img.d, a = hex("#5f7f3a"), b = hex("#86a24f");
@@ -774,6 +816,6 @@
 
   return {
     SPECIES: ORDER.map(function (id) { return { id: id, name: SPECIES[id].name, botanical: SPECIES[id].botanical, billboardType: SPECIES[id].billboardType }; }),
-    build: build, textures: textures, fairway: fairway
+    build: build, textures: textures, mipLevels: mipLevels, fairway: fairway
   };
 });

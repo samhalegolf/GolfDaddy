@@ -317,12 +317,15 @@
 
     {
       id: "course-3d", label: "3D Course Viewer", parent: "courses",
-      function: "View-only 3D model of a hole with a camera you move freely: orbit round it, walk on it, or jump to overhead, from-the-tee and round-the-green views. Built from exactly what GPS Play stands up - the published hole frame (or the Illustrated map painted from the course package by the app's own painter), draped over the published terrain-RGB elevation, with the same tree placement - but drawn through a real perspective camera instead of the app's fixed tilt. Relief exaggeration is adjustable. Writes nothing.",
+      function: "View-only 3D model of a hole with a camera you move freely: orbit round it, walk on it, or jump to overhead, from-the-tee and round-the-green views. Built from exactly what GPS Play stands up - the published hole frame (or the Illustrated map painted from the course package by the app's own painter), draped over the published terrain-RGB elevation, with the same tree placement - but drawn through a real perspective camera instead of the app's fixed tilt. Every tree stands as a 3D model of its species (guessed from the photo under its crown, mapped water and latitude - nobody tags trees): realistic models for the nearest trees on the photo, low-poly for the rest and for Illustrated. Relief exaggeration is adjustable. Writes nothing.",
       owner: "scripts/studio/courses/course-3d/course-3d-page.js",
       runtime: { app: false, studio: true, server: true },
       code: [
         { role: "Page (owner): loading, perspective renderer, camera", path: "scripts/studio/courses/course-3d/course-3d-page.js" },
         { role: "Illustrated picture + tree placement (the app's own, loaded not copied)", path: "app/js/gd-illustrated-surface.js" },
+        { role: "Low-poly tree models, one per NZ species", path: "scripts/trees/nz-trees.js" },
+        { role: "Realistic tree models (bark + leaf cards) for the photo", path: "scripts/trees/nz-trees-real.js" },
+        { role: "Species guess per tree from the photo", path: "scripts/trees/tree-species.js" },
         { role: "The app's mesh this mirrors (fixed camera, shear in frame)", path: "app/js/gd-terrain-mesh.js" },
         { role: "Course package surfaces for Illustrated", path: "scripts/gd-bubble-hazard-core.js" },
         { role: "Course selection (pick-only mode, app-facing owner)", path: "scripts/inline/gd-course-picker-search-v2.js" }
@@ -341,7 +344,10 @@
       ],
       keyFunctions: [],
       status: "implemented", needsVerification: true,
-      warnings: ["Trees stand at real size while the ground is exaggerated by the Relief slider, as in Play."]
+      warnings: [
+        "Trees stand at real size while the ground is exaggerated by the Relief slider, as in Play.",
+        "Species are a best guess from colour, size and nearby water: pine and macrocarpa are easily confused from above, and deciduous trees photographed in winter read poorly. Play and the watches still draw their own trees."
+      ]
     },
 
     {

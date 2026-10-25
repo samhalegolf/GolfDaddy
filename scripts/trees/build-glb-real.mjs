@@ -1,5 +1,5 @@
 /* Writes one textured .glb per realistic tree from nz-trees-real.js.
- *   node build-glb-real.mjs [outDir]      (default: ./glb-realistic)
+ *   node scripts/trees/build-glb-real.mjs <output folder>
  * No dependencies. Each file: one node, one mesh, two primitives -
  *   bark:   opaque, tiling bark texture (REPEAT)
  *   leaves: alphaMode MASK (cutoff 0.45), leaf/needle atlas, single-sided because every
@@ -18,7 +18,11 @@ const lib = {};
 new Function("self", readFileSync(join(here, "nz-trees-real.js"), "utf8"))(lib);
 const T = lib.NZTreesReal;
 
-const outDir = process.argv[2] || join(here, "glb-realistic");
+const outDir = process.argv[2];
+if (!outDir) {
+  console.error("usage: node scripts/trees/build-glb-real.mjs <output folder>");
+  process.exit(1);
+}
 mkdirSync(outDir, { recursive: true });
 
 const pad4 = (buf, fill = 0) => {
