@@ -530,8 +530,8 @@
         <button id="setRelief" type="button" class="toggle">Enhanced</button>
       </div>
       <div class="setRow">
-        <div><strong data-i18n="gpsSettings.mapStyle">Map style</strong><span id="setMapStyleSub">Satellite photo of the course.</span></div>
-        <button id="setMapStyle" type="button" class="toggle">Photo</button>
+        <div><strong data-i18n="gpsSettings.mapStyle">Map style</strong><span id="setMapStyleSub">Hybrid on fully mapped holes, the photo elsewhere.</span></div>
+        <button id="setMapStyle" type="button" class="toggle">Auto</button>
       </div>
       <!-- Operator only (app.account.isAdmin): force the live map onto Esri or
            Mapbox to compare them. English only on purpose - no player sees it. -->
@@ -736,7 +736,7 @@
 <script src="js/pin.js"></script>
 <script src="js/gps.js?v=log-popup-20260917"></script>
 <script src="js/wake-lock.js"></script>
-<script src="js/gps-settings.js?v=view3d-20261025"></script>
+<script src="js/gps-settings.js?v=hybrid-20261026"></script>
 <script src="js/plays-like.js"></script>
 <!-- Course Data. GPS Play's only analytical output: at shot completion it
      submits an immutable raw snapshot here and returns. The Conditions Engine
@@ -776,7 +776,11 @@
 <script src="../scripts/clarity-garmin-founder.js?v=20261005a"></script>
 <script src="js/watch-handover.js"></script>
 <script src="../scripts/gd-green-contours-core.js"></script>
-<script src="js/gd-terrain-mesh.js"></script>
+<!-- The hybrid map style: its settings, shader code and mask, and the look saved in the
+     Studio (play-view.js reads /api/play-view). Before both renderers, which include it. -->
+<script src="../scripts/gd-hybrid-look.js"></script>
+<script src="js/play-view.js"></script>
+<script src="js/gd-terrain-mesh.js?v=hybrid-20261026"></script>
 <script src="../scripts/gd-watch-map-core.js"></script>
 <script src="js/gd-illustrated-surface.js?v=view3d-20261025"></script>
 <!-- 3D mode (the rail's cube): the tree models, the species guesser and the scene that draws
@@ -785,11 +789,11 @@
 <script src="../scripts/trees/nz-trees.js"></script>
 <script src="../scripts/trees/nz-trees-real.js"></script>
 <script src="../scripts/trees/tree-species.js"></script>
-<script src="js/gd-course-3d.js?v=outline-20261025"></script>
+<script src="js/gd-course-3d.js?v=outline-20261026"></script>
 <script src="js/live-hybrid.js"></script>
 <script src="js/live-terrain.js?v=mesh-all-players-20261001"></script>
 <script src="js/gd-green-contours.js"></script>
-<script src="js/painter.js?v=view3d-mode-20261025"></script>
+<script src="js/painter.js?v=hybrid-20261026"></script>
 <script src="js/resume.js?v=live-hole-20261001"></script>
 <script src="js/tool-rail.js?v=view3d-20261025"></script>
 <!-- Password-reset and account-setup links land on whatever page the app has

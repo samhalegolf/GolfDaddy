@@ -29,6 +29,7 @@ const ROOT = path.join(__dirname, "..");
 
 const PAGE = `<!doctype html><html><body>
 <canvas id="c" width="256" height="256"></canvas>
+<script src="/scripts/gd-hybrid-look.js"></script>
 <script src="/app/js/gd-terrain-mesh.js"></script>
 <script src="/scripts/trees/nz-trees.js"></script>
 <script src="/scripts/gd-bubble-hazard-core.js"></script>
@@ -115,6 +116,33 @@ window.run = () => {
   m.dispose();
   try { m.render(); out.renderAfterDispose = "ok"; } catch (e) { out.renderAfterDispose = "threw: " + e.message; }
   try { m.dispose(); out.doubleDispose = "ok"; } catch (e) { out.doubleDispose = "threw: " + e.message; }
+  /* Play's hybrid map style, on both its renderers: a dark blue photo, a green drawn map over
+     it, the whole-frame mask. Blend 0 is the photo; full blend is the drawn map. */
+  const drawnMap = document.createElement("canvas"); drawnMap.width = drawnMap.height = 256;
+  const dctx = drawnMap.getContext("2d"); dctx.fillStyle = "rgb(40,200,40)"; dctx.fillRect(0, 0, 256, 256);
+  const bluePhoto = document.createElement("canvas"); bluePhoto.width = bluePhoto.height = 256;
+  const bctx = bluePhoto.getContext("2d"); bctx.fillStyle = "rgb(0,0,90)"; bctx.fillRect(0, 0, 256, 256);
+  const wholeMask = GDHybridLook.drawMask({ width: 256, height: 256, pxPerMetre: 1, project: () => null }, {});
+  function centreOf(cv) {
+    const s2 = document.createElement("canvas"); s2.width = cv.width; s2.height = cv.height;
+    const x = s2.getContext("2d"); x.drawImage(cv, 0, 0);
+    const d = x.getImageData(128, 128, 1, 1).data;
+    return { r: d[0], g: d[1], b: d[2] };
+  }
+  out.playHybrid = {};
+  [["plain", (cv, o) => GDTerrainMesh.create(cv, o)], ["framed", (cv, o) => GDCourse3D.createFramed(cv, o)]].forEach(([name, make]) => {
+    out.playHybrid[name] = [0, 1].map((blend) => {
+      const fresh = canvas.cloneNode(false); canvas.parentNode.replaceChild(fresh, canvas); canvas = fresh;
+      const mesh = make(canvas, {
+        aerial: bluePhoto, elevation: elevation(0), metres: [300, 300], demSize: [16, 16], imagePx: [256, 256], framePx: [256, 256],
+        seaLevel: 0, overlay: drawnMap, mask: wholeMask, lumaMean: 0.1, look: GDHybridLook.look({ blend: blend * 100 }), treeModels: "low"
+      });
+      mesh.state.tiltDeg = 0; mesh.state.ambient = 1; mesh.render();
+      const c = centreOf(canvas);
+      mesh.dispose();
+      return c;
+    });
+  });
   return out;
 };
 /* The Studio's free viewer draws the same scene through its own camera: it still builds. */
@@ -181,8 +209,9 @@ window.runHybrid = async () => {
   const out = { hybrid: !!built && built.hybrid, unavailable: built && built.illustratedUnavailable };
   await frames(); out.blendNone = centre;
   viewer.setLook({ blend: 1, method: "mix" }); await frames(); out.blendFull = centre;
-  viewer.setMask({ where: "surfaces", surfaces: { bunkers: true } }); await frames(); out.maskedOff = centre;
-  viewer.setMask({ where: "surfaces", surfaces: { greens: true } }); await frames(); out.maskedGreen = centre;
+  const only = (kind) => { const s = {}; GDHybridLook.SURFACES.forEach((k) => { s[k] = k === kind; }); return s; };
+  viewer.setMask({ where: "surfaces", surfaces: only("bunkers") }); await frames(); out.maskedOff = centre;
+  viewer.setMask({ where: "surfaces", surfaces: only("greens") }); await frames(); out.maskedGreen = centre;
   viewer.setLook({ method: "detail", detail: 1 }); await frames(); out.detail = centre;
   viewer.dispose();
   return out;
@@ -317,6 +346,11 @@ async function launchBrowser(playwright) {
   assert.ok(blue(hybrid.maskedOff), "masked to surfaces that are not there, the photo shows: " + JSON.stringify(hybrid.maskedOff));
   assert.ok(green(hybrid.maskedGreen), "masked to the greens, the green is illustrated: " + JSON.stringify(hybrid.maskedGreen));
   assert.ok(hybrid.detail && hybrid.detail.g > 0, "the detail method draws: " + JSON.stringify(hybrid.detail));
+  ["plain", "framed"].forEach((name) => {
+    const [none, full] = out.playHybrid[name];
+    assert.ok(blue(none), name + " mesh, hybrid at blend 0, is the photo: " + JSON.stringify(none));
+    assert.ok(green(full), name + " mesh, hybrid at full blend, is the drawn map: " + JSON.stringify(full));
+  });
   const isRed = (p) => p && p.r > 150 && p.g < 60 && p.b < 60;
   const isSky = (p) => p && p.b > 180 && p.g > 160 && p.r > 130 && p.r < 190;
   assert.ok(outline.built, "a whole-course surface builds with no hole number");
@@ -332,5 +366,5 @@ async function launchBrowser(playwright) {
   assert.strictEqual(outline.pickedSky, null, "above the horizon picks nothing");
   assert.ok(isRed(outline.noOutline), "no outline, the whole surface shows: " + JSON.stringify(outline.noOutline));
   assert.ok(outline.overlayGone, "dispose takes the overlay off the stage");
-  console.log("course-3d-framed passed: lift agreement at rotations 0 and 137, flat, height zero, tree, dispose, Studio viewer, hybrid blend and mask, course outline");
+  console.log("course-3d-framed passed: lift agreement at rotations 0 and 137, flat, height zero, tree, dispose, Studio viewer, hybrid blend and mask, Play's hybrid on both meshes, course outline");
 })().catch((e) => { console.error(e); process.exit(1); });

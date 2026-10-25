@@ -13,7 +13,10 @@
      shotUp         - rotate the view so the shot runs up the screen
      frameTightness - how much of the shot the lock stage fills
      relief         - how far the terrain mesh lifts the ground (off to 5x)
-     mapStyle       - photo, or the hole drawn from the course map (gd-illustrated-surface.js)
+     mapStyle       - auto (the default: hybrid on a hole that meets the watch maps' criteria,
+                      the photo elsewhere), photo, the hole drawn from the course map
+                      (gd-illustrated-surface.js), or hybrid (the two blended as saved in the
+                      Studio: scripts/gd-hybrid-look.js, read by play-view.js)
      view3d         - 3D mode: the mesh drawn with 3D tree models (gd-course-3d.js), in either
                       map style. Switched from the cube on the tool rail, not this panel
      windGhost      - draw the wind ghost bubble beside the real one
@@ -44,18 +47,21 @@
   };
   var RELIEF_ORDER = ["off", "natural", "enhanced", "dramatic"];
 
-  /* What the terrain mesh is dressed in. Illustrated rides on the mesh, so it needs relief on;
-     without the mesh the photo is what shows. */
+  /* What the terrain mesh is dressed in. Illustrated and hybrid ride on the mesh, so they need
+     relief on; without the mesh the photo is what shows. painter.js decides what auto means
+     for the hole in front of you. */
   var MAP_STYLE = {
+    auto:        { label: "gpsSettings.mapStyleAuto",        sub: "gpsSettings.mapStyleAutoHint" },
     photo:       { label: "gpsSettings.mapStylePhoto",       sub: "gpsSettings.mapStylePhotoHint" },
-    illustrated: { label: "gpsSettings.mapStyleIllustrated", sub: "gpsSettings.mapStyleIllustratedHint" }
+    illustrated: { label: "gpsSettings.mapStyleIllustrated", sub: "gpsSettings.mapStyleIllustratedHint" },
+    hybrid:      { label: "gpsSettings.mapStyleHybrid",      sub: "gpsSettings.mapStyleHybridHint" }
   };
-  var MAP_STYLE_ORDER = ["photo", "illustrated"];
+  var MAP_STYLE_ORDER = ["auto", "photo", "illustrated", "hybrid"];
 
   /* corridor is deliberately not in the panel yet: it is the dispersion
      corridor from the v2 bubble design, off until it has been played with.
      Stored like the rest so turning it on survives a reload. */
-  var DEFAULTS = { units: "m", aimLine: true, shotUp: true, frameTightness: "medium", relief: "enhanced", mapStyle: "photo", view3d: false, corridor: false,
+  var DEFAULTS = { units: "m", aimLine: true, shotUp: true, frameTightness: "medium", relief: "enhanced", mapStyle: "auto", mapStyleChosen: false, view3d: false, corridor: false,
     windGhost: true, slopeBubble: false, hybridView: "composite", greenLinesCoarse: false };
 
   /* Operator-only debug views of the Clarity 3D Mesh picture (live-hybrid.js VIEWS - keep the
@@ -78,7 +84,8 @@
         shotUp: raw.shotUp !== false,
         frameTightness: TIGHTNESS[raw.frameTightness] ? raw.frameTightness : DEFAULTS.frameTightness,
         relief: RELIEF[raw.relief] ? raw.relief : DEFAULTS.relief,
-        mapStyle: MAP_STYLE[raw.mapStyle] ? raw.mapStyle : DEFAULTS.mapStyle,
+        mapStyle: chosenMapStyle(raw),
+        mapStyleChosen: raw.mapStyleChosen === true,
         view3d: raw.view3d === true,
         hybridView: HYBRID_VIEWS.indexOf(raw.hybridView) !== -1 ? raw.hybridView : DEFAULTS.hybridView,
         greenLinesCoarse: raw.greenLinesCoarse === true,
@@ -87,6 +94,15 @@
         slopeBubble: raw.slopeBubble === true
       };
     } catch (e) { return Object.assign({}, DEFAULTS); }
+  }
+
+  /* The map style the player picked, or auto. Every save writes every setting, so before auto
+     existed a stored "photo" was almost always just the old default riding along with some
+     other change - that becomes auto. Illustrated was only ever there by choice, and anything
+     picked since is marked as picked. */
+  function chosenMapStyle(raw) {
+    if (!MAP_STYLE[raw.mapStyle]) return DEFAULTS.mapStyle;
+    return raw.mapStyleChosen === true || raw.mapStyle === "illustrated" ? raw.mapStyle : DEFAULTS.mapStyle;
   }
 
   function save() {
@@ -148,6 +164,7 @@
     set: function (key, value) {
       if (!(key in DEFAULTS)) return;
       state[key] = value;
+      if (key === "mapStyle") state.mapStyleChosen = true;
       save();
       render();
       notify();
@@ -207,7 +224,7 @@
     var styleBtn = document.getElementById("setMapStyle");
     if (styleBtn) {
       styleBtn.textContent = t(MAP_STYLE[state.mapStyle].label);
-      styleBtn.setAttribute("aria-pressed", state.mapStyle === "illustrated" ? "true" : "false");
+      styleBtn.setAttribute("aria-pressed", state.mapStyle === "photo" ? "false" : "true");
     }
     var styleSub = document.getElementById("setMapStyleSub");
     if (styleSub) styleSub.textContent = t(MAP_STYLE[state.mapStyle].sub);

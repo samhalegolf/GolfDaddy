@@ -30,25 +30,22 @@
 (function () {
   "use strict";
 
+  /* Hybrid style: the illustrated map blended over the photo, to find out how far the two can
+     be mixed. The settings' shape and defaults are scripts/gd-hybrid-look.js's; Save stores
+     them through /api/play-view, and Play's Auto map style draws with what is saved on every
+     hole that meets the watch maps' criteria. hybridSaved is the last saved (or loaded) copy,
+     for Reset and for the note beside Save. */
+  var HYBRID = window.GDHybridLook;
+  function defaultHybrid() { return HYBRID ? HYBRID.normalize(null) : null; }
+
   /* Survives leaving and re-entering the page, like Map Viewport. */
   /* hole is a hole number or WHOLE. surface and boundary are the record's course map and saved
      outline; draft is the outline as trimmed and not yet saved (null: nothing unsaved). */
   var WHOLE = "course";
   var session = { courseKey: "", courseName: "", course: null, hole: null, style: "photo", exaggeration: 2.5,
     hybrid: defaultHybrid(), surface: null, boundary: null, draft: null };
-
-  /* Hybrid style: the illustrated map blended over the photo, to find out how far the two can
-     be mixed. Percentages as the sliders show them; shading null is automatic (the photo's
-     light and the drawn map's, in proportion to the blend). */
-  function defaultHybrid() {
-    return {
-      blend: 50, method: "mix", detail: 100, saturation: 100, shading: null,
-      where: "all", featherM: 2, trees: "realistic",
-      surfaces: { greens: true, fairways: true, bunkers: true, water: true, trees: false, tees: true }
-    };
-  }
+  var hybridSaved = { settings: null, updatedAt: null, loaded: false, touched: false };
   var HYBRID_SURFACES = [["greens", "Greens"], ["fairways", "Fairways"], ["bunkers", "Bunkers"], ["water", "Water"], ["trees", "Woods"], ["tees", "Tees"]];
-  var AUTO_SHADING = { photo: 0.22, illustrated: 0.5 };   // 1 - the viewer's ambient for each
 
   var ASSET_API = "/api/course-visual-assets";
   var MAP_API = "/api/course-map";
@@ -187,8 +184,10 @@
       '<label class="gdStudioViewportField">Feather <input data-gd-3d="hFeather" type="range" min="0" max="15" step="0.5"> <span data-gd-3d="hFeatherValue"></span></label>' +
       '<label class="gdStudioViewportField">Trees <select data-gd-3d="hTrees">' +
       '<option value="realistic">Realistic (with shadows)</option><option value="low">Low-poly</option></select></label>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-3d="hSave" title="Play draws with this on its Auto map style, on holes that meet the watch maps\' criteria">Save for Play</button>' +
+      '<button type="button" class="gdStudioDiagramBtn" data-gd-3d="hReset">Back to saved</button>' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-3d="hCopy">Copy settings</button>' +
-      '<button type="button" class="gdStudioDiagramBtn" data-gd-3d="hReset">Reset</button>' +
+      '<span class="gdStudioViewportCourse" data-gd-3d="hSaved"></span>' +
       "</div></div>" +
       '<div class="gdStudioViewportBar">' +
       '<button type="button" class="gdStudioDiagramBtn" data-gd-3d="viewOverhead">Overhead</button>' +
@@ -216,12 +215,13 @@
     var el = {};
     ["pick", "key", "hole", "style", "relief", "reliefValue", "viewOverhead", "viewTee", "viewGreen", "mode", "course", "stage", "canvas", "readout",
       "hybridBar", "hBlend", "hBlendValue", "hMethod", "hDetail", "hDetailValue", "hSaturation", "hSaturationValue", "hShading", "hShadingValue",
-      "hShadingAuto", "hWhere", "hSurfaces", "hFeather", "hFeatherValue", "hTrees", "hCopy", "hReset",
+      "hShadingAuto", "hWhere", "hSurfaces", "hFeather", "hFeatherValue", "hTrees", "hCopy", "hReset", "hSave", "hSaved",
       "mapBar", "build", "trim", "fromHoles", "undo", "save", "revert", "clear", "jump", "mapStatus"]
       .forEach(function (name) { el[name] = containerEl.querySelector('[data-gd-3d="' + name + '"]'); });
 
     try {
       if (!window.GDCourse3D) throw new Error("the 3D viewer (app/js/gd-course-3d.js) did not load");
+      if (!HYBRID) throw new Error("the hybrid look (scripts/gd-hybrid-look.js) did not load");
       viewer = window.GDCourse3D.createViewer(el.stage, el.canvas, {
         exaggeration: session.exaggeration,
         onFrame: readout,
@@ -428,9 +428,7 @@
 
     /* ---- the course map and its outline ---- */
 
-    function accessToken() {
-      return typeof gdAdminCourseDbAccessToken === "function" ? Promise.resolve(gdAdminCourseDbAccessToken()) : Promise.resolve("");
-    }
+    /* accessToken (the Hybrid section's, above): the Studio session's bearer token. */
     function mapRequest(method, query, body) {
       return accessToken().then(function (t) {
         if (!t) throw new Error("sign in again - no session token");
@@ -611,16 +609,13 @@
     /* The blend as the scene takes it. Any other style gets the plain look, so the photo
        style's colour is never the hybrid's saturation. */
     function hybridLook() {
-      var h = session.hybrid;
       if (session.style !== "hybrid") return { blend: 0, method: "mix", detail: 1, saturation: 1, shading: null };
-      return { blend: h.blend / 100, method: h.method, detail: h.detail / 100, saturation: h.saturation / 100, shading: h.shading };
+      return HYBRID.look(session.hybrid);
     }
-    function hybridMask() {
-      var h = session.hybrid;
-      return { where: h.where, surfaces: Object.assign({}, h.surfaces), featherM: h.featherM };
-    }
+    function hybridMask() { return session.hybrid; }
+    /* The automatic shading in the sliders' percent: 1 - the viewer's ambient for the blend. */
     function autoShading() {
-      return AUTO_SHADING.photo + (AUTO_SHADING.illustrated - AUTO_SHADING.photo) * (session.hybrid.blend / 100);
+      return 100 - HYBRID.ambient(HYBRID.look(Object.assign({}, session.hybrid, { shading: null })), 0.78, 0.5) * 100;
     }
 
     /* Every control shows the session, and only the ones that mean something are enabled. */
@@ -632,9 +627,9 @@
       el.hDetail.value = String(h.detail); el.hDetailValue.textContent = h.detail + "%";
       el.hDetail.disabled = h.method !== "detail";
       el.hSaturation.value = String(h.saturation); el.hSaturationValue.textContent = h.saturation + "%";
-      var shading = h.shading == null ? autoShading() : h.shading;
-      el.hShading.value = String(Math.round(shading * 100));
-      el.hShadingValue.textContent = Math.round(shading * 100) + "%" + (h.shading == null ? " (auto)" : "");
+      var shading = Math.round(h.shading == null ? autoShading() : h.shading);
+      el.hShading.value = String(shading);
+      el.hShadingValue.textContent = shading + "%" + (h.shading == null ? " (auto)" : "");
       el.hShadingAuto.disabled = h.shading == null;
       el.hWhere.value = h.where;
       Array.prototype.forEach.call(el.hSurfaces.querySelectorAll("[data-gd-3d-surface]"), function (box) {
@@ -644,15 +639,30 @@
       el.hFeather.value = String(h.featherM); el.hFeatherValue.textContent = h.featherM + "m";
       el.hFeather.disabled = h.where !== "surfaces";
       el.hTrees.value = h.trees;
+      var same = hybridSaved.settings && JSON.stringify(hybridSaved.settings) === JSON.stringify(HYBRID.normalize(h));
+      el.hSaved.textContent = !hybridSaved.loaded ? "Reading what Play has…"
+        : hybridSaved.failed ? "Could not read what Play has - Save still works"
+        : !hybridSaved.updatedAt ? "Nothing saved yet - Play uses the defaults"
+        : (same ? "Play shows this · saved " : "Changed since the save of ") + new Date(hybridSaved.updatedAt).toLocaleString();
     }
-    function lookChanged() { showHybrid(); viewer.setLook(hybridLook()); }
-    function maskChanged() { showHybrid(); viewer.setMask(hybridMask()); }
+    function lookChanged() { hybridSaved.touched = true; showHybrid(); viewer.setLook(hybridLook()); }
+    function maskChanged() { hybridSaved.touched = true; showHybrid(); viewer.setMask(hybridMask()); }
+    /* Whole settings in, as a load or a reset brings them: the look, the mask, and the trees
+       if those changed. */
+    function adoptHybrid(settings) {
+      var trees = session.hybrid.trees;
+      session.hybrid = HYBRID.normalize(settings);
+      showHybrid();
+      viewer.setLook(hybridLook());
+      viewer.setMask(hybridMask());
+      if (trees !== session.hybrid.trees && session.style === "hybrid" && session.hole) loadSelection(session.hole, true);
+    }
 
     el.hBlend.addEventListener("input", function () { session.hybrid.blend = Number(el.hBlend.value) || 0; lookChanged(); });
     el.hMethod.addEventListener("change", function () { session.hybrid.method = el.hMethod.value; lookChanged(); });
     el.hDetail.addEventListener("input", function () { session.hybrid.detail = Number(el.hDetail.value) || 0; lookChanged(); });
     el.hSaturation.addEventListener("input", function () { session.hybrid.saturation = Number(el.hSaturation.value) || 0; lookChanged(); });
-    el.hShading.addEventListener("input", function () { session.hybrid.shading = (Number(el.hShading.value) || 0) / 100; lookChanged(); });
+    el.hShading.addEventListener("input", function () { session.hybrid.shading = Number(el.hShading.value) || 0; lookChanged(); });
     el.hShadingAuto.addEventListener("click", function () { session.hybrid.shading = null; lookChanged(); });
     el.hWhere.addEventListener("change", function () { session.hybrid.where = el.hWhere.value; maskChanged(); });
     el.hSurfaces.addEventListener("change", function (e) {
@@ -663,6 +673,7 @@
     });
     el.hFeather.addEventListener("input", function () { session.hybrid.featherM = Number(el.hFeather.value) || 0; maskChanged(); });
     el.hTrees.addEventListener("change", function () {
+      hybridSaved.touched = true;
       session.hybrid.trees = el.hTrees.value;
       showHybrid();
       if (session.hole) loadSelection(session.hole, true);
@@ -674,14 +685,49 @@
       if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () { note(text); });
       else note(text);
     });
-    el.hReset.addEventListener("click", function () {
-      var trees = session.hybrid.trees;
-      session.hybrid = defaultHybrid();
-      showHybrid();
-      viewer.setLook(hybridLook());
-      viewer.setMask(hybridMask());
-      if (trees !== session.hybrid.trees && session.hole) loadSelection(session.hole, true);
+    el.hReset.addEventListener("click", function () { adoptHybrid(hybridSaved.settings || defaultHybrid()); });
+
+    async function accessToken() {
+      if (typeof window.gdAdminCourseDbAccessToken === "function") return window.gdAdminCourseDbAccessToken();
+      try {
+        var auth = window.ClaritySupabaseAuth;
+        if (auth && typeof auth.freshAccessToken === "function") return (await auth.freshAccessToken()) || "";
+      } catch (e) {}
+      return "";
+    }
+    el.hSave.addEventListener("click", async function () {
+      el.hSave.disabled = true;
+      try {
+        var token = await accessToken();
+        if (!token) throw new Error("sign in as an admin first");
+        var res = await fetch("/api/play-view", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json", Authorization: "Bearer " + token },
+          body: JSON.stringify({ hybrid: session.hybrid }),
+          cache: "no-store"
+        });
+        var data = await res.json().catch(function () { return null; });
+        if (!res.ok) throw new Error((data && data.error) || ("HTTP " + res.status));
+        hybridSaved = { settings: data.hybrid, updatedAt: data.updatedAt, loaded: true, touched: hybridSaved.touched };
+        session.hybrid = HYBRID.normalize(data.hybrid);
+        if (!destroyed) note("Saved - Play's Auto map style draws with this look (players pick it up within a minute)");
+      } catch (error) {
+        if (!destroyed) note("Could not save the hybrid look - " + (error.message || error));
+      }
+      if (!destroyed) { el.hSave.disabled = false; showHybrid(); }
     });
+
+    /* What Play is drawing with now. It becomes the starting look unless this page's sliders
+       have already been moved. */
+    fetch("/api/play-view", { headers: { Accept: "application/json" }, cache: "no-store" })
+      .then(function (res) { return res.ok ? res.json() : Promise.reject(new Error("HTTP " + res.status)); })
+      .then(function (data) {
+        if (destroyed) return;
+        hybridSaved = { settings: data && data.saved ? data.hybrid : null, updatedAt: data && data.saved ? data.updatedAt : null, loaded: true, touched: hybridSaved.touched };
+        if (hybridSaved.settings && !hybridSaved.touched) adoptHybrid(hybridSaved.settings);
+        else showHybrid();
+      })
+      .catch(function () { if (!destroyed) { hybridSaved.loaded = true; hybridSaved.failed = true; showHybrid(); } });
     showHybrid();
 
     /* ---- controls ---- */

@@ -56,6 +56,7 @@ jobs:
           node dev/fresh-app-boot.test.js
           node dev/course-3d-framed.test.js
           node dev/course-surface.test.mjs
+          node dev/play-view.test.js
           node dev/i18n.test.js
           node dev/app-native-contract.test.js
           node dev/app-course-data-feed.test.js
