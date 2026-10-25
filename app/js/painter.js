@@ -2315,7 +2315,7 @@
         metresPerPixel: metresX / picture.width,
         imageWidth: picture.width,
         imageHeight: picture.height
-      }, packageSingleTrees(pkg));
+      }, lib.singleTrees(pkg));
       var shapes = lib.paint(picture.getContext("2d"), {
         width: picture.width,
         height: picture.height,
@@ -2333,17 +2333,6 @@
     } catch (e) {
       return null;
     }
-  }
-
-  /* The course's real tree markers from the package (course-package.mjs singleTrees,
-     [lat, lng, r] each, r the crown radius in metres): each stands where it is at its own size,
-     one tree per marker. A package from before they were carried has none, and the woods are
-     filled as they always were. */
-  function packageSingleTrees(pkg) {
-    var list = pkg && Array.isArray(pkg.singleTrees) ? pkg.singleTrees : [];
-    return list.filter(function (t) {
-      return Array.isArray(t) && Number.isFinite(Number(t[0])) && Number.isFinite(Number(t[1])) && Number(t[2]) > 0;
-    }).map(function (t) { return { lat: Number(t[0]), lng: Number(t[1]), r: Number(t[2]) }; });
   }
 
   /* The player's Terrain relief setting. 0 means no mesh at all. */
@@ -3207,6 +3196,28 @@
       var proj = projector();
       var at = unTilt(clientX, clientY);
       return proj ? proj.toLatLng({ left: at.left, top: at.top }) : null;
+    },
+    /* The picture on screen, for the 3D view (view-3d.js) to stand up: the frame and its
+       metadata, the elevation sidecar, the course it is painted and planted from, and the
+       hole's own tee and green. Null on the live map - there is no picture to drape. */
+    view3d: function () {
+      var img = el("surfaceImage");
+      if (!published || !publishedFrameUrl || !img || !img.dataset.playSurface) return null;
+      var meta;
+      try { meta = JSON.parse(img.dataset.playSurface); } catch (e) { return null; }
+      if (!meta) return null;
+      var elevation = meta.elevation || {};
+      var r = currentScene && currentScene.hole.rec;
+      return {
+        holeNumber: loadedHole,
+        meta: meta,
+        frameUrl: publishedFrameUrl,
+        elevationUrl: elevation.url || (elevation.path ? apiUrl(surfaceLib.assetUrl(elevation.path)) : null),
+        pkg: marshal && marshal.pkg ? marshal.pkg() : null,
+        surfaces: courseHazardSurfaces(),
+        tee: r && r.tee ? { lat: r.tee.lat, lng: r.tee.lng } : null,
+        green: r && r.green ? { lat: r.green.lat, lng: r.green.lng } : null
+      };
     },
     /* The current hole's green, for tools that compute against it (Pin Lock). */
     holeGeometry: function () {

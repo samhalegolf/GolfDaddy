@@ -614,12 +614,38 @@ async function bootCheck() {
          presentation is up, so read it there. */
       presentation: window.ClarityApp.painter.presentation().kind
     };
+    /* The 3D view (the rail's cube) stands up the picture on screen, switches style in
+       place, and gives its canvas back on closing. Headless Chromium without WebGL can only
+       say it could not build, which is the honest answer there too. */
+    const statusKey = () => document.getElementById("view3dStatus").getAttribute("data-i18n");
+    const webgl = !!document.createElement("canvas").getContext("webgl");
+    document.getElementById("railView3d").click();
+    await gd.until(() => statusKey() !== "threeD.loading", "the 3D view to build hole 1");
+    const view3d = {
+      webgl,
+      open: gd.shown("view3dScreen"),
+      opened: statusKey(),
+      canvas: !!document.querySelector("#view3dStage canvas")
+    };
+    if (webgl) {
+      document.querySelector('#view3dStyle [data-style="illustrated"]').click();
+      await gd.until(() => statusKey() !== "threeD.loading", "the 3D view to rebuild in Illustrated");
+      view3d.restyled = statusKey();
+      view3d.illustratedPressed = document.querySelector('#view3dStyle [data-style="illustrated"]').getAttribute("aria-pressed");
+    }
+    document.getElementById("view3dClose").click();
+    view3d.closed = !gd.shown("view3dScreen") && !document.querySelector("#view3dStage canvas");
     await gd.goHole(2, 600);
     const h2State = {
       presented: document.body.classList.contains("surface-published"),
       mapCreated: document.getElementById("map").childElementCount > 0
     };
-    return { h1State, h2State };
+    /* On the live map there is no picture to drape: the screen says so instead of a scene. */
+    document.getElementById("railView3d").click();
+    view3d.liveMap = statusKey();
+    view3d.liveMapCanvas = !!document.querySelector("#view3dStage canvas");
+    document.getElementById("view3dClose").click();
+    return { h1State, h2State, view3d };
   });
 
   const play = await page.evaluate(async (h1) => {
@@ -1868,6 +1894,22 @@ async function bootCheck() {
     "the presentation up must be the published surface, got: " + surfaceFirst.h1State.presentation);
   assert.strictEqual(surfaceFirst.h2State.presented, false, "no visual on hole 2 → back on the live map");
   assert.ok(surfaceFirst.h2State.mapCreated, "the map is created the moment absence is the answer");
+  {
+    const v = surfaceFirst.view3d;
+    assert.ok(v.open, "the rail's cube opens the 3D view");
+    if (v.webgl) {
+      assert.strictEqual(v.opened, "threeD.hint", "a published hole stands up in 3D, got: " + v.opened);
+      assert.ok(v.canvas, "the 3D view draws on its own canvas");
+      assert.ok(["threeD.hint", "threeD.illustratedUnavailable"].includes(v.restyled),
+        "switching to Illustrated rebuilds the hole (or says it shows the photo), got: " + v.restyled);
+      assert.strictEqual(v.illustratedPressed, "true", "the style switch shows Illustrated as chosen");
+    } else {
+      assert.strictEqual(v.opened, "threeD.failed", "no WebGL says the 3D view could not be built, got: " + v.opened);
+    }
+    assert.ok(v.closed, "closing the 3D view hides it and gives its canvas back");
+    assert.strictEqual(v.liveMap, "threeD.unavailable", "a live map hole says 3D needs a picture, got: " + v.liveMap);
+    assert.ok(!v.liveMapCanvas, "no scene is built on the live map");
+  }
   assert.ok(!framed.scrollJumped, "clicking the pill must not scroll-jump the play screen");
   assert.ok(!framed.bubbleUnderBar, "the bubble Head To the Tee raises must not hide under the distance bar");
   {

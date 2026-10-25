@@ -105,6 +105,14 @@ or writes course data back.
 - `js/tool-rail.js` — the tab/rail toggle, and wires each rail button to its
   tool module's entry point. Each tool module wires its own panel/popover
   internals itself.
+- `js/view-3d.js` — the 3D view, opened from the cube on the rail: the hole on
+  screen as a model you can orbit or walk, in Photo or Illustrated. View only;
+  it reads what the painter has up (`app.painter.view3d()`) and closes straight
+  back to Play. Live map holes have no picture to stand up and say so.
+- `js/gd-course-3d.js` — the 3D viewer itself (scene, camera, touch input,
+  picture and tree building), shared with Clarity Studio's 3D Course Viewer.
+  Unlike `gd-terrain-mesh.js` it owns a real camera, which is why it is never
+  the play surface: nothing is projected or tapped through it.
 - `js/boot.js` — wiring. Sets `ClarityApp.booted` as the test canary.
 
 Test: `node dev/fresh-app-boot.test.js` (registered in structural-smoke CI) —
