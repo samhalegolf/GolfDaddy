@@ -334,5 +334,16 @@
     });
   }
 
-  return { paint: paint, placeTrees: placeTrees, packageHoles: packageHoles, holeIsMapped: holeIsMapped, PALETTE: PALETTE };
+  /* The course's real tree markers from the package (course-package.mjs singleTrees,
+     [lat, lng, r] each, r the crown radius in metres), as placeTrees takes them: each stands
+     where it is at its own size, one tree per marker. A package from before they were carried
+     has none, and the woods are filled as they always were. */
+  function singleTrees(pkg) {
+    var list = pkg && Array.isArray(pkg.singleTrees) ? pkg.singleTrees : [];
+    return list.filter(function (t) {
+      return Array.isArray(t) && Number.isFinite(Number(t[0])) && Number.isFinite(Number(t[1])) && Number(t[2]) > 0;
+    }).map(function (t) { return { lat: Number(t[0]), lng: Number(t[1]), r: Number(t[2]) }; });
+  }
+
+  return { paint: paint, placeTrees: placeTrees, packageHoles: packageHoles, singleTrees: singleTrees, holeIsMapped: holeIsMapped, PALETTE: PALETTE };
 });
