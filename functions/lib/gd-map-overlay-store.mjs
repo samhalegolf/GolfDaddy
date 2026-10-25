@@ -11,6 +11,7 @@
 import { createSupabaseFetch } from "./gd-supabase-fetch.mjs";
 import { normalizeOverlayFeatures, overlaySummary, overlayOverCap } from "./gd-map-overlay-core.mjs";
 import { normalizePlayOrders } from "./gd-play-order-core.mjs";
+import { courseSlug } from "./gd-course-slug.mjs";
 
 export const OVERLAYS_TABLE = "course_map_overlays";
 const MAPS_TABLE = "course_maps";
@@ -22,7 +23,7 @@ export function supabaseBase() { return env("SUPABASE_URL").replace(/\/+$/, "");
 export function supabaseKey() { return env("SUPABASE_SERVICE_ROLE_KEY"); }
 function anonKey() { return env("SUPABASE_ANON_KEY") || env("VITE_SUPABASE_ANON_KEY") || env("SUPABASE_PUBLIC_ANON_KEY") || ""; }
 export function hasSupabase() { return !!(supabaseBase() && supabaseKey()); }
-export function slug(value) { return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90); }
+export function slug(value) { return courseSlug(value).slice(0, 90); }
 
 export const supabaseFetch = createSupabaseFetch({ base: supabaseBase, key: supabaseKey, label: "course-map-overlay" });
 

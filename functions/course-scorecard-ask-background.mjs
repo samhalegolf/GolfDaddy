@@ -14,6 +14,7 @@ import { buildScorecardAskPrompt, readAskAnswer } from "./lib/gd-scorecard-ask-c
 import { hasSupabase, loadAsk, writeAsk, supabaseFetch } from "./lib/gd-scorecard-ask-store.mjs";
 import { loadCourse, json } from "./lib/gd-map-overlay-store.mjs";
 import { loadFacilityChildren } from "./lib/gd-facility-scorecards.mjs";
+import { courseSlug } from "./lib/gd-course-slug.mjs";
 
 /* Claude Opus 5.5, as the other model calls here: reading a club's card off its site and
    telling the men's tee from the ladies' is judgement work, and it runs once a course. */
@@ -23,7 +24,7 @@ function askModel() { return process.env.CLARITY_SCORECARD_ASK_MODEL || DEFAULT_
    carry on before we call it a day. */
 const MAX_CONTINUES = 4;
 
-function slug(value) { return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90); }
+function slug(value) { return courseSlug(value).slice(0, 90); }
 
 async function callModel(prompt) {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });

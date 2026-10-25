@@ -34,6 +34,7 @@ import { resolveImagerySource, unscannableReason, attributionFor } from "./lib/g
 import { renderHoleSurfaceMercator, renderOverview } from "./lib/gd-visual-export-core.mjs";
 import { reliefFromTerrainRgb, cropByBounds, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS, terrainRgbPngFromHeights, decodeElevation } from "./lib/gd-relief-core.mjs";
 import { ensureCourseTerrain, loadCourseTerrain, TERRAIN_BUCKET } from "./lib/terrain/gd-terrain-service.mjs";
+import { terrainForWindow } from "./lib/terrain/gd-terrain-window.mjs";
 import { createSupabaseStorage } from "./lib/gd-supabase-storage.mjs";
 import greenCore from "../scripts/gd-green-contours-core.js";
 import courseVersionLabel from "../scripts/gd-course-version-label.js";
@@ -41,6 +42,11 @@ import courseVersionLabel from "../scripts/gd-course-version-label.js";
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import { isTestKind, testRunFromJob, TEST_BAKE_BUCKET, TEST_SNAPSHOT_KIND, TEST_EXPORT_KIND } from "./lib/gd-test-bake-core.mjs";
 import { mapboxCaptureSource } from "./lib/gd-mapbox-source.mjs";
+import { runOpcdExport } from "./lib/gd-opcd-export-job.mjs";
+import { OPCD_EXPORT_KIND } from "./lib/gd-opcd-export-core.mjs";
+import { readCanopy } from "./lib/gd-canopy-height.mjs";
+import { loadScorecard } from "./lib/gd-map-overlay-store.mjs";
+import { scorecardCourseKey } from "./lib/gd-scorecard-resolve.mjs";
 const JOBS_TABLE = "course_visual_jobs";
 const MAPS_TABLE = "course_maps";
 const RECIPES_TABLE = "course_visual_recipes";
@@ -961,6 +967,41 @@ async function runTerrainJob(job) {
   };
 }
 
+/* OPCD / GSPro export (lib/gd-opcd-export-job.mjs): the course's terrain asset, surfaces and
+   trees as the files a Unity course build starts from. Reads the baked asset, baking one
+   first when the course has none; writes beside the frames in the course-visuals bucket. */
+async function openCanopyTile(url) {
+  const { fromUrl } = await import("geotiff");
+  return fromUrl(url, { allowFullFile: false });
+}
+async function runOpcdExportJob(job) {
+  const pkg = await loadCoursePackage(job.course_id);
+  if (!pkg) throw new Error("course " + job.course_id + " not found in " + MAPS_TABLE);
+  return await runOpcdExport({ courseId: pkg.courseId, pkg }, {
+    supabaseFetch,
+    loadTerrain: courseId => loadCourseTerrain(courseId, { supabaseFetch }),
+    ensureTerrain: async (p, bounds) => {
+      await ensureTerrainForCourse(p, bounds);
+      return loadCourseTerrain(p.courseId, { supabaseFetch });
+    },
+    download: path => storageDownload(path, TERRAIN_BUCKET),
+    decodeTerrainPng: async buffer => {
+      const raw = await sharp(buffer, { limitInputPixels: false }).raw().toBuffer({ resolveWithObject: true });
+      const decoded = decodeElevation(raw.data, raw.info.width, raw.info.height, raw.info.channels, "terrain-rgb");
+      return { heights: decoded.heights, width: raw.info.width, height: raw.info.height };
+    },
+    upload: (path, buffer, contentType) => storageUpload(path, buffer, contentType, TERRAIN_BUCKET),
+    encodePreviewPng: (grey, width, height) => sharp(grey, { raw: { width, height, channels: 1 }, limitInputPixels: false }).png({ compressionLevel: 9 }).toBuffer(),
+    readWindow: (grid, asset) => terrainForWindow({ grid, asset, env: process.env }, {}),
+    readCanopy: bounds => readCanopy(bounds, { openTiff: openCanopyTile }),
+    loadScorecardHoles: async p => {
+      const card = await loadScorecard(p.courseName, scorecardCourseKey);
+      return card ? card.holes : null;
+    },
+    heartbeat: stage => heartbeatJob(job, { stage, rssMb: Math.round(process.memoryUsage().rss / 1048576) })
+  });
+}
+
 async function runExportJob(job, deadlineAt) {
   const space = spaceFor(job);
   const pkg = await loadCoursePackage(job.course_id);
@@ -1359,6 +1400,7 @@ export default async function courseVisualWorker(req) {
       const result = job.kind === "snapshot" || job.kind === TEST_SNAPSHOT_KIND ? await runSnapshotJob(job, deadlineAt)
         : job.kind === "export" || job.kind === TEST_EXPORT_KIND ? await runExportJob(job, deadlineAt)
         : job.kind === "terrain" ? await runTerrainJob(job)
+        : job.kind === OPCD_EXPORT_KIND ? await runOpcdExportJob(job)
         : { skipped: "unknown kind " + job.kind };
       if (result && result.requeue) {
         /* Soft deadline reached: hand the job back and chain a fresh invocation, which

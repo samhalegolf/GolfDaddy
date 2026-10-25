@@ -34,6 +34,7 @@ import { enqueueMapperJob, mapperActorKey, promoteNearbyJob, NEARBY_AUTOMAP_KIND
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import { courseSingleTrees, packSingleTrees } from "./lib/gd-course-single-trees.mjs";
+import { courseSlug } from "./lib/gd-course-slug.mjs";
 const MAPS_TABLE = "course_maps";
 const VISUALS_TABLE = "course_visuals";
 const VISUAL_JOBS_TABLE = "course_visual_jobs";
@@ -72,7 +73,7 @@ async function verifiedUserId(req) {
   }
 }
 
-function slug(value) { return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90); }
+function slug(value) { return courseSlug(value).slice(0, 90); }
 
 async function loadCoursePackageRows(courseId) {
   const [mapRows, visualRows, visualJobRows, mapperJobRows] = await Promise.all([

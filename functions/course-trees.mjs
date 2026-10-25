@@ -1,4 +1,4 @@
-/* A course's trees (course_trees, see lib/gd-course-trees-core.mjs) for Studio. Admin only.
+/* A course's trees (course_trees, see lib/gd-course-trees-store.mjs) for Studio. Admin only.
  *
  * GET  ?courseId=          -> {courseId, row: {trees, level, status, imagery, run, publishedAt,
  *                             publishedBy} | null, job: the latest tree run {status, error,

@@ -44,7 +44,7 @@
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); }
   function num(v) { if (v === "" || v == null) return null; var n = Number(v); return Number.isFinite(n) ? n : null; }
   function slug(course) {
-    return String(course && (course.courseId || course.id || course.canonicalKey || course.courseKey) || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
+    return String(course && (course.courseId || course.id || course.canonicalKey || course.courseKey) || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
   }
   function common() { return window.GDWatchCommon || null; }
 

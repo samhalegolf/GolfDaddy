@@ -15502,7 +15502,7 @@ function gdResetCoursePickerPresentationReadiness(payload,opts={}){
 }
 function gdStoredCourseSessionKey(course){
   return String(course?.courseId||course?.id||course?.canonicalKey||course?.name||course?.courseName||"")
-    .toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g,"-")
     .replace(/^-+|-+$/g,"");

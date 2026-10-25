@@ -17,6 +17,7 @@
  * only when the overlay is ready, like the shapes. */
 
 import { OVERLAY_TAG, derivedHoleLines, normalizeOverlayFeatures, isOverlayElement } from "./gd-map-overlay-core.mjs";
+import { courseSlug } from "./gd-course-slug.mjs";
 
 export const PLAY_ORDER_MAX = 12;
 export const PLAY_ORDER_MAX_HOLES = 36;
@@ -34,8 +35,7 @@ export function validHoleRef(value) {
 }
 
 function slugPart(value) {
-  return String(value || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
+  return courseSlug(value).slice(0, 90);
 }
 
 /* Cleans what Studio sends and gives every play order a course id that then never changes.

@@ -15,6 +15,7 @@
 
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import { appleBakeNeeded, wakeAppleBake } from "./lib/gd-apple-bake-wake.mjs";
+import { courseSlug } from "./lib/gd-course-slug.mjs";
 
 const MAPS_TABLE = "course_maps";
 const WATCH_TABLE = "course_watch_maps";
@@ -23,7 +24,7 @@ function env(name) { return process.env[name] || ""; }
 const supabaseFetch = createSupabaseFetch({ base: () => env("SUPABASE_URL").replace(/\/+$/, ""), key: () => env("SUPABASE_SERVICE_ROLE_KEY"), label: "course-page-wake" });
 
 function slug(value) {
-  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 160);
+  return courseSlug(value).slice(0, 160);
 }
 
 function json(status, body) {

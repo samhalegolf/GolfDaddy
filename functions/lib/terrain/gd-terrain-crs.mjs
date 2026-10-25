@@ -47,8 +47,27 @@ const CRS = {
   "EPSG:2193": { kind: "tmerc", datum: "WGS84", lat0: 0, lon0: 173, k0: 0.9996, e0: 1600000, n0: 10000000 }
 };
 
+/* WGS84 / UTM, any zone: EPSG:326<zz> north of the equator, EPSG:327<zz> south. One formula
+   rather than 120 table rows. The Norway and Svalbard zone exceptions are not applied - a
+   course there still projects correctly, just in the regular 6-degree zone. */
+function utmDef(code) {
+  const m = /^EPSG:32([67])(\d\d)$/.exec(code);
+  if (!m) return null;
+  const zone = Number(m[2]);
+  if (zone < 1 || zone > 60) return null;
+  const south = m[1] === "7";
+  return { kind: "tmerc", datum: "WGS84", lat0: 0, lon0: zone * 6 - 183, k0: 0.9996, e0: 500000, n0: south ? 10000000 : 0, utm: { zone, hemisphere: south ? "S" : "N" } };
+}
+
+/* The UTM code a point falls in - the metre grid an export of ground round it should use. */
+export function utmCrsFor(lat, lng) {
+  const zone = Math.max(1, Math.min(60, Math.floor((Number(lng) + 180) / 6) + 1));
+  return "EPSG:32" + (Number(lat) >= 0 ? "6" : "7") + String(zone).padStart(2, "0");
+}
+
 export function supportedCrs(code) {
-  return Object.prototype.hasOwnProperty.call(CRS, normaliseCrs(code));
+  const key = normaliseCrs(code);
+  return Object.prototype.hasOwnProperty.call(CRS, key) || !!utmDef(key);
 }
 
 export function normaliseCrs(code) {
@@ -191,7 +210,8 @@ function wgs84ToDatum(datumKey, ll) {
 /* ---------- public ---------------------------------------------------------------------- */
 
 function crsDef(code) {
-  const def = CRS[normaliseCrs(code)];
+  const key = normaliseCrs(code);
+  const def = CRS[key] || utmDef(key);
   if (!def) throw new Error("unsupported CRS " + code);
   return def;
 }

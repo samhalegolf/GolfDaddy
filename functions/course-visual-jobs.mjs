@@ -13,8 +13,15 @@
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import courseVersionLabel from "../scripts/gd-course-version-label.js";
 import { isTestKind } from "./lib/gd-test-bake-core.mjs";
+import { courseSlug } from "./lib/gd-course-slug.mjs";
 
 const TABLE = "course_visual_jobs";
+/* OPCD / GSPro exports (functions/course-opcd-export.mjs) share the queue but are not builds
+   of the course: a running export must never show a player the course as building. Mirrors
+   OPCD_EXPORT_KIND in lib/gd-opcd-export-core.mjs (asserted by dev/opcd-export.test.mjs) -
+   a literal here so a player poll does not load that module's imports. */
+const OPCD_EXPORT_KIND = "opcd_export";
+const sideJobKind = kind => isTestKind(kind) || kind === OPCD_EXPORT_KIND;
 const MAPS_TABLE = "course_maps";
 const VISUALS_TABLE = "course_visuals";
 const MAPPER_JOBS_TABLE = "course_mapper_jobs";
@@ -67,7 +74,7 @@ const supabaseFetch = createSupabaseFetch({
   label: "course-visual-jobs"
 });
 
-function slug(value) { return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90); }
+function slug(value) { return courseSlug(value).slice(0, 90); }
 
 function latestJob(jobs, predicate) {
   return (Array.isArray(jobs) ? jobs : []).find(predicate) || null;
@@ -88,7 +95,7 @@ function deriveCourseBuildStateFromRows({ jobs, visual }) {
   /* Test bakes (gd-test-bake-core.mjs) share the queue but are not builds of this course: a
      running test must never show a player the course as building, and a failed one must
      never read as this course's failure. */
-  const orderedJobs = (Array.isArray(jobs) ? jobs : []).filter(job => !isTestKind(job && job.kind));
+  const orderedJobs = (Array.isArray(jobs) ? jobs : []).filter(job => !sideJobKind(job && job.kind));
   const live = latestJob(orderedJobs, job => job.status === "running") || latestJob(orderedJobs, job => job.status === "queued");
   const latestTerminal = latestJob(orderedJobs, job => (job.kind === "snapshot" || job.kind === "export") && (job.status === "done" || job.status === "failed"));
   const latestSnapshotSuccess = latestJob(orderedJobs, job => job.kind === "snapshot" && job.status === "done");
@@ -192,7 +199,7 @@ async function courseBuildStateAll() {
   const jobs = Array.isArray(jobRows) ? jobRows : [];
   jobs.forEach((job) => {
     const id = String(job && job.course_id || "");
-    if (!id || isTestKind(job.kind)) return;
+    if (!id || sideJobKind(job.kind)) return;
     const list = jobsByCourse.get(id) || [];
     if (list.length < JOBS_PER_COURSE) list.push(job);
     jobsByCourse.set(id, list);

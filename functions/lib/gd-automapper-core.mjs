@@ -22,6 +22,7 @@
    putting hazards on holes they are not visible on. One-way - gd-visual-plan-core.mjs imports
    only gd-imagery-sources.mjs, so there is no cycle. */
 import { packageHoleData, boundsFromPoints, padBounds, boundsSpanM, validBounds, capturePolicy } from "./gd-visual-plan-core.mjs";
+import { courseSlug } from "./gd-course-slug.mjs";
 
 /* Bumped whenever this module's resolution algorithm changes in a way that should make an
    already-mapped course eligible to be remapped. Compared against course_maps.geometry_version
@@ -132,13 +133,9 @@ export function validHoleNumber(value) {
   return Number.isFinite(h) && h >= 1 && h <= 36 ? Math.round(h) : null;
 }
 
-/* NFD-normalised before the character filter, because [^a-z0-9] does not eat a
-   macron - it eats the letter WITH the macron and the space beside it. "Te Arai
-   Links" (with the macron on the A) slugged to "te-rai", a course id that is not
-   the course's name and reads as a typo, and every accented club in the world
-   had the same problem waiting. */
+/* The shared course slug (gd-course-slug.mjs), never empty. */
 export function slug(s) {
-  return String(s || "item").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "item";
+  return courseSlug(s || "item") || "item";
 }
 
 /* ---------- course identity / duplicate matching (gd-course-library-pin-lock.js:763-1073) - */
