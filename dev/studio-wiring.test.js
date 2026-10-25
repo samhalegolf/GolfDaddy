@@ -216,6 +216,21 @@ test("the nav tree only references real registry ids", () => {
   });
 });
 
+/* Last, because it rebuilds dist: the native build (--app-only) prunes what only the studio
+   loads, and must never prune a file the /app/ shell loads from ../scripts - the illustrated
+   map's trees disappeared from every native build that way (gd-watch-map-core.js). */
+test("the native build keeps every script the /app/ shell loads", () => {
+  build(["--app-only"]);
+  try {
+    const shell = read(path.join("app", "index.html"));
+    const refs = [...shell.matchAll(/(?:src|href)="\.\.\/((?:scripts|styles)\/[^"?]+\.(?:js|css))/g)].map((m) => m[1]);
+    assert.ok(refs.includes("scripts/gd-watch-map-core.js"), "the shell no longer loads the tree placement - update this test");
+    refs.forEach((ref) => assert.ok(fs.existsSync(path.join(DIST, ref)), "pruned from the native build but the /app/ shell loads it: " + ref));
+  } finally {
+    build();
+  }
+});
+
 let failed = 0;
 tests.forEach((entry) => {
   try {

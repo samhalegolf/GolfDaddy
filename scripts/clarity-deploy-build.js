@@ -230,7 +230,13 @@ const sourceHtml = fs.readFileSync(path.join(dist, "index.html"), "utf8");
 const app = stripSurface(sourceHtml, STUDIO);
 const studio = stripSurface(sourceHtml, APP);
 const appOnlyFiles = [...assetRefs(sourceHtml)].filter(function (ref) { return !assetRefs(studio.html).has(ref); });
-const studioOnlyFiles = [...assetRefs(sourceHtml)].filter(function (ref) { return !assetRefs(app.html).has(ref); });
+/* The /app/ shell (app/index.html) loads shared scripts from the site root as ../scripts/...
+   A file that only a studio-marked tag loads from index.html is still the app's when the shell
+   loads it - gd-watch-map-core.js, which places the illustrated map's trees, was pruned from
+   every native build that way and the trees quietly never stood. */
+const shellRefs = new Set([...String(fs.readFileSync(path.join(dist, APP, "index.html"), "utf8"))
+  .matchAll(/(?:src|href)="\.\.\/((?:scripts|styles)\/[^"?]+\.(?:js|css))/g)].map(function (m) { return m[1]; }));
+const studioOnlyFiles = [...assetRefs(sourceHtml)].filter(function (ref) { return !assetRefs(app.html).has(ref) && !shellRefs.has(ref); });
 
 const appStamped = stampContentVersions(stampTarget(app.html, APP));
 fs.writeFileSync(path.join(dist, "index.html"), appStamped.html);
