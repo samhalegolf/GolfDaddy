@@ -25,6 +25,9 @@ const PAGE = `<!doctype html><html><body>
 <canvas id="c" width="256" height="256"></canvas>
 <script src="/app/js/gd-terrain-mesh.js"></script>
 <script src="/scripts/trees/nz-trees.js"></script>
+<script src="/scripts/gd-bubble-hazard-core.js"></script>
+<script src="/scripts/gd-watch-map-core.js"></script>
+<script src="/app/js/gd-illustrated-surface.js"></script>
 <script src="/app/js/gd-course-3d.js"></script>
 <script>
 /* Terrain-RGB at one height everywhere. */
@@ -130,6 +133,54 @@ window.runViewer = async () => {
   viewer.dispose();
   return { built: !!built && !built.flat, status: !!status && status.mode === "orbit" };
 };
+/* Hybrid (the Studio's photo/illustrated blend): a dark blue photo under an illustrated map
+   with one green in the middle of the frame. The colour at the middle of the screen says
+   which picture is showing as the blend and the mask change. */
+window.runHybrid = async () => {
+  const stage = document.createElement("div");
+  stage.style.cssText = "width:200px;height:150px;position:relative";
+  const c = document.createElement("canvas");
+  stage.appendChild(c);
+  document.body.appendChild(stage);
+  let centre = null;
+  const viewer = GDCourse3D.createViewer(stage, c, {
+    onFrame: () => {
+      const s = document.createElement("canvas"); s.width = c.width; s.height = c.height;
+      const ctx = s.getContext("2d"); ctx.drawImage(c, 0, 0);
+      const d = ctx.getImageData(Math.floor(c.width / 2), Math.floor(c.height / 2), 1, 1).data;
+      centre = { r: d[0], g: d[1], b: d[2] };
+    }
+  });
+  const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  /* A frame round a real place, so the course shapes project onto it. */
+  const zoom = 18, scale = 256 * Math.pow(2, zoom), lat0 = -36.9, lng0 = 174.7;
+  const rad = lat0 * Math.PI / 180;
+  const cx = (lng0 + 180) / 360 * scale, cy = (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * scale;
+  const at = (x, y) => ({
+    lat: Math.atan(Math.sinh(Math.PI * (1 - 2 * (cy - 128 + y) / scale))) * 180 / Math.PI,
+    lng: (cx - 128 + x) / scale * 360 - 180
+  });
+  const greenShape = [at(88, 88), at(168, 88), at(168, 168), at(88, 168)];
+  const pkg = { status: "full-map-ready", holes: [{ holeNumber: 1, geometry: { greenShape, green: at(128, 128), tee: at(128, 240), route: [] } }] };
+  const photoPic = document.createElement("canvas"); photoPic.width = photoPic.height = 256;
+  const pctx = photoPic.getContext("2d"); pctx.fillStyle = "rgb(0,0,90)"; pctx.fillRect(0, 0, 256, 256);
+  const built = await viewer.load({
+    holeNumber: 1,
+    meta: { captureZoom: zoom, originPx: { x: cx - 128, y: cy - 128 }, outputDimensions: { width: 256, height: 256 } },
+    frameUrl: photoPic.toDataURL(),
+    style: "hybrid",
+    treeModels: "low",
+    course: () => ({ pkg, surfaces: GDBubbleHazardCore.collectPackageSurfaces(pkg) })
+  }, false);
+  const out = { hybrid: !!built && built.hybrid, unavailable: built && built.illustratedUnavailable };
+  await frames(); out.blendNone = centre;
+  viewer.setLook({ blend: 1, method: "mix" }); await frames(); out.blendFull = centre;
+  viewer.setMask({ where: "surfaces", surfaces: { bunkers: true } }); await frames(); out.maskedOff = centre;
+  viewer.setMask({ where: "surfaces", surfaces: { greens: true } }); await frames(); out.maskedGreen = centre;
+  viewer.setLook({ method: "detail", detail: 1 }); await frames(); out.detail = centre;
+  viewer.dispose();
+  return out;
+};
 </script></body></html>`;
 
 function startServer() {
@@ -170,6 +221,7 @@ async function launchBrowser(playwright) {
   await page.goto("http://127.0.0.1:" + server.address().port + "/__course-3d-framed.html", { waitUntil: "load" });
   const out = await page.evaluate(() => window.run());
   const viewer = out.webgl ? await page.evaluate(() => window.runViewer()) : null;
+  const hybrid = out.webgl ? await page.evaluate(() => window.runHybrid()) : null;
   await browser.close();
   server.close();
 
@@ -191,5 +243,12 @@ async function launchBrowser(playwright) {
   assert.strictEqual(out.renderAfterDispose, "ok", "render after dispose is harmless");
   assert.strictEqual(out.doubleDispose, "ok", "dispose twice is harmless");
   assert.deepStrictEqual(viewer, { built: true, status: true }, "the Studio's free viewer still builds a hole");
-  console.log("course-3d-framed passed: lift agreement at rotations 0 and 137, flat, height zero, tree, dispose, Studio viewer");
+  const blue = (p) => p && p.b > p.g + 20, green = (p) => p && p.g > p.b + 20;
+  assert.ok(hybrid.hybrid, "a mapped hole builds as a hybrid: " + JSON.stringify(hybrid));
+  assert.ok(blue(hybrid.blendNone), "blend 0 is the photo: " + JSON.stringify(hybrid.blendNone));
+  assert.ok(green(hybrid.blendFull), "blend 100 over the whole frame is the illustrated map: " + JSON.stringify(hybrid.blendFull));
+  assert.ok(blue(hybrid.maskedOff), "masked to surfaces that are not there, the photo shows: " + JSON.stringify(hybrid.maskedOff));
+  assert.ok(green(hybrid.maskedGreen), "masked to the greens, the green is illustrated: " + JSON.stringify(hybrid.maskedGreen));
+  assert.ok(hybrid.detail && hybrid.detail.g > 0, "the detail method draws: " + JSON.stringify(hybrid.detail));
+  console.log("course-3d-framed passed: lift agreement at rotations 0 and 137, flat, height zero, tree, dispose, Studio viewer, hybrid blend and mask");
 })().catch((e) => { console.error(e); process.exit(1); });

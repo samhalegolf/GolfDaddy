@@ -12,10 +12,12 @@
  *
  * Same pictures, same heights, same trees either way; only how it is looked at differs.
  *
- * Two styles, the same two GPS Settings offers:
+ * Styles - the first two are the ones GPS Settings offers:
  *   - photo        the published frame, realistic tree models near the camera, low-poly beyond
  *   - illustrated  the hole painted from the course map by app/js/gd-illustrated-surface.js,
  *                  low-poly trees. A hole with no green or fairway mapped shows the photo.
+ *   - hybrid       Studio only, for now: the illustrated picture blended over the photo - how
+ *                  much, how (setLook) and where (a mask of chosen surfaces, setMask).
  *
  * What the viewer's load needs:
  *   - meta          the frame's playSurface metadata (origin, zoom, size, elevation sidecar)
@@ -137,6 +139,16 @@
     uniform vec3 uEye;
     uniform vec3 uSky;
     uniform float uFogFar;
+    /* Hybrid (the Studio's photo/illustrated blend): the illustrated picture over the photo,
+       through a mask of where it applies. uBlend 0 is the picture alone - Play and the plain
+       styles never take the blend branch. */
+    uniform sampler2D uOverlay;
+    uniform sampler2D uMask;
+    uniform float uBlend;
+    uniform float uMethod;             // 0 mix, 1 illustrated colour with photo detail, 2 overlay
+    uniform float uDetail;             // how much of the photo's light and dark the detail keeps
+    uniform float uLumaMean;           // the photo's average brightness, the detail's 1.0
+    uniform float uSaturation;         // the photo's colour, 1 as taken
     varying vec2 vUv;
     varying vec3 vWorld;
   ` + DECODE + `
@@ -153,7 +165,21 @@
         (hD - hU) * uExaggeration / (2.0 * uMetresPerTexel.y)
       ));
       float lit = uAmbient + (1.0 - uAmbient) * max(dot(n, normalize(uLight)), 0.0);
-      vec3 colour = texture2D(uPicture, vUv).rgb * lit;
+      vec3 photo = texture2D(uPicture, vUv).rgb;
+      float luma = dot(photo, vec3(0.299, 0.587, 0.114));
+      photo = clamp(mix(vec3(luma), photo, uSaturation), 0.0, 1.0);
+      vec3 colour = photo;
+      if (uBlend > 0.0) {
+        vec3 drawn = texture2D(uOverlay, vUv).rgb;
+        vec3 target = drawn;
+        if (uMethod > 1.5) {
+          target = mix(2.0 * photo * drawn, 1.0 - 2.0 * (1.0 - photo) * (1.0 - drawn), step(0.5, photo));
+        } else if (uMethod > 0.5) {
+          target = clamp(drawn * mix(1.0, luma / max(uLumaMean, 0.02), uDetail), 0.0, 1.0);
+        }
+        colour = mix(photo, target, texture2D(uMask, vUv).r * uBlend);
+      }
+      colour *= lit;
       float fog = smoothstep(uFogFar * 0.45, uFogFar, distance(vWorld, uEye));
       gl_FragColor = vec4(mix(colour, uSky, fog), 1.0);
     }
@@ -419,7 +445,8 @@
     var gl = canvas.getContext("webgl", { antialias: true, alpha: false });
     if (!gl) throw new Error("WebGL is not available in this browser");
     var ground = program(gl, GROUND_VERT, GROUND_FRAG, ["aGrid"],
-      ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uEdgeTuck", "uPicture", "uTexel", "uMetresPerTexel", "uLight", "uAmbient", "uEye", "uSky", "uFogFar"]);
+      ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uEdgeTuck", "uPicture", "uTexel", "uMetresPerTexel", "uLight", "uAmbient", "uEye", "uSky", "uFogFar",
+       "uOverlay", "uMask", "uBlend", "uMethod", "uDetail", "uLumaMean", "uSaturation"]);
     var mesh = program(gl, MESH_VERT, MESH_FRAG, ["aPos", "aNor", "aCol", "aUv", "aInst", "aStretch"],
       ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uEdgeTuck", "uTex", "uPicture", "uTextured", "uLeaf", "uTint", "uLight", "uEye", "uSky", "uFogFar"]);
     var shadows = program(gl, SHADOW_VERT, SHADOW_FRAG, ["aTree", "aCorner"],
@@ -429,6 +456,10 @@
     var instanceBuffer = gl.createBuffer();
     var LIGHT = norm([-0.6, 0.75, -0.35]);
     var sky = [0.62, 0.74, 0.84];
+    /* How a hybrid hole is blended (setLook). shading null is automatic: the photo's light
+       and the drawn map's, in proportion to the blend. */
+    var look = { blend: 0, method: 0, detail: 1, saturation: 1, shading: null };
+    var METHODS = { mix: 0, detail: 1, overlay: 2 };
     var hole = null;   // {mesh, elevation, picture, trees, metres, demSize, seaLevel, ambient, heightAt}
 
     /* ---- tree models on the GPU: per species, low and realistic ---- */
@@ -518,6 +549,8 @@
       if (!hole) return;
       gl.deleteTexture(hole.elevation);
       gl.deleteTexture(hole.picture);
+      if (hole.overlay) gl.deleteTexture(hole.overlay);
+      if (hole.mask) gl.deleteTexture(hole.mask);
       gl.deleteBuffer(hole.mesh.vb);
       gl.deleteBuffer(hole.mesh.ib);
       if (hole.trees) { gl.deleteBuffer(hole.trees.shadowVb); gl.deleteBuffer(hole.trees.shadowIb); }
@@ -525,9 +558,11 @@
     }
 
     /* input: {picture, elevation (image|null), demSize, metres, seaLevel, ambient, realistic,
-       edgeTuck, trees:[{u, v, r, species}]} - realistic is the photo: realistic models near
-       the camera, and the trees' shadows on the ground. edgeTuck is Play's: the frame's edge
-       held on the ground plane. */
+       edgeTuck, trees:[{u, v, r, species}], overlay, mask, lumaMean} - realistic is the photo:
+       realistic models near the camera, and the trees' shadows on the ground. edgeTuck is
+       Play's: the frame's edge held on the ground plane. overlay and mask make it a hybrid
+       hole: the illustrated picture, where the mask is white, blended over the photo by
+       setLook. lumaMean is the photo's average brightness, for the detail blend. */
     function setHole(input) {
       release();
       /* Realistic models are only for the photo: switching to Illustrated stops building them. */
@@ -579,9 +614,40 @@
         ambient: input.ambient,
         realistic: !!input.realistic,
         edgeTuck: !!input.edgeTuck,
+        overlay: input.overlay ? texture(gl, input.overlay) : null,
+        mask: input.overlay && input.mask ? texture(gl, input.mask) : null,
+        lumaMean: Number(input.lumaMean) > 0 ? Number(input.lumaMean) : 0.35,
         heightAt: heightAt
       };
       return trees ? trees.list.length : 0;
+    }
+
+    /* The hole's own light, or on a hybrid hole the look's: the photo carries baked relief and
+       the drawn map none, so automatic shading follows the blend between them. */
+    function holeAmbient() {
+      if (look.shading != null) return 1 - look.shading;
+      if (!hole.overlay) return hole.ambient;
+      return AMBIENT.photo + (AMBIENT.illustrated - AMBIENT.photo) * look.blend;
+    }
+
+    /* {blend 0..1, method "mix"|"detail"|"overlay", detail 0..2, saturation 0..1.5,
+       shading 0..1 or null}: uniforms only, so a slider is live. */
+    function setLook(next) {
+      next = next || {};
+      if (next.blend != null) look.blend = Math.max(0, Math.min(1, Number(next.blend) || 0));
+      if (next.method != null) look.method = METHODS[next.method] != null ? METHODS[next.method] : 0;
+      if (next.detail != null) look.detail = Math.max(0, Number(next.detail) || 0);
+      if (next.saturation != null) look.saturation = Math.max(0, Number(next.saturation) || 0);
+      if ("shading" in next) look.shading = next.shading == null ? null : Math.max(0, Math.min(1, Number(next.shading) || 0));
+      if (onChange) onChange();
+    }
+
+    /* A new mask for the hole's overlay (where the illustrated picture applies). */
+    function setMask(canvas2d) {
+      if (!hole || !hole.overlay || !canvas2d) return;
+      if (hole.mask) gl.deleteTexture(hole.mask);
+      hole.mask = texture(gl, canvas2d);
+      if (onChange) onChange();
     }
 
     /* Metres of relief above the lowest point, exaggerated, at world x/z. */
@@ -658,12 +724,22 @@
       gl.uniform2f(ground.uTexel, 1 / hole.demSize[0], 1 / hole.demSize[1]);
       gl.uniform2f(ground.uMetresPerTexel, hole.metres[0] / hole.demSize[0], hole.metres[1] / hole.demSize[1]);
       gl.uniform3fv(ground.uLight, new Float32Array(LIGHT));
-      gl.uniform1f(ground.uAmbient, view.ambient != null ? view.ambient : hole.ambient);
+      gl.uniform1f(ground.uAmbient, view.ambient != null ? view.ambient : holeAmbient());
       gl.uniform3fv(ground.uEye, new Float32Array(eye));
       gl.uniform3fv(ground.uSky, new Float32Array(sky));
       gl.uniform1f(ground.uFogFar, fogFar);
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, hole.elevation); gl.uniform1i(ground.uElevation, 0);
       gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, hole.picture); gl.uniform1i(ground.uPicture, 1);
+      var blending = hole.overlay && hole.mask && look.blend > 0;
+      gl.uniform1f(ground.uBlend, blending ? look.blend : 0);
+      gl.uniform1f(ground.uMethod, look.method);
+      gl.uniform1f(ground.uDetail, look.detail);
+      gl.uniform1f(ground.uLumaMean, hole.lumaMean);
+      gl.uniform1f(ground.uSaturation, look.saturation);
+      /* Bound whether or not they are used: a sampler left on another unit's texture is legal
+         but reads the wrong thing the moment the branch is taken. */
+      gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, hole.overlay || hole.picture); gl.uniform1i(ground.uOverlay, 2);
+      gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, hole.mask || hole.picture); gl.uniform1i(ground.uMask, 3);
       gl.bindBuffer(gl.ARRAY_BUFFER, hole.mesh.vb);
       gl.enableVertexAttribArray(ground.aGrid);
       gl.vertexAttribPointer(ground.aGrid, 2, gl.FLOAT, false, 0, 0);
@@ -832,6 +908,7 @@
 
     return {
       setHole: setHole, render: render, renderFramed: renderFramed, dispose: dispose, groundAt: groundAt,
+      setLook: setLook, setMask: setMask,
       metres: function () { return hole ? hole.metres : null; },
       /* The DEM's own heights (not exaggerated) at frame uv, sampled as the GPU samples them. */
       heightAt: function (u, v) { return hole ? hole.heightAt(u, v) : 0; },
@@ -977,7 +1054,14 @@
       var surfaces = res[0].surfaces, trees = placeTrees(space, surfaces, metresX, res[0].pkg);
       return treesInMetres(withSpecies(trees, space, metresX, res[1], surfaces, input.meta), space, metresX);
     }).catch(function () { return []; }) : Promise.resolve([]);
-    var picturePromise = imagePromise.then(function (img) {
+    return Promise.all([fitTexture(imagePromise, maxTexture), treesPromise]).then(function (res) {
+      return { picture: res[0], trees: res[1] };
+    });
+  }
+
+  /* The frame JPEG as a texture can take it: downscaled past this GPU's ceiling. */
+  function fitTexture(imagePromise, maxTexture) {
+    return imagePromise.then(function (img) {
       var max = Math.min(MAX_PICTURE_PX, maxTexture || MAX_PICTURE_PX);
       var big = Math.max(img.naturalWidth, img.naturalHeight);
       if (big <= max) return img;
@@ -987,9 +1071,93 @@
       c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
       return c;
     });
-    return Promise.all([picturePromise, treesPromise]).then(function (res) {
-      return { picture: res[0], trees: res[1] };
+  }
+
+  /* Hybrid: the photo underneath and the illustrated picture over it, both in the frame's own
+     space, with what it takes to redraw the mask later (hybridMask) and the photo's average
+     brightness for the detail blend. The trees are the illustrated map's, which are the
+     photo's too - one placement. Rejects as illustrated() does, and the caller shows the
+     photo. */
+  function hybrid(input, metresX, maxTexture) {
+    var space = frameSpace(input.meta, ILLUSTRATED_PX);
+    return Promise.all([illustrated(input, metresX), fitTexture(loadImage(input.frameUrl), maxTexture), courseSurfaces(input)]).then(function (res) {
+      return {
+        picture: res[1],
+        overlay: res[0].picture,
+        trees: res[0].trees,
+        lumaMean: meanLuma(res[1]),
+        hybrid: { space: space, metresX: metresX, surfaces: res[2].surfaces, holes: window.GDIllustratedSurface.packageHoles(res[2].pkg) }
+      };
     });
+  }
+
+  /* The picture's average brightness, read small. A picture the browser will not let us read
+     answers a grass-ish guess. */
+  function meanLuma(source) {
+    try {
+      var c = document.createElement("canvas");
+      c.width = c.height = 32;
+      var ctx = c.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(source, 0, 0, 32, 32);
+      var d = ctx.getImageData(0, 0, 32, 32).data, sum = 0;
+      for (var i = 0; i < d.length; i += 4) sum += (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255;
+      return sum / (d.length / 4);
+    } catch (e) {
+      return 0.35;
+    }
+  }
+
+  /* The surfaces a hybrid mask can take, by the names the Studio shows. tees are points on the
+     package's holes, drawn as a pad of TEE_PAD_M round each. */
+  var MASK_SURFACES = ["greens", "fairways", "bunkers", "water", "trees", "tees"];
+  var TEE_PAD_M = 8;
+
+  /* Where the illustrated picture applies, white on black at the illustrated picture's size:
+     everywhere, or only on the chosen surfaces. featherM softens the edge by that many metres
+     (a blur where the browser has canvas filters, a hard edge where it has not).
+     opts: {where: "all"|"surfaces", surfaces: {greens: true, ...}, featherM} */
+  function hybridMask(data, opts) {
+    opts = opts || {};
+    var space = data.space;
+    var c = document.createElement("canvas");
+    c.width = space.width;
+    c.height = space.height;
+    var ctx = c.getContext("2d");
+    if (opts.where !== "surfaces") {
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, c.width, c.height);
+      return c;
+    }
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, c.width, c.height);
+    var ppm = space.width / data.metresX;
+    var feather = Math.max(0, Number(opts.featherM) || 0) * ppm;
+    if (feather > 0 && "filter" in ctx) ctx.filter = "blur(" + feather.toFixed(1) + "px)";
+    ctx.fillStyle = "#fff";
+    var chosen = opts.surfaces || {};
+    MASK_SURFACES.forEach(function (kind) {
+      if (!chosen[kind]) return;
+      if (kind === "tees") {
+        (data.holes || []).forEach(function (hole) {
+          if (!hole || !hole.tee) return;
+          var at = space.project(hole.tee);
+          ctx.beginPath();
+          ctx.arc(at.x, at.y, TEE_PAD_M * ppm, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        return;
+      }
+      ((data.surfaces && data.surfaces[kind]) || []).forEach(function (surface) {
+        var ring = (surface && surface.ring || []).map(space.project);
+        if (ring.length < 3) return;
+        ctx.beginPath();
+        ctx.moveTo(ring[0].x, ring[0].y);
+        for (var i = 1; i < ring.length; i++) ctx.lineTo(ring[i].x, ring[i].y);
+        ctx.closePath();
+        ctx.fill();
+      });
+    });
+    return c;
   }
 
   /* Lat/lng to world metres from the frame's centre (x east, z south). Null when the frame
@@ -1368,9 +1536,12 @@
 
     /* ---- loading ---- */
 
-    /* Stand a hole up. Resolves with what was built - {illustrated, illustratedUnavailable,
-       flat, trees, standing, reliefM} - or null when a later load overtook this one. An
-       Illustrated hole that cannot be painted shows the photo, and says why. */
+    /* Stand a hole up. Resolves with what was built - {illustrated, hybrid,
+       illustratedUnavailable, flat, trees, standing, reliefM} - or null when a later load
+       overtook this one. An Illustrated or Hybrid hole that cannot be painted shows the photo,
+       and says why. input.style is "photo", "illustrated" or "hybrid"; a hybrid load also takes
+       mask (hybridMask's opts) and treeModels. */
+    var hybridData = null;
     function load(input, keepView) {
       var token = ++loadToken;
       var meta = input.meta || {};
@@ -1381,11 +1552,12 @@
         course: function () { return surfaces || (surfaces = Promise.resolve(input.course ? input.course() : null)); }
       });
       var unavailable = "";
-      var picturePromise = input.style === "illustrated"
-        ? illustrated(once, metres[0]).catch(function (error) {
-            unavailable = String((error && error.message) || error);
-            return photo(once, metres[0], scene.maxTexture);
-          })
+      function orPhoto(error) {
+        unavailable = String((error && error.message) || error);
+        return photo(once, metres[0], scene.maxTexture);
+      }
+      var picturePromise = input.style === "illustrated" ? illustrated(once, metres[0]).catch(orPhoto)
+        : input.style === "hybrid" ? hybrid(once, metres[0], scene.maxTexture).catch(orPhoto)
         : photo(once, metres[0], scene.maxTexture);
       var elevationPromise = elevation && input.elevationUrl
         ? loadImage(input.elevationUrl).catch(function () { return null; })
@@ -1393,6 +1565,7 @@
       return Promise.all([picturePromise, elevationPromise]).then(function (res) {
         if (destroyed || token !== loadToken) return null;
         var drawn = res[0], dem = res[1];
+        hybridData = drawn.hybrid || null;
         var standing = scene.setHole({
           picture: drawn.picture,
           elevation: dem,
@@ -1400,8 +1573,12 @@
           metres: metres,
           seaLevel: elevation && elevation.elevationRange ? Number(elevation.elevationRange.min) : 0,
           ambient: drawn.illustrated ? AMBIENT.illustrated : meta.liveTerrain ? AMBIENT.live : AMBIENT.photo,
-          realistic: !drawn.illustrated,
-          trees: drawn.trees
+          /* treeModels ("realistic" | "low") overrides the style's own choice. */
+          realistic: input.treeModels ? input.treeModels === "realistic" : !drawn.illustrated,
+          trees: drawn.trees,
+          overlay: drawn.overlay || null,
+          mask: hybridData ? hybridMask(hybridData, input.mask) : null,
+          lumaMean: drawn.lumaMean
         });
         toWorld = frameWorld(meta, metres);
         var pins = meta.anchorPins || {};
@@ -1409,6 +1586,7 @@
         if (!keepView) viewOverhead(); else requestFrame();
         return {
           illustrated: !!drawn.illustrated,
+          hybrid: !!hybridData,
           illustratedUnavailable: unavailable,
           flat: !dem,
           trees: drawn.trees || [],
@@ -1443,6 +1621,10 @@
       toggleMode: toggleMode,
       mode: function () { return cam.mode; },
       exaggeration: function () { return exaggeration; },
+      /* Hybrid: the blend (scene setLook), live; and where it applies (hybridMask's opts),
+         redrawn from the hole already up. */
+      setLook: function (next) { scene.setLook(next); },
+      setMask: function (opts) { if (hybridData) scene.setMask(hybridMask(hybridData, opts)); },
       setExaggeration: function (value) { exaggeration = Math.max(0, Number(value) || 0); requestFrame(); },
       requestFrame: requestFrame,
       /* Where the camera is, for a readout. Null until a hole is up. */
