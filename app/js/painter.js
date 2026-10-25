@@ -842,9 +842,13 @@
       show(dot, false); show(label, false);
       return;
     }
+    /* at is on the untilted plane the dot is drawn in; seen is where that shows on the screen.
+       In lock the tilt puts ground above the plane's top edge on screen, so "on screen" and
+       the edge clamp are worked out where you see it, and the clamped point taken back. */
     var at = proj.toScreen(who);
+    var seen = at ? reTilt(at) : null;
     var vw = window.innerWidth, vh = window.innerHeight;
-    var inside = at && at.left >= 0 && at.top >= 0 && at.left <= vw && at.top <= vh;
+    var inside = seen && seen.left >= 0 && seen.top >= 0 && seen.left <= vw && seen.top <= vh;
     show(dot, true);
     dot.classList.toggle("stale", !!who.stale);
     if (inside) {
@@ -855,24 +859,27 @@
       return;
     }
     var cx = vw / 2, cy = vh / 2;
-    var target = at || { left: cx, top: cy - vh };
+    /* Past the horizon (or unprojectable): straight up, the way the far ground lies. */
+    var target = seen || { left: cx, top: cy - vh };
     var dx = target.left - cx, dy = target.top - cy;
     var len = Math.hypot(dx, dy) || 1;
     var scale = Math.min((vw / 2 - EDGE_MARGIN_PX) / Math.abs(dx || 1e-6),
       (vh / 2 - EDGE_MARGIN_PX) / Math.abs(dy || 1e-6));
     var ex = cx + dx * scale, ey = cy + dy * scale;
+    var placed = unTilt(ex, ey);
     dot.classList.add("edged");
-    dot.style.left = ex + "px";
-    dot.style.top = ey + "px";
+    dot.style.left = placed.left + "px";
+    dot.style.top = placed.top + "px";
     /* Measured from the centre of what is on screen, so the arrow and the
        number describe the same line. */
-    var centreLL = proj.toLatLng({ left: cx, top: cy });
+    var centre = unTilt(cx, cy);
+    var centreLL = proj.toLatLng({ left: centre.left, top: centre.top });
     var away = centreLL ? app.distance.haversineMeters(centreLL, who) : null;
     show(label, Number.isFinite(away));
     if (Number.isFinite(away)) {
       label.textContent = settings() ? settings().format(away) : Math.round(away) + "m";
-      label.style.left = ex + "px";
-      label.style.top = ey + "px";
+      label.style.left = placed.left + "px";
+      label.style.top = placed.top + "px";
       label.style.transform = "translate(-50%,-50%) rotate(" + (Math.atan2(dy, dx) * 180 / Math.PI) + "deg)";
     }
   }
@@ -2881,6 +2888,29 @@
   }
 
   // ---------------------------------------------------------------- input
+
+  /* unTilt's forward half: where a point on the untilted plane shows on the screen through the
+     lock tilt, or null when it is past the horizon (never on screen however far up). Identity
+     when the tilt is off. */
+  function reTilt(point) {
+    if (!point || !currentScene || currentScene.camera.stage !== "shot") return point;
+    var vp = el("surfaceViewport");
+    if (!vp) return point;
+    var css = getComputedStyle(document.documentElement);
+    var deg = parseFloat(css.getPropertyValue("--tiltDeg"));
+    var d = parseFloat(css.getPropertyValue("--tiltPerspective"));
+    var s = parseFloat(css.getPropertyValue("--tiltScale"));
+    var originY = parseFloat(css.getPropertyValue("--tiltOriginY"));
+    var w = vp.offsetWidth, h = vp.offsetHeight;
+    if (!(Number.isFinite(deg) && Number.isFinite(d) && d > 0 && Number.isFinite(s) && s > 0
+      && Number.isFinite(originY) && w > 0 && h > 0)) return point;
+    var ox = w / 2, oy = h * originY;
+    var X = (point.left - ox) * s, Y = (point.top - oy) * s;
+    var rad = (deg * Math.PI) / 180;
+    var k = d - Y * Math.sin(rad);
+    if (!(k > 1e-6)) return null;
+    return { left: ox + (X * d) / k, top: oy + (Y * Math.cos(rad) * d) / k };
+  }
 
   /* Every control on the surface raises its Signal through here, which makes
      it the one place a rangefinder-only session can be turned back - and it
