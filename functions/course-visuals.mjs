@@ -179,6 +179,9 @@ function rowToVisual(row) {
     diagnostics: jsonObject(row && row.diagnostics),
     versions: jsonArray(row && row.versions),
     uploaded_assets: jsonArray(row && row.uploaded_assets),
+    /* The course map and the outline that trims it (lib/gd-course-surface-core.mjs). */
+    course_boundary: row && row.course_boundary && typeof row.course_boundary === "object" ? row.course_boundary : null,
+    course_surface: row && row.course_surface && typeof row.course_surface === "object" ? row.course_surface : null,
     created_at: text(row && row.created_at, 80),
     updated_at: text(row && row.updated_at, 80)
   });

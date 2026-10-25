@@ -39,6 +39,7 @@
   var MAX_PICTURE_PX = 4096;      // most GPUs' texture ceiling; the frame is downscaled past it
   var ILLUSTRATED_PX = 2048;      // the app's MESH_MAX_PX - the picture is painted at this size
   var EYE_HEIGHT_M = 1.7;
+  var FOV = 50 * Math.PI / 180;   // the free viewer's vertical field of view
   var AMBIENT = { photo: 0.78, illustrated: 0.5, live: 0.42 };
   /* The hybrid blend's settings, shader code and mask (scripts/gd-hybrid-look.js). */
   var HYBRID = window.GDHybridLook;   // painter.js: the published photo carries baked relief, a live frame does not
@@ -142,10 +143,16 @@
     uniform vec3 uEye;
     uniform vec3 uSky;
     uniform float uFogFar;
+    /* The course outline (setClip): white inside. uClipMode 0 off, 1 the ground outside is
+       cut away, 2 it is shown dimmed (while the outline is being trimmed). */
+    uniform sampler2D uClip;
+    uniform float uClipMode;
     varying vec2 vUv;
     varying vec3 vWorld;
   ` + DECODE + HYBRID.GLSL + `
     void main() {
+      float inside = texture2D(uClip, vUv).r;
+      if (uClipMode > 0.5 && uClipMode < 1.5 && inside < 0.5) discard;
       /* Normals from the heightfield per fragment, as the app's mesh does: the grid is coarser
          than the DEM and this keeps the fine relief the geometry alone would lose. */
       float hL = heightAt(vUv - vec2(uTexel.x, 0.0));
@@ -162,6 +169,7 @@
          (scripts/gd-hybrid-look.js). */
       vec3 colour = hybridColour(texture2D(uPicture, vUv).rgb, vUv);
       colour *= lit;
+      if (uClipMode > 1.5 && inside < 0.5) colour = mix(vec3(dot(colour, vec3(0.299, 0.587, 0.114))), colour, 0.25) * 0.45;
       float fog = smoothstep(uFogFar * 0.45, uFogFar, distance(vWorld, uEye));
       gl_FragColor = vec4(mix(colour, uSky, fog), 1.0);
     }
@@ -222,12 +230,15 @@
     uniform vec3 uEye;
     uniform vec3 uSky;
     uniform float uFogFar;
+    uniform sampler2D uClip;
+    uniform float uClipMode;
     varying vec3 vNormal;
     varying vec3 vColour;
     varying vec2 vUv;
     varying vec2 vFootUv;
     varying vec3 vWorld;
     void main() {
+      if (uClipMode > 0.5 && texture2D(uClip, vFootUv).r < 0.5) discard;
       vec4 t = uTextured > 0.5 ? texture2D(uTex, vUv) : vec4(1.0);
       if (t.a < 0.45) discard;
       vec3 n = normalize(vNormal);
@@ -271,9 +282,11 @@
     varying vec2 vQ;
     varying float vSeed;
     varying vec3 vWorld;
+    varying vec2 vFootUv;
   ` + DECODE + TUCK + `
     void main() {
       float r = aTree.z;
+      vFootUv = aTree.xy;
       float seed = fract(sin(dot(aTree.xy, vec2(12.9898, 78.233))) * 43758.5453);
       float crown = aTree.w * 0.6;
       vec2 dir = normalize(uShadowDir), side = vec2(-dir.y, dir.x);
@@ -294,11 +307,15 @@
     precision highp float;
     uniform vec3 uEye;
     uniform float uFogFar;
+    uniform sampler2D uClip;
+    uniform float uClipMode;
     varying vec2 vQ;
     varying float vSeed;
     varying vec3 vWorld;
+    varying vec2 vFootUv;
   ` + NOISE + `
     void main() {
+      if (uClipMode > 0.5 && texture2D(uClip, vFootUv).r < 0.5) discard;
       float d = length(vQ) + (fbm(vQ * 3.0 + vSeed * 40.0) - 0.5) * 0.3;
       float fog = smoothstep(uFogFar * 0.45, uFogFar, distance(vWorld, uEye));
       float a = (1.0 - smoothstep(0.45, 1.0, d)) * 0.42 * (1.0 - fog);
@@ -427,12 +444,13 @@
     var gl = canvas.getContext("webgl", { antialias: true, alpha: false });
     if (!gl) throw new Error("WebGL is not available in this browser");
     var ground = program(gl, GROUND_VERT, GROUND_FRAG, ["aGrid"],
-      ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uEdgeTuck", "uPicture", "uTexel", "uMetresPerTexel", "uLight", "uAmbient", "uEye", "uSky", "uFogFar"]
+      ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uEdgeTuck", "uPicture", "uTexel", "uMetresPerTexel", "uLight", "uAmbient", "uEye", "uSky", "uFogFar",
+       "uClip", "uClipMode"]
       .concat(HYBRID.UNIFORMS));
     var mesh = program(gl, MESH_VERT, MESH_FRAG, ["aPos", "aNor", "aCol", "aUv", "aInst", "aStretch"],
-      ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uEdgeTuck", "uTex", "uPicture", "uTextured", "uLeaf", "uTint", "uLight", "uEye", "uSky", "uFogFar"]);
+      ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uEdgeTuck", "uTex", "uPicture", "uTextured", "uLeaf", "uTint", "uLight", "uEye", "uSky", "uFogFar", "uClip", "uClipMode"]);
     var shadows = program(gl, SHADOW_VERT, SHADOW_FRAG, ["aTree", "aCorner"],
-      ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uEdgeTuck", "uShadowDir", "uEye", "uFogFar"]);
+      ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uEdgeTuck", "uShadowDir", "uEye", "uFogFar", "uClip", "uClipMode"]);
     var instanced = gl.getExtension("ANGLE_instanced_arrays");
     var wideIndex = !!gl.getExtension("OES_element_index_uint");
     var instanceBuffer = gl.createBuffer();
@@ -441,7 +459,16 @@
     /* How a hybrid hole is blended (setLook): GDHybridLook.look()'s shape, nothing blended
        until a caller says how much. Only a hole with an overlay takes it. */
     var look = HYBRID.look({ blend: 0 });
-    var hole = null;   // {mesh, elevation, picture, trees, metres, demSize, seaLevel, ambient, heightAt}
+    var hole = null;   // {mesh, elevation, picture, trees, metres, demSize, seaLevel, ambient, heightAt, clip, clipMode}
+    /* Bound wherever a clip is sampled with none set: one white texel is "all inside". */
+    var allInside = (function () {
+      var c = document.createElement("canvas");
+      c.width = c.height = 1;
+      var ctx = c.getContext("2d");
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, 1, 1);
+      return texture(gl, c);
+    })();
 
     /* ---- tree models on the GPU: per species, low and realistic ---- */
 
@@ -532,6 +559,7 @@
       gl.deleteTexture(hole.picture);
       if (hole.overlay) gl.deleteTexture(hole.overlay);
       if (hole.mask) gl.deleteTexture(hole.mask);
+      if (hole.clip) gl.deleteTexture(hole.clip);
       gl.deleteBuffer(hole.mesh.vb);
       gl.deleteBuffer(hole.mesh.ib);
       if (hole.trees) { gl.deleteBuffer(hole.trees.shadowVb); gl.deleteBuffer(hole.trees.shadowIb); }
@@ -598,7 +626,9 @@
         overlay: input.overlay ? texture(gl, input.overlay) : null,
         mask: input.overlay && input.mask ? texture(gl, input.mask) : null,
         lumaMean: Number(input.lumaMean) > 0 ? Number(input.lumaMean) : 0.35,
-        heightAt: heightAt
+        heightAt: heightAt,
+        clip: null,
+        clipMode: 0
       };
       return trees ? trees.list.length : 0;
     }
@@ -623,6 +653,20 @@
       if (onChange) onChange();
     }
 
+    /* The course outline over this hole's frame: canvas2d white inside, black outside, any
+       size (it is stretched over the frame); mode "cut" hides the ground and trees outside,
+       "show" dims the ground outside and hides the trees (for trimming). No canvas: off. */
+    var CLIP_MODES = { cut: 1, show: 2 };
+    function setClip(canvas2d, mode) {
+      if (!hole) return;
+      if (canvas2d !== undefined) {
+        if (hole.clip) gl.deleteTexture(hole.clip);
+        hole.clip = canvas2d ? texture(gl, canvas2d) : null;
+      }
+      hole.clipMode = hole.clip ? (CLIP_MODES[mode] || CLIP_MODES.cut) : 0;
+      if (onChange) onChange();
+    }
+
     /* Metres of relief above the lowest point, exaggerated, at world x/z. */
     function groundAt(x, z, exaggeration) {
       if (!hole) return 0;
@@ -635,10 +679,11 @@
     function render(camera, exaggeration) {
       var span = hole ? Math.max(hole.metres[0], hole.metres[1]) : 1;
       var view = lookAt(camera.eye, camera.target);
-      draw({
-        viewProj: multiply(perspective(50 * Math.PI / 180, canvas.width / Math.max(1, canvas.height), 0.5, span * 4), view.matrix),
-        eye: camera.eye, fogFar: span * 2.2, clear: sky
-      }, exaggeration);
+      var aspect = canvas.width / Math.max(1, canvas.height);
+      var viewProj = multiply(perspective(FOV, aspect, 0.5, span * 4), view.matrix);
+      draw({ viewProj: viewProj, eye: camera.eye, fogFar: span * 2.2, clear: sky }, exaggeration);
+      /* What the frame was drawn through, so the viewer can put things on it and pick from it. */
+      return { viewProj: viewProj, eye: camera.eye, right: view.right, up: view.up, back: view.back, aspect: aspect, far: span * 4 };
     }
 
     /* Through Play's own framing instead of a camera (createFramed below): the canvas IS the
@@ -704,6 +749,8 @@
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, hole.elevation); gl.uniform1i(ground.uElevation, 0);
       gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, hole.picture); gl.uniform1i(ground.uPicture, 1);
       HYBRID.setUniforms(gl, ground, { overlay: hole.overlay, mask: hole.mask, fallback: hole.picture }, look, hole.lumaMean);
+      gl.activeTexture(gl.TEXTURE4); gl.bindTexture(gl.TEXTURE_2D, hole.clip || allInside); gl.uniform1i(ground.uClip, 4);
+      gl.uniform1f(ground.uClipMode, hole.clipMode);
       gl.bindBuffer(gl.ARRAY_BUFFER, hole.mesh.vb);
       gl.enableVertexAttribArray(ground.aGrid);
       gl.vertexAttribPointer(ground.aGrid, 2, gl.FLOAT, false, 0, 0);
@@ -728,6 +775,8 @@
       gl.uniform3fv(shadows.uEye, new Float32Array(eye));
       gl.uniform1f(shadows.uFogFar, fogFar);
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, hole.elevation); gl.uniform1i(shadows.uElevation, 0);
+      gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, hole.clip || allInside); gl.uniform1i(shadows.uClip, 1);
+      gl.uniform1f(shadows.uClipMode, hole.clipMode);
       gl.depthMask(false);
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -791,6 +840,8 @@
       gl.uniform1f(mesh.uTint, hole.realistic ? 0.12 : 0);
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, hole.elevation); gl.uniform1i(mesh.uElevation, 0);
       gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, hole.picture); gl.uniform1i(mesh.uPicture, 1);
+      gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, hole.clip || allInside); gl.uniform1i(mesh.uClip, 3);
+      gl.uniform1f(mesh.uClipMode, hole.clipMode);
       gl.uniform1i(mesh.uTex, 2);
       Object.keys(groups).forEach(function (key) {
         var g = groups[key], data = new Float32Array(g.data);
@@ -862,6 +913,7 @@
           Object.keys(gpu[set]).forEach(function (id) { if (gpu[set][id]) gpu[set][id].parts.forEach(deletePart); });
         });
         gl.deleteBuffer(instanceBuffer);
+        gl.deleteTexture(allInside);
         gl.deleteProgram(ground.program);
         gl.deleteProgram(mesh.program);
         gl.deleteProgram(shadows.program);
@@ -872,7 +924,8 @@
 
     return {
       setHole: setHole, render: render, renderFramed: renderFramed, dispose: dispose, groundAt: groundAt,
-      setLook: setLook, setMask: setMask,
+      setLook: setLook, setMask: setMask, setClip: setClip,
+      clear: function () { release(); if (onChange) onChange(); },
       metres: function () { return hole ? hole.metres : null; },
       /* The DEM's own heights (not exaggerated) at frame uv, sampled as the GPU samples them. */
       heightAt: function (u, v) { return hole ? hole.heightAt(u, v) : 0; },
@@ -981,7 +1034,8 @@
     return Promise.all([courseSurfaces(input), photoImage]).then(function (res) {
       var course = res[0];
       var surfaces = course.surfaces;
-      if (!core || !core.hasAnySurface(surfaces) || !lib.holeIsMapped(surfaces, input.holeNumber)) {
+      /* A whole-course surface (no hole number) needs only something mapped somewhere on it. */
+      if (!core || !core.hasAnySurface(surfaces) || (input.holeNumber != null && !lib.holeIsMapped(surfaces, input.holeNumber))) {
         throw new Error("this hole has no green or fairway on the map");
       }
       var picture = document.createElement("canvas");
@@ -1068,6 +1122,46 @@
       var p = worldPx(pt.lat, pt.lng, zoom);
       return [((p.x - meta.originPx.x) / w - 0.5) * metres[0], ((p.y - meta.originPx.y) / h - 0.5) * metres[1]];
     };
+  }
+
+  /* World metres from the frame's centre back to lat/lng: frameWorld's inverse. */
+  function frameUnworld(meta, metres) {
+    var zoom = Number(meta.captureZoom), out = meta.outputDimensions || {}, w = Number(out.width), h = Number(out.height);
+    if (!meta.originPx || !Number.isInteger(zoom) || !w || !h) return null;
+    var scale = 256 * Math.pow(2, zoom);
+    return function (x, z) {
+      var px = (x / metres[0] + 0.5) * w + Number(meta.originPx.x);
+      var py = (z / metres[1] + 0.5) * h + Number(meta.originPx.y);
+      var n = Math.PI - 2 * Math.PI * py / scale;
+      return { lat: 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))), lng: px / scale * 360 - 180 };
+    };
+  }
+
+  /* ------------------------------------------------------------------ the course outline */
+
+  var CLIP_PX = 2048;   // the outline's mask over the frame: ~1 m a pixel on a whole course
+
+  /* The outline as the scene's clip: white inside, over this frame's own pixel space. Null
+     when there is no outline or the frame carries no projection. */
+  function clipCanvas(meta, ring) {
+    if (!ring || ring.length < 3) return null;
+    var space = frameSpace(meta, CLIP_PX);
+    if (!space) return null;
+    var c = document.createElement("canvas");
+    c.width = space.width;
+    c.height = space.height;
+    var ctx = c.getContext("2d");
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.fillStyle = "#fff";
+    ctx.beginPath();
+    ring.forEach(function (p, i) {
+      var at = space.project(p);
+      if (i) ctx.lineTo(at.x, at.y); else ctx.moveTo(at.x, at.y);
+    });
+    ctx.closePath();
+    ctx.fill();
+    return c;
   }
 
   /* ------------------------------------------------------------------ Play's 3D mode */
@@ -1168,6 +1262,9 @@
     var keys = {};
     var anchors = null;          // {tee:[x,z], green:[x,z]} in world metres, for the views
     var toWorld = null;
+    var fromWorld = null;
+    var meta = null;             // the frame up, for redrawing the outline's mask
+    var lastView = null;         // what the last frame was drawn through (scene.render)
     var exaggeration = opts.exaggeration != null ? Number(opts.exaggeration) : 2.5;
     var scene = createScene(canvas, requestFrame);
 
@@ -1212,7 +1309,9 @@
       var moving = applyKeys(dt);
       lastTick = moving ? now : 0;
       resize();
-      scene.render(camera(), exaggeration);
+      if (outline.dirty) applyOutline();
+      lastView = scene.render(camera(), exaggeration);
+      drawOutline();
       if (opts.onFrame) opts.onFrame();
       if (moving) requestFrame();
     }
@@ -1344,11 +1443,13 @@
     var drag = null;
     function onDown(e) {
       stage.focus();
+      if (outline.trimming && trimDown(e)) return;
       drag = { x: e.clientX, y: e.clientY, pan: e.button === 2 || e.shiftKey, id: e.pointerId };
       try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
       if (cam.mode === "orbit") stage.style.cursor = "grabbing";
     }
     function onMove(e) {
+      if (outline.trimming && trimMove(e)) return;
       if (!drag || drag.id !== e.pointerId || touches.size > 1) return;
       var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       drag.x = e.clientX; drag.y = e.clientY;
@@ -1364,6 +1465,7 @@
       requestFrame();
     }
     function onUp(e) {
+      if (outline.drag && outline.drag.id === e.pointerId) trimUp();
       if (drag && drag.id === e.pointerId) drag = null;
       if (cam.mode === "orbit") stage.style.cursor = "grab";
     }
@@ -1437,6 +1539,223 @@
     if (resizeObserver) resizeObserver.observe(stage);
     stage.style.cursor = "grab";
 
+    /* ---- the course outline ---- */
+
+    /* The outline drawn round the course: lat/lng points, cut out of the ground (setClip) and,
+       while trimming, drawn over the 3D view as a line along the ground with a handle at each
+       point and a smaller one halfway along each edge. Drag a handle to move the point, drag
+       a halfway handle to add a point there, right-click (or long-press) a handle to take the
+       point out. Undo steps back one edit. opts.onOutline(ring) runs after every change. */
+    var outline = { ring: null, trimming: false, dirty: false, drag: null, history: [] };
+    var overlay = document.createElement("canvas");
+    overlay.setAttribute("data-gd-3d-overlay", "");
+    overlay.style.cssText = "position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none";
+    stage.appendChild(overlay);
+    var HANDLE_PX = 7, HIT_PX = 12, EDGE_STEP_M = 8, LONG_PRESS_MS = 550;
+
+    function copyRing(ring) { return ring ? ring.map(function (p) { return { lat: p.lat, lng: p.lng }; }) : null; }
+    function outlineChanged() {
+      outline.dirty = true;
+      requestFrame();
+      if (opts.onOutline) opts.onOutline(copyRing(outline.ring));
+    }
+    function applyOutline() {
+      outline.dirty = false;
+      var mask = meta ? clipCanvas(meta, outline.ring) : null;
+      scene.setClip(mask, outline.trimming ? "show" : "cut");
+    }
+    function setOutline(ring) {
+      outline.ring = ring && ring.length >= 3 ? copyRing(ring) : null;
+      outline.history = [];
+      outline.drag = null;
+      outlineChanged();
+    }
+    function trim(on) {
+      outline.trimming = !!on;
+      outline.drag = null;
+      stage.style.cursor = cam.mode === "walk" ? "crosshair" : "grab";
+      outline.dirty = true;
+      requestFrame();
+    }
+    function undoOutline() {
+      if (!outline.history.length) return false;
+      outline.ring = outline.history.pop();
+      outlineChanged();
+      return true;
+    }
+    function remember() {
+      outline.history.push(copyRing(outline.ring));
+      if (outline.history.length > 100) outline.history.shift();
+    }
+
+    /* A screen point (CSS px in the stage) to the ground under it: march the camera ray until
+       it goes under the ground, then halve the step till it sits on it. Null off the ground. */
+    function pick(sx, sy) {
+      var v = lastView, m = scene.metres();
+      if (!v || !m) return null;
+      var tanHalf = Math.tan(FOV / 2);
+      var nx = (sx / Math.max(1, stage.clientWidth)) * 2 - 1, ny = 1 - (sy / Math.max(1, stage.clientHeight)) * 2;
+      var dir = norm([
+        -v.back[0] + v.right[0] * nx * tanHalf * v.aspect + v.up[0] * ny * tanHalf,
+        -v.back[1] + v.right[1] * nx * tanHalf * v.aspect + v.up[1] * ny * tanHalf,
+        -v.back[2] + v.right[2] * nx * tanHalf * v.aspect + v.up[2] * ny * tanHalf
+      ]);
+      var step = Math.max(0.5, Math.max(m[0], m[1]) / 1500), prev = 0;
+      function below(t) {
+        var x = v.eye[0] + dir[0] * t, y = v.eye[1] + dir[1] * t, z = v.eye[2] + dir[2] * t;
+        return y <= ground(x, z);
+      }
+      for (var t = step; t < v.far; t += step) {
+        if (below(t)) {
+          var lo = prev, hi = t;
+          for (var i = 0; i < 24; i++) { var mid = (lo + hi) / 2; if (below(mid)) hi = mid; else lo = mid; }
+          var x = v.eye[0] + dir[0] * hi, z = v.eye[2] + dir[2] * hi;
+          if (Math.abs(x) > m[0] / 2 || Math.abs(z) > m[1] / 2) return null;
+          return [x, z];
+        }
+        prev = t;
+        step *= 1.004;
+      }
+      return null;
+    }
+
+    /* World x, y, z to stage CSS px through the last frame, or null behind the camera. */
+    function screenOf(x, y, z) {
+      var M = lastView && lastView.viewProj;
+      if (!M) return null;
+      var cw = M[3] * x + M[7] * y + M[11] * z + M[15];
+      if (cw <= 0.5) return null;
+      var cx = (M[0] * x + M[4] * y + M[8] * z + M[12]) / cw, cy = (M[1] * x + M[5] * y + M[9] * z + M[13]) / cw;
+      return [(cx * 0.5 + 0.5) * stage.clientWidth, (0.5 - cy * 0.5) * stage.clientHeight];
+    }
+    function onGround(p) {
+      var at = toWorld && toWorld(p);
+      return at ? [at[0], ground(at[0], at[1]) + 0.4, at[1]] : null;
+    }
+    function handles() {
+      var ring = outline.ring || [], points = [], mids = [];
+      ring.forEach(function (p, i) {
+        var a = onGround(p), b = onGround(ring[(i + 1) % ring.length]);
+        points.push(a ? screenOf(a[0], a[1], a[2]) : null);
+        if (a && b) {
+          var mx = (a[0] + b[0]) / 2, mz = (a[2] + b[2]) / 2;
+          mids.push(screenOf(mx, ground(mx, mz) + 0.4, mz));
+        } else mids.push(null);
+      });
+      return { points: points, mids: mids };
+    }
+    function nearest(list, sx, sy) {
+      var best = -1, bestD = HIT_PX * HIT_PX;
+      list.forEach(function (p, i) {
+        if (!p) return;
+        var d = (p[0] - sx) * (p[0] - sx) + (p[1] - sy) * (p[1] - sy);
+        if (d < bestD) { bestD = d; best = i; }
+      });
+      return best;
+    }
+    function local(e) {
+      var r = stage.getBoundingClientRect();
+      return [e.clientX - r.left, e.clientY - r.top];
+    }
+
+    function removePoint(i) {
+      if (!outline.ring || outline.ring.length <= 3) return false;
+      remember();
+      outline.ring.splice(i, 1);
+      outlineChanged();
+      return true;
+    }
+
+    /* True when the press was the outline's (on a handle); anything else moves the camera. */
+    function trimDown(e) {
+      var at = local(e), h = handles();
+      var i = nearest(h.points, at[0], at[1]);
+      if (i >= 0 && (e.button === 2 || e.ctrlKey || e.metaKey)) { removePoint(i); return true; }
+      if (e.button !== 0 || e.shiftKey) return false;
+      if (i >= 0) {
+        remember();
+        outline.drag = { id: e.pointerId, index: i, moved: false, timer: setTimeout(function () {
+          /* Held without moving: take the point out (touch has no right button). */
+          if (outline.drag && !outline.drag.moved) { var k = outline.drag.index; outline.drag = null; outline.history.pop(); removePoint(k); }
+        }, LONG_PRESS_MS) };
+      } else {
+        var k = nearest(h.mids, at[0], at[1]);
+        if (k < 0) return false;
+        remember();
+        var a = outline.ring[k], b = outline.ring[(k + 1) % outline.ring.length];
+        outline.ring.splice(k + 1, 0, { lat: (a.lat + b.lat) / 2, lng: (a.lng + b.lng) / 2 });
+        outline.drag = { id: e.pointerId, index: k + 1, moved: true, timer: 0 };
+        outlineChanged();
+      }
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+      return true;
+    }
+    function trimMove(e) {
+      var at = local(e);
+      if (!outline.drag) {
+        var h = handles(), over = nearest(h.points, at[0], at[1]) >= 0 || nearest(h.mids, at[0], at[1]) >= 0;
+        if (!drag) stage.style.cursor = over ? "move" : (cam.mode === "walk" ? "crosshair" : "grab");
+        return false;
+      }
+      if (outline.drag.id !== e.pointerId) return true;
+      var hit = pick(at[0], at[1]);
+      if (!hit || !fromWorld) return true;
+      if (outline.drag.timer) { clearTimeout(outline.drag.timer); outline.drag.timer = 0; }
+      outline.drag.moved = true;
+      outline.ring[outline.drag.index] = fromWorld(hit[0], hit[1]);
+      outlineChanged();
+      return true;
+    }
+    function trimUp() {
+      if (outline.drag && outline.drag.timer) clearTimeout(outline.drag.timer);
+      if (outline.drag && !outline.drag.moved) outline.history.pop();   // a click on a handle changed nothing
+      outline.drag = null;
+    }
+
+    /* The outline over the 3D view while trimming: each edge stepped along the ground so it
+       lies over the hills rather than cutting through them. */
+    function drawOutline() {
+      var dpr = Math.min(2, window.devicePixelRatio || 1);
+      var w = Math.round(stage.clientWidth * dpr), h = Math.round(stage.clientHeight * dpr);
+      if (overlay.width !== w || overlay.height !== h) { overlay.width = w; overlay.height = h; }
+      var ctx = overlay.getContext("2d");
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      var ring = outline.ring;
+      if (!outline.trimming || !ring || !toWorld) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.beginPath();
+      var open = false;
+      ring.forEach(function (p, i) {
+        var a = toWorld(p), b = toWorld(ring[(i + 1) % ring.length]);
+        if (!a || !b) { open = false; return; }
+        var n = Math.max(1, Math.min(64, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / EDGE_STEP_M)));
+        for (var k = 0; k <= n; k++) {
+          var x = a[0] + (b[0] - a[0]) * k / n, z = a[1] + (b[1] - a[1]) * k / n;
+          var sp = screenOf(x, ground(x, z) + 0.4, z);
+          if (!sp) { open = false; continue; }
+          if (open) ctx.lineTo(sp[0], sp[1]); else ctx.moveTo(sp[0], sp[1]);
+          open = true;
+        }
+      });
+      ctx.lineJoin = "round";
+      ctx.strokeStyle = "rgba(0,0,0,0.6)"; ctx.lineWidth = 5; ctx.stroke();
+      ctx.strokeStyle = "#ffd23f"; ctx.lineWidth = 2.5; ctx.stroke();
+      var hs = handles();
+      hs.mids.forEach(function (p) {
+        if (!p) return;
+        ctx.beginPath(); ctx.arc(p[0], p[1], HANDLE_PX * 0.6, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,210,63,0.35)"; ctx.fill();
+        ctx.lineWidth = 1.5; ctx.strokeStyle = "#ffd23f"; ctx.stroke();
+      });
+      hs.points.forEach(function (p, i) {
+        if (!p) return;
+        ctx.beginPath(); ctx.arc(p[0], p[1], HANDLE_PX, 0, Math.PI * 2);
+        ctx.fillStyle = outline.drag && outline.drag.index === i ? "#ffd23f" : "#fff"; ctx.fill();
+        ctx.lineWidth = 2; ctx.strokeStyle = "#1b1b1b"; ctx.stroke();
+      });
+    }
+
     /* ---- loading ---- */
 
     /* Stand a hole up. Resolves with what was built - {illustrated, hybrid,
@@ -1447,9 +1766,9 @@
     var hybridData = null;
     function load(input, keepView) {
       var token = ++loadToken;
-      var meta = input.meta || {};
-      var elevation = meta.elevation || null;
-      var metres = holeMetres(meta);
+      var meta0 = input.meta || {};
+      var elevation = meta0.elevation || null;
+      var metres = holeMetres(meta0);
       var surfaces = null;
       var once = Object.assign({}, input, {
         course: function () { return surfaces || (surfaces = Promise.resolve(input.course ? input.course() : null)); }
@@ -1475,7 +1794,7 @@
           demSize: elevation ? [Number(elevation.width), Number(elevation.height)] : [1, 1],
           metres: metres,
           seaLevel: elevation && elevation.elevationRange ? Number(elevation.elevationRange.min) : 0,
-          ambient: drawn.illustrated ? AMBIENT.illustrated : meta.liveTerrain ? AMBIENT.live : AMBIENT.photo,
+          ambient: drawn.illustrated ? AMBIENT.illustrated : meta0.liveTerrain ? AMBIENT.live : AMBIENT.photo,
           /* treeModels ("realistic" | "low") overrides the style's own choice. */
           realistic: input.treeModels ? input.treeModels === "realistic" : !drawn.illustrated,
           trees: drawn.trees,
@@ -1483,7 +1802,14 @@
           mask: hybridData ? HYBRID.drawMask(hybridData, input.mask) : null,
           lumaMean: drawn.lumaMean
         });
+        meta = meta0;
         toWorld = frameWorld(meta, metres);
+        fromWorld = frameUnworld(meta, metres);
+        /* The outline goes with the frame: a new frame, a new mask from the outline given. */
+        outline.ring = input.outline && input.outline.length >= 3 ? copyRing(input.outline) : null;
+        outline.history = [];
+        outline.drag = null;
+        applyOutline();
         var pins = meta.anchorPins || {};
         anchors = toWorld ? { tee: toWorld(input.tee || pins.tee), green: toWorld(input.green || pins.green) } : null;
         if (!keepView) viewOverhead(); else requestFrame();
@@ -1510,6 +1836,8 @@
       if (resizeObserver) resizeObserver.disconnect();
       listeners.forEach(function (l) { l[0].removeEventListener(l[1], l[2], l[3]); });
       listeners = [];
+      if (outline.drag && outline.drag.timer) clearTimeout(outline.drag.timer);
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
       scene.dispose();
     }
 
@@ -1523,12 +1851,32 @@
       viewFrom: viewFrom,
       toggleMode: toggleMode,
       mode: function () { return cam.mode; },
+      /* Nothing up: a load in flight is dropped and the stage shows the sky. */
+      clear: function () {
+        loadToken++;
+        scene.clear();
+        meta = toWorld = fromWorld = anchors = null;
+        outline.ring = null;
+        outline.history = [];
+        outline.drag = null;
+        outline.trimming = false;
+        requestFrame();
+      },
       exaggeration: function () { return exaggeration; },
       /* Hybrid: the blend (GDHybridLook.look()'s shape), live; and where it applies
          (GDHybridLook settings), redrawn from the hole already up. */
       setLook: function (next) { scene.setLook(next); },
       setMask: function (settings) { if (hybridData) scene.setMask(HYBRID.drawMask(hybridData, settings)); },
       setExaggeration: function (value) { exaggeration = Math.max(0, Number(value) || 0); requestFrame(); },
+      /* The course outline: [{lat, lng}] or null (setOutline), editing it on the view (trim),
+         stepping back one edit (undoOutline), and the outline as it stands (outline). */
+      setOutline: setOutline,
+      trim: trim,
+      trimming: function () { return outline.trimming; },
+      undoOutline: undoOutline,
+      outline: function () { return copyRing(outline.ring); },
+      /* Ground under a stage point (CSS px), as lat/lng - null off the ground. */
+      pickLatLng: function (sx, sy) { var hit = pick(sx, sy); return hit && fromWorld ? fromWorld(hit[0], hit[1]) : null; },
       requestFrame: requestFrame,
       /* Where the camera is, for a readout. Null until a hole is up. */
       status: function () {

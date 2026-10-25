@@ -217,6 +217,7 @@ assert.ok(/trees: drawn \? drawn\.trees : null/.test(PAINTER_SRC), 'its trees go
 assert.ok(/if \(!drawn \|\| threeD \|\| hybrid\) aerialImg\.src/.test(PAINTER_SRC), 'the photo is not fetched for the plain mesh when drawn (3D mode reads species off it, hybrid blends over it)');
 assert.ok(/style !== "illustrated" && style !== "hybrid"/.test(PAINTER_SRC), 'photo style never paints');
 assert.ok(/if \(chosen !== "auto"\) return chosen;/.test(PAINTER_SRC) && /lib\.holeQualifies\(pkg, loadedHole\) \? "hybrid" : "photo"/.test(PAINTER_SRC), 'auto is hybrid on a qualifying hole, the photo elsewhere');
-assert.ok(/meshStyle === meshLook\(\)/.test(PAINTER_SRC) && /return style \+ \(view3d\(\) \? ":3d" : ""\) \+ \(style === "hybrid"/.test(PAINTER_SRC), 'a style change, 3D on or off, or a new hybrid look rebuilds the mesh');
+assert.ok(/meshStyle === meshLook\(\)/.test(PAINTER_SRC) && /return style \+ \(style === "hybrid" \? ":" \+ JSON\.stringify\(hybridSettings\(\)\) : view3d\(\) \? ":3d" : ""\)/.test(PAINTER_SRC), 'a style change, 3D on or off, or a new hybrid look rebuilds the mesh (a hybrid is on the 3D scene either way)');
+assert.ok(/var threeD = view3d\(\) \|\| !!\(hybrid && window\.GDCourse3D && window\.GDCourse3D\.createFramed\)/.test(PAINTER_SRC), 'a hybrid hole stands on the 3D scene, for its tree models');
 
 console.log('illustrated-surface: all assertions passed');

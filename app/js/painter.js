@@ -46,6 +46,7 @@
      stays, and the flat frame is already a finished picture. */
   var mesh = null;
   var meshStyle = null;        // the look the mesh up now was built for (meshLook)
+  var greenDrawn = false;      // the mesh draws the green (Illustrated, or a Hybrid that reaches it)
   /* Backing store cap. Frames go to 3072, and a 3072-square canvas is ~37MB of GPU memory per
      hole on a device that also has the texture and the elevation resident. The canvas is
      stretched to the frame's own size by CSS, so this costs sharpness the tilt hides and
@@ -632,6 +633,10 @@
       green.style.width = ""; green.style.height = ""; green.style.transform = "";
       return;
     }
+    /* The green frame is a photo. Where the mesh draws the green - Illustrated, or a Hybrid
+       whose blend reaches it - that photo would sit over the drawn map as a bare patch, so it
+       stays off and the mesh's own green shows. */
+    if (greenDrawn) { green.style.display = "none"; return; }
     green.style.display = "";
     var k = Math.pow(2, Number(meta.captureZoom) - Number(gf.captureZoom));
     var dx = Number(gf.originPx.x) * k - Number(meta.originPx.x);
@@ -2045,6 +2050,7 @@
     var disposed = !!mesh;
     if (mesh && mesh.dispose) { try { mesh.dispose(); } catch (e) { /* context already lost */ } }
     mesh = null;
+    greenDrawn = false;
     document.body.classList.remove("surface-mesh");
     var canvas = el("surfaceMesh");
     if (!canvas) return;
@@ -2205,8 +2211,10 @@
     var drawn = illustratedPicture(meta, frameW, frameH);
     var hybrid = drawn && mapStyle() === "hybrid" ? hybridSettings() : null;
     /* 3D mode draws the same frame through gd-course-3d.js: every tree a 3D model of its
-       species, which it reads off the photo - so the photo is wanted under Illustrated too. */
-    var threeD = view3d();
+       species, which it reads off the photo - so the photo is wanted under Illustrated too.
+       A Hybrid hole always does: its look's tree models (realistic, unless the Studio chose
+       low-poly) are the 3D scene's - the plain mesh only has flat sprites. */
+    var threeD = view3d() || !!(hybrid && window.GDCourse3D && window.GDCourse3D.createFramed);
     var loaded = 0, needed = drawn && !threeD && !hybrid ? 1 : 2, aerialImg = new Image(), elevationImg = new Image();
     aerialImg.crossOrigin = elevationImg.crossOrigin = "anonymous";
 
@@ -2263,6 +2271,7 @@
            answered, and must not be rebuilt on every settings change. */
         meshStyle = meshLook();
         mesh.state.exaggeration = reliefExaggeration();
+        greenDrawn = !!drawn && (!hybrid || window.GDHybridLook.changesGreens(hybrid));
         applyMeshFrame();
         document.body.classList.add("surface-mesh");
         /* The green frame was placed on the flat frame before the mesh was up; now the ground
@@ -2328,10 +2337,11 @@
   }
 
   /* What a mesh is built for: a change of any of these is a new mesh, not a re-light - the
-     style, 3D on or off, and for a hybrid the look itself. */
+     style, 3D on or off, and for a hybrid the look itself. A hybrid stands on the 3D scene
+     either way (attachMesh), so the cube does not rebuild it. */
   function meshLook() {
     var style = mapStyle();
-    return style + (view3d() ? ":3d" : "") + (style === "hybrid" ? ":" + JSON.stringify(hybridSettings()) : "");
+    return style + (style === "hybrid" ? ":" + JSON.stringify(hybridSettings()) : view3d() ? ":3d" : "");
   }
 
   /* The illustrated picture for this frame and the trees that stand on it, {picture, trees,

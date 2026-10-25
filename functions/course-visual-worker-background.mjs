@@ -32,7 +32,7 @@ sharp.concurrency(1);
 import { planCourseCaptures, captureGrid, packageHoleData, courseBoundsFor, GREEN_FRAME_MAX_PX } from "./lib/gd-visual-plan-core.mjs";
 import { resolveImagerySource, unscannableReason, attributionFor } from "./lib/gd-imagery-sources.mjs";
 import { renderHoleSurfaceMercator, renderOverview } from "./lib/gd-visual-export-core.mjs";
-import { reliefFromTerrainRgb, cropByBounds, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS, terrainRgbPngFromHeights, decodeElevation } from "./lib/gd-relief-core.mjs";
+import { reliefFromTerrainRgb, cropByBounds, reliefAzimuthForPlayAxis, RELIEF_DEFAULTS, terrainRgbPngFromHeights, decodeElevation, metresPerPixel } from "./lib/gd-relief-core.mjs";
 import { ensureCourseTerrain, loadCourseTerrain, TERRAIN_BUCKET } from "./lib/terrain/gd-terrain-service.mjs";
 import { terrainForWindow } from "./lib/terrain/gd-terrain-window.mjs";
 import { createSupabaseStorage } from "./lib/gd-supabase-storage.mjs";
@@ -44,6 +44,10 @@ import { isTestKind, testRunFromJob, TEST_BAKE_BUCKET, TEST_SNAPSHOT_KIND, TEST_
 import { mapboxCaptureSource } from "./lib/gd-mapbox-source.mjs";
 import { runOpcdExport } from "./lib/gd-opcd-export-job.mjs";
 import { OPCD_EXPORT_KIND } from "./lib/gd-opcd-export-core.mjs";
+import {
+  COURSE_SURFACE_KIND, COURSE_SURFACE_ROOT, COURSE_SURFACE_MAX_PX, normaliseBoundary, boundaryHash, surfaceExtent,
+  surfaceCaptures, surfaceVersion, elevationGrid, resampleHeights, heightRange, surfaceHoles, courseSurfaceRecord
+} from "./lib/gd-course-surface-core.mjs";
 import { readCanopy } from "./lib/gd-canopy-height.mjs";
 import { loadScorecard } from "./lib/gd-map-overlay-store.mjs";
 import { scorecardCourseKey } from "./lib/gd-scorecard-resolve.mjs";
@@ -517,6 +521,23 @@ async function sweepOldFrameVersions(courseId, liveVersion) {
   for (const dir of staleDirs) {
     const files = await storageList(courseId + "/frames/" + dir + "/");
     const paths = files.filter(f => f && f.id !== null && f.name).map(f => courseId + "/frames/" + dir + "/" + f.name);
+    await storageRemove(paths);
+    removed += paths.length;
+  }
+  return { staleDirs: staleDirs.length, removed };
+}
+
+/* Retire every course map version except the live one. Same rules as the frame sweep:
+   {courseId}/course-map/{oldVersion}/* only. */
+async function sweepOldSurfaceVersions(courseId, liveVersion) {
+  const root = courseId + "/" + COURSE_SURFACE_ROOT + "/";
+  const staleDirs = (await storageList(root))
+    .filter(e => e && e.id === null && e.name && e.name !== liveVersion && /^s[a-z0-9]+$/.test(e.name))
+    .map(e => e.name);
+  let removed = 0;
+  for (const dir of staleDirs) {
+    const files = await storageList(root + dir + "/");
+    const paths = files.filter(f => f && f.id !== null && f.name).map(f => root + dir + "/" + f.name);
     await storageRemove(paths);
     removed += paths.length;
   }
@@ -1002,6 +1023,160 @@ async function runOpcdExportJob(job) {
   });
 }
 
+/* A capture's pixels, downloaded once per run. Prefers the pre-downscaled rendition written
+   at snapshot time - small download, no 17MP decode. pathExport is the current field;
+   path2048 is what snapshots written before the rendition size became configurable carry,
+   and reading it keeps those courses exporting (at their old size) until they are
+   re-snapshotted. Neither present: downscale the master. */
+function captureReader(space) {
+  const cachedBuffers = {};
+  return async function bufferFor(entry) {
+    if (!cachedBuffers[entry.path]) {
+      const rendition = entry.pathExport || entry.path2048 || "";
+      if (rendition) {
+        /* The terrain asset lives in the live bucket even for a test export. */
+        cachedBuffers[entry.path] = await storageDownload(rendition, entry.bucket || space.bucket);
+      } else {
+        const raw = await storageDownload(entry.path, space.bucket);
+        const isPng = entry.path.endsWith(".png");
+        const resized = sharp(raw, { limitInputPixels: false }).resize({ width: EXPORT_RENDITION_PX, height: EXPORT_RENDITION_PX, fit: "inside", withoutEnlargement: true });
+        cachedBuffers[entry.path] = await (isPng ? resized.png({ compressionLevel: 9 }) : resized.jpeg({ quality: 88 })).toBuffer();
+      }
+    }
+    return cachedBuffers[entry.path];
+  };
+}
+
+/* The course map (lib/gd-course-surface-core.mjs): the course's captures composited once
+   over the whole course, cut to its outline, with the course terrain resampled onto the
+   same ground. Built from the published hole frames' own snapshot and recipe, so it matches
+   them; queued after every published export and whenever Studio saves an outline. One
+   composite - well inside a single invocation, so no relay. */
+async function runCourseSurfaceJob(job) {
+  const space = spaceFor(job);
+  const pkg = await loadCoursePackage(job.course_id);
+  if (!pkg) throw new Error("course " + job.course_id + " not found in " + MAPS_TABLE);
+  const rows = await supabaseFetch("course_visuals?select=course_boundary,course_surface,uploaded_assets&course_id=eq." + encodeURIComponent(pkg.courseId) + "&limit=1");
+  const row = Array.isArray(rows) ? rows[0] || null : null;
+  const published = row && Array.isArray(row.uploaded_assets) && row.uploaded_assets.some(a => a && a.role === "hole-frame-published");
+  if (!published) throw new Error("the course has no published hole frames yet - scan it first; the course map is drawn from the same captures");
+  const capturesIndex = JSON.parse((await storageDownload(space.root + "/captures/index.json", space.bucket)).toString("utf8"));
+  const entries = Array.isArray(capturesIndex && capturesIndex.captures) ? capturesIndex.captures : [];
+  if (capturesIndex.source && capturesIndex.source.storable === false) {
+    throw new Error("refusing to publish: captures come from " + capturesIndex.source.key + ", which is not storable");
+  }
+  /* An outline that no longer validates (the rules tightened since it was saved) is reported
+     and drawn without, never a failed build. */
+  let boundary = null;
+  if (row.course_boundary && row.course_boundary.ring) {
+    try { boundary = normaliseBoundary(row.course_boundary.ring); }
+    catch (error) { console.log("[visual-worker] course map " + pkg.courseId + ": outline ignored - " + error.message); }
+  }
+  const backdropEntry = entries.find(e => e.role === "course-backdrop") || null;
+  const extent = surfaceExtent({ boundary, backdropBounds: backdropEntry && backdropEntry.bounds, captureBounds: entries.map(e => e.bounds) });
+  if (!extent) throw new Error("no captured ground to draw the course map on");
+  const recipe = await latestPublishedRecipe(pkg.courseId);
+  /* The hole frames' own look, less what only means something on one hole: the floodlight
+     pools on a tee-to-green line and the mowing stripes run across the frame. */
+  const settings = mergeSettings(recipe.settings || {}, { floodlight: { enabled: false }, mowingVisibility: 0 });
+  const terrainManifest = await terrainForExport(pkg, space);
+  const terrainEntry = terrainCaptureEntry(terrainManifest);
+  const version = surfaceVersion({
+    snapshot: capturesIndex.generatedAt || null,
+    terrain: terrainManifest ? terrainManifest.terrainVersion : 0,
+    boundary: boundary ? boundaryHash(boundary.ring) : "",
+    settings: hashText(JSON.stringify(settings)),
+    relief: RELIEF_STAMP
+  });
+  if (row.course_surface && row.course_surface.version === version && !(job.recipe && job.recipe.force)) {
+    return { unchanged: true, version, path: row.course_surface.path };
+  }
+  const dir = space.root + "/" + COURSE_SURFACE_ROOT + "/" + version;
+  const bufferFor = captureReader(space);
+  const chosen = surfaceCaptures(entries, extent);
+  await heartbeatJob(job, { version, stage: "reading " + chosen.length + " captures", rssMb: Math.round(process.memoryUsage().rss / 1048576) });
+  const captures = [];
+  for (let i = 0; i < chosen.length; i += TILE_CONCURRENCY) {
+    const batch = chosen.slice(i, i + TILE_CONCURRENCY);
+    captures.push(...await Promise.all(batch.map(async entry => ({ entry, buffer: await bufferFor(entry) }))));
+  }
+  const underlay = backdropEntry ? { entry: backdropEntry, buffer: await bufferFor(backdropEntry) } : null;
+  /* Relief lit from the north-west, as the overview is: a course has no one play axis. */
+  let terrain = null;
+  if (terrainEntry) {
+    try {
+      const crop = await cropByBounds(await bufferFor(terrainEntry), terrainEntry.bounds, extent, { padPx: 0 });
+      const shaded = await reliefFromTerrainRgb(crop.buffer, { latitude: (crop.bounds.north + crop.bounds.south) / 2, zoom: terrainEntry.captureZoom });
+      terrain = { entry: { role: "terrain-reference", bounds: crop.bounds }, buffer: shaded.png };
+    } catch (error) {
+      console.log("[visual-worker] course map relief skipped: " + (error && error.message || error));
+    }
+  }
+  await heartbeatJob(job, { version, stage: "compositing", rssMb: Math.round(process.memoryUsage().rss / 1048576) });
+  const frame = await renderHoleSurfaceMercator({
+    pins: { tee: null, green: null, route: [], greenShape: [] },
+    captures, underlay, terrain, greenSurface: null, settings, maxDim: COURSE_SURFACE_MAX_PX, extent
+  });
+  captures.length = 0;
+  if (frame.diagnostics) console.log(normaliseLogLine("course map", frame.diagnostics));
+  await storageUpload(dir + "/surface.jpg", frame.jpeg, "image/jpeg", space.bucket);
+
+  /* The elevation over exactly the picture's ground, at the terrain's own spacing. */
+  let elevation = null;
+  if (terrainEntry) {
+    try {
+      const crop = await cropByBounds(await bufferFor(terrainEntry), terrainEntry.bounds, frame.bounds, { padPx: 2 });
+      const raw = await sharp(crop.buffer, { limitInputPixels: false }).raw().toBuffer({ resolveWithObject: true });
+      const decoded = decodeElevation(raw.data, raw.info.width, raw.info.height, raw.info.channels, "terrain-rgb");
+      const latitude = (frame.bounds.north + frame.bounds.south) / 2;
+      const metresAcross = metresPerPixel(latitude, frame.captureZoom) * frame.width;
+      const grid = elevationGrid(frame.width, frame.height, metresAcross, terrainEntry.terrain.sourceResolutionM);
+      const heights = resampleHeights(decoded.heights, raw.info.width, raw.info.height, crop.bounds, frame.bounds, grid.width, grid.height);
+      const png = await terrainRgbPngFromHeights(heights, grid.width, grid.height);
+      const path = dir + "/surface.elevation.png";
+      await storageUpload(path, png, "image/png", space.bucket);
+      elevation = {
+        path, encoding: "terrain-rgb", bounds: frame.bounds, width: grid.width, height: grid.height,
+        metresPerPixel: grid.metresPerPixel, elevationRange: heightRange(heights),
+        sourceMetresPerSample: terrainEntry.terrain.sourceResolutionM, terrain: terrainEntry.terrain
+      };
+    } catch (error) {
+      console.log("[visual-worker] course map elevation skipped: " + (error && error.message || error));
+    }
+  }
+  const record = courseSurfaceRecord({
+    version, dir, frame, bytes: frame.jpeg.length, elevation, boundary, extent,
+    holes: surfaceHoles(pkg), source: capturesIndex.source || null,
+    builtAt: new Date().toISOString(), jobId: job.id
+  });
+  await storageUpload(dir + "/surface.json", Buffer.from(JSON.stringify(record)), "application/json", space.bucket);
+  await supabaseFetch("course_visuals?course_id=eq." + encodeURIComponent(pkg.courseId), {
+    method: "PATCH",
+    body: JSON.stringify({ course_surface: record })
+  });
+  console.log("[visual-worker] course map " + pkg.courseId + " " + frame.width + "x" + frame.height + " z" + frame.captureZoom +
+    " from " + chosen.length + " captures" + (boundary ? ", cut to a " + boundary.ring.length + "-point outline" : "") +
+    (elevation ? ", elevation " + elevation.width + "x" + elevation.height : ", no elevation") + " (" + (frame.jpeg.length / 1024).toFixed(0) + "KB)");
+  let swept = null;
+  try { swept = await sweepOldSurfaceVersions(pkg.courseId, version); }
+  catch (e) { console.warn("course map sweep failed", pkg.courseId, e && e.message || e); }
+  return {
+    version, path: record.path, width: frame.width, height: frame.height, captureZoom: frame.captureZoom,
+    captures: chosen.length, outline: boundary ? boundary.ring.length : 0, elevation: !!elevation, swept
+  };
+}
+
+/* One course map at a time per course. Only a QUEUED job counts as already asked for: a
+   running one may have read the outline before it changed, so a new ask behind it stands. */
+async function enqueueCourseSurface(courseId, requestedBy) {
+  const existing = await supabaseFetch(JOBS_TABLE + "?select=id&course_id=eq." + encodeURIComponent(courseId) + "&kind=eq." + COURSE_SURFACE_KIND + "&status=eq.queued&limit=1");
+  if (Array.isArray(existing) && existing.length) return;
+  await supabaseFetch(JOBS_TABLE, {
+    method: "POST",
+    body: JSON.stringify([{ course_id: courseId, kind: COURSE_SURFACE_KIND, status: "queued", recipe: { requestedAt: new Date().toISOString() }, requested_by: requestedBy }])
+  });
+}
+
 async function runExportJob(job, deadlineAt) {
   const space = spaceFor(job);
   const pkg = await loadCoursePackage(job.course_id);
@@ -1031,26 +1206,7 @@ async function runExportJob(job, deadlineAt) {
   const framesDir = space.root + "/frames/" + version;
   const holeData = packageHoleData(pkg);
   const backdropEntry = entries.find(e => e.role === "course-backdrop");
-  const cachedBuffers = {};
-  /* Prefer the pre-downscaled rendition written at snapshot time - small download, no 17MP
-     decode. pathExport is the current field; path2048 is what snapshots written before the
-     rendition size became configurable carry, and reading it keeps those courses exporting
-     (at their old size) until they are re-snapshotted. Neither present: downscale the master. */
-  async function bufferFor(entry) {
-    if (!cachedBuffers[entry.path]) {
-      const rendition = entry.pathExport || entry.path2048 || "";
-      if (rendition) {
-        /* The terrain asset lives in the live bucket even for a test export. */
-        cachedBuffers[entry.path] = await storageDownload(rendition, entry.bucket || space.bucket);
-      } else {
-        const raw = await storageDownload(entry.path, space.bucket);
-        const isPng = entry.path.endsWith(".png");
-        const resized = sharp(raw, { limitInputPixels: false }).resize({ width: EXPORT_RENDITION_PX, height: EXPORT_RENDITION_PX, fit: "inside", withoutEnlargement: true });
-        cachedBuffers[entry.path] = await (isPng ? resized.png({ compressionLevel: 9 }) : resized.jpeg({ quality: 88 })).toBuffer();
-      }
-    }
-    return cachedBuffers[entry.path];
-  }
+  const bufferFor = captureReader(space);
   /* A hole is its corridor. A green surround on its own (its corridor failed to shoot) is not a
      hole frame and must not take the export down with it. */
   const holeNumbers = [...new Set(entries.filter(e => e.holeNumber && e.role !== "green-surround").map(e => Number(e.holeNumber)))].sort((a, b) => a - b);
@@ -1401,6 +1557,7 @@ export default async function courseVisualWorker(req) {
         : job.kind === "export" || job.kind === TEST_EXPORT_KIND ? await runExportJob(job, deadlineAt)
         : job.kind === "terrain" ? await runTerrainJob(job)
         : job.kind === OPCD_EXPORT_KIND ? await runOpcdExportJob(job)
+        : job.kind === COURSE_SURFACE_KIND ? await runCourseSurfaceJob(job)
         : { skipped: "unknown kind " + job.kind };
       if (result && result.requeue) {
         /* Soft deadline reached: hand the job back and chain a fresh invocation, which
@@ -1438,6 +1595,8 @@ export default async function courseVisualWorker(req) {
            same frames (lib/gd-tree-queue.mjs). An automatic run leaves trees someone has
            edited in Studio as they are. */
         await queueTreeRun(supabaseFetch, { courseId: job.course_id, requestedBy: "auto-after-frames", origin }).catch(() => {});
+        /* And the course map, drawn again from the captures the new frames came from. */
+        await enqueueCourseSurface(job.course_id, "auto-after-frames").catch(() => {});
       }
       /* Hybrid: fresh captures always get re-exported with the live recipe (or natural). */
       if (job.kind === "snapshot") await enqueueFollowUpExport(job.course_id).catch(() => {});
