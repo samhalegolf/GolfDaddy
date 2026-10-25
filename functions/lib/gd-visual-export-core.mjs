@@ -721,10 +721,14 @@ function unworld(x, y) {
    green design is authored against the green frame's resolution, and the same recipe on a
    z18 hole frame gave lines 4x thicker and paint that did not match. Keeping all green work
    on the overlay also makes a missing overlay visible - a bare green means it did not load. */
-export async function renderHoleSurfaceMercator({ pins, captures, underlay = null, terrain, greenSurface, settings, maxDim = 2048, quality = 82 }) {
+/* extent (WGS84 bounds) frames the surface on that ground instead of on the captures' union -
+   the course map (gd-course-surface-core.mjs) is cut to its outline, not to wherever the
+   hole captures happen to reach. With an extent the underlay alone is enough to draw. */
+export async function renderHoleSurfaceMercator({ pins, captures, underlay = null, terrain, greenSurface, settings, maxDim = 2048, quality = 82, extent = null }) {
   const rects = captures.map(item => ({ item, pb: projectedBounds(item.entry.bounds) })).filter(r => r.pb);
-  if (!rects.length) throw new Error("no positioned captures for mercator surface");
-  const merged = {
+  const framed = extent ? projectedBounds(extent) : null;
+  if (!rects.length && !(framed && underlay)) throw new Error("no positioned captures for mercator surface");
+  const merged = framed || {
     left: Math.min(...rects.map(r => r.pb.left)),
     top: Math.min(...rects.map(r => r.pb.top)),
     right: Math.max(...rects.map(r => r.pb.right)),
@@ -745,7 +749,7 @@ export async function renderHoleSurfaceMercator({ pins, captures, underlay = nul
      were allowed (see frameZoomFor). The honest bound is the sharpest capture actually in
      hand: render at the resolution of the real pixels, never above it. Deriving it from the
      captures rather than recomputing the planner's guess also means the two cannot drift. */
-  const shotZoom = Math.max(1, ...rects.map(r => num(r.item.entry.captureZoom, 19)));
+  const shotZoom = rects.length ? Math.max(1, ...rects.map(r => num(r.item.entry.captureZoom, 19))) : Math.max(1, num(underlay.entry.captureZoom, 17));
   const captureZoom = Math.max(1, Math.min(shotZoom, Math.floor(19 + Math.log2(f))));
   const scalePx = 256 * Math.pow(2, captureZoom);
   const originPx = { x: merged.left * scalePx, y: merged.top * scalePx };

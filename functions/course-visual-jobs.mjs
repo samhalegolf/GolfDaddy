@@ -21,7 +21,11 @@ const TABLE = "course_visual_jobs";
    OPCD_EXPORT_KIND in lib/gd-opcd-export-core.mjs (asserted by dev/opcd-export.test.mjs) -
    a literal here so a player poll does not load that module's imports. */
 const OPCD_EXPORT_KIND = "opcd_export";
-const sideJobKind = kind => isTestKind(kind) || kind === OPCD_EXPORT_KIND;
+/* The course map (functions/course-map.mjs) the same way: drawn from frames already published,
+   never a build a player waits on. Mirrors COURSE_SURFACE_KIND in lib/gd-course-surface-core.mjs
+   (asserted by dev/course-surface.test.mjs). */
+const COURSE_SURFACE_KIND = "course_surface";
+const sideJobKind = kind => isTestKind(kind) || kind === OPCD_EXPORT_KIND || kind === COURSE_SURFACE_KIND;
 const MAPS_TABLE = "course_maps";
 const VISUALS_TABLE = "course_visuals";
 const MAPPER_JOBS_TABLE = "course_mapper_jobs";

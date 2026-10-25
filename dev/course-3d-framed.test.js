@@ -11,6 +11,12 @@
  *   - tilted, the dot moves exactly where lift() says, for any frame rotation
  *   - ground at height zero never moves, tilt or not
  *   - a tree model stands up on it, and dispose is safe twice and after a render
+ * And the Studio's course outline on the free viewer (a whole-course surface, no hole number):
+ *   - inside the outline the picture shows; outside it the ground is cut away to the sky
+ *   - while trimming, the ground outside is dimmed rather than cut, and the outline is drawn
+ *   - the ground under the middle of the screen picks back to the lat/lng it was put at
+ *   - setOutline reports through onOutline, a fresh outline has nothing to undo, and dispose
+ *     takes the overlay off the stage
  *
  * Run: node dev/course-3d-framed.test.js
  */
@@ -181,6 +187,66 @@ window.runHybrid = async () => {
   viewer.dispose();
   return out;
 };
+/* The course outline on a whole-course surface: a red picture, the camera overhead on its
+   middle, and outlines that do and do not cover the middle of the screen. */
+window.runOutline = async () => {
+  const stage = document.createElement("div");
+  stage.style.cssText = "width:200px;height:150px;position:relative";
+  const c = document.createElement("canvas");
+  stage.appendChild(c);
+  document.body.appendChild(stage);
+  let centre = null, reported = null;
+  const viewer = GDCourse3D.createViewer(stage, c, {
+    onFrame: () => {
+      const s = document.createElement("canvas"); s.width = c.width; s.height = c.height;
+      const ctx = s.getContext("2d"); ctx.drawImage(c, 0, 0);
+      const d = ctx.getImageData(Math.floor(c.width / 2), Math.floor(c.height / 2), 1, 1).data;
+      centre = { r: d[0], g: d[1], b: d[2] };
+    },
+    onOutline: (ring) => { reported = ring; }
+  });
+  const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  const zoom = 18, scale = 256 * Math.pow(2, zoom), lat0 = -36.9, lng0 = 174.7;
+  const rad = lat0 * Math.PI / 180;
+  const cx = (lng0 + 180) / 360 * scale, cy = (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * scale;
+  const at = (x, y) => ({
+    lat: Math.atan(Math.sinh(Math.PI * (1 - 2 * (cy - 128 + y) / scale))) * 180 / Math.PI,
+    lng: (cx - 128 + x) / scale * 360 - 180
+  });
+  const red = document.createElement("canvas"); red.width = red.height = 256;
+  const rctx = red.getContext("2d"); rctx.fillStyle = "rgb(200,20,20)"; rctx.fillRect(0, 0, 256, 256);
+  const covering = [at(60, 60), at(196, 60), at(196, 196), at(60, 196)];
+  const corner = [at(4, 4), at(60, 4), at(60, 60), at(4, 60)];
+  const built = await viewer.load({
+    holeNumber: null,
+    meta: { captureZoom: zoom, originPx: { x: cx - 128, y: cy - 128 }, outputDimensions: { width: 256, height: 256 } },
+    frameUrl: red.toDataURL(),
+    style: "photo",
+    course: () => null,
+    outline: covering
+  }, false);
+  const out = { built: !!built };
+  await frames(); out.inside = centre;
+  viewer.setOutline(corner); await frames(); out.cut = centre;
+  out.reported = reported && reported.length;
+  out.undoFresh = viewer.undoOutline();
+  viewer.trim(true); await frames(); out.dimmed = centre;
+  const overlay = stage.querySelector("[data-gd-3d-overlay]");
+  out.overlayDrawn = (() => {
+    const d = overlay.getContext("2d").getImageData(0, 0, overlay.width, overlay.height).data;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 0) return true;
+    return false;
+  })();
+  out.trimming = viewer.trimming();
+  const picked = viewer.pickLatLng(100, 75);
+  const mid = at(128, 128);
+  out.pickedM = picked ? Math.hypot((picked.lat - mid.lat) * 111320, (picked.lng - mid.lng) * 111320 * Math.cos(rad)) : null;
+  out.pickedSky = viewer.pickLatLng(100, -400);
+  viewer.trim(false); viewer.setOutline(null); await frames(); out.noOutline = centre;
+  viewer.dispose();
+  out.overlayGone = !stage.querySelector("[data-gd-3d-overlay]");
+  return out;
+};
 </script></body></html>`;
 
 function startServer() {
@@ -222,6 +288,7 @@ async function launchBrowser(playwright) {
   const out = await page.evaluate(() => window.run());
   const viewer = out.webgl ? await page.evaluate(() => window.runViewer()) : null;
   const hybrid = out.webgl ? await page.evaluate(() => window.runHybrid()) : null;
+  const outline = out.webgl ? await page.evaluate(() => window.runOutline()) : null;
   await browser.close();
   server.close();
 
@@ -250,5 +317,20 @@ async function launchBrowser(playwright) {
   assert.ok(blue(hybrid.maskedOff), "masked to surfaces that are not there, the photo shows: " + JSON.stringify(hybrid.maskedOff));
   assert.ok(green(hybrid.maskedGreen), "masked to the greens, the green is illustrated: " + JSON.stringify(hybrid.maskedGreen));
   assert.ok(hybrid.detail && hybrid.detail.g > 0, "the detail method draws: " + JSON.stringify(hybrid.detail));
-  console.log("course-3d-framed passed: lift agreement at rotations 0 and 137, flat, height zero, tree, dispose, Studio viewer, hybrid blend and mask");
+  const isRed = (p) => p && p.r > 150 && p.g < 60 && p.b < 60;
+  const isSky = (p) => p && p.b > 180 && p.g > 160 && p.r > 130 && p.r < 190;
+  assert.ok(outline.built, "a whole-course surface builds with no hole number");
+  assert.ok(isRed(outline.inside), "inside the outline the picture shows: " + JSON.stringify(outline.inside));
+  assert.ok(isSky(outline.cut), "outside it the ground is cut away to the sky: " + JSON.stringify(outline.cut));
+  assert.strictEqual(outline.reported, 4, "setOutline reports the outline through onOutline");
+  assert.strictEqual(outline.undoFresh, false, "a fresh outline has nothing to undo");
+  assert.ok(outline.trimming, "trimming is on");
+  assert.ok(outline.dimmed && !isSky(outline.dimmed) && outline.dimmed.r > outline.dimmed.g + 10 && outline.dimmed.r < 150,
+    "trimming, the ground outside is dimmed, not cut: " + JSON.stringify(outline.dimmed));
+  assert.ok(outline.overlayDrawn, "trimming, the outline is drawn over the view");
+  assert.ok(outline.pickedM != null && outline.pickedM < 3, "the middle of the screen picks the ground at the middle of the frame: " + outline.pickedM + " m off");
+  assert.strictEqual(outline.pickedSky, null, "above the horizon picks nothing");
+  assert.ok(isRed(outline.noOutline), "no outline, the whole surface shows: " + JSON.stringify(outline.noOutline));
+  assert.ok(outline.overlayGone, "dispose takes the overlay off the stage");
+  console.log("course-3d-framed passed: lift agreement at rotations 0 and 137, flat, height zero, tree, dispose, Studio viewer, hybrid blend and mask, course outline");
 })().catch((e) => { console.error(e); process.exit(1); });

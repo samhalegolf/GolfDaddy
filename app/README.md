@@ -112,7 +112,9 @@ or writes course data back.
   same CSS matrix and lock tilt, same lift for the overlays — so shot lock,
   tilt framing, taps and every overlay work unchanged, in Photo or
   Illustrated. It owns no camera in the app; the free camera (`createViewer`)
-  is Clarity Studio's 3D Course Viewer only.
+  is Clarity Studio's 3D Course Viewer only, as is the course outline that
+  cuts the ground (`setClip`) and the whole-course surface it is trimmed on
+  (`course_surface` on the visual record) - Play does not read either yet.
 - `js/boot.js` — wiring. Sets `ClarityApp.booted` as the test canary.
 
 Test: `node dev/fresh-app-boot.test.js` (registered in structural-smoke CI) —

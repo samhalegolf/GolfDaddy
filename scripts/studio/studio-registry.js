@@ -317,7 +317,7 @@
 
     {
       id: "course-3d", label: "3D Course Viewer", parent: "courses",
-      function: "View-only 3D model of a hole with a camera you move freely: orbit round it, walk on it, or jump to overhead, from-the-tee and round-the-green views. Built from exactly what GPS Play stands up - the published hole frame (or the Illustrated map painted from the course package by the app's own painter), draped over the published terrain-RGB elevation, with the same tree placement - but drawn through a real perspective camera instead of the app's fixed tilt. Every tree stands as a 3D model of its species (guessed from the photo under its crown, mapped water and latitude - nobody tags trees): realistic models for the nearest trees on the photo, low-poly for the rest and for Illustrated. Relief exaggeration is adjustable. A third style, Hybrid, blends the Illustrated map over the photo to find how far the two can be mixed: blend amount, method (mix, illustrated colour with the photo's detail, overlay), detail, photo colour, shading, where it applies (whole frame or chosen surfaces - greens, fairways, bunkers, water, woods, tees - with a feathered edge) and tree models; Copy settings puts a blend worth keeping on the clipboard as JSON. The scene is app/js/gd-course-3d.js, the same one GPS Play's 3D mode (the cube on its tool rail) draws its terrain with - there through Play's own framing and lock tilt, never a free camera - so the trees and ground here are exactly what a player sees. Writes nothing.",
+      function: "3D model of a hole, or of the whole course, with a camera you move freely: orbit round it, walk on it, or jump to overhead, from-the-tee and round-the-green views. Built from exactly what GPS Play stands up - the published hole frame (or the Illustrated map painted from the course package by the app's own painter), draped over the published terrain-RGB elevation, with the same tree placement - but drawn through a real perspective camera instead of the app's fixed tilt. Every tree stands as a 3D model of its species (guessed from the photo under its crown, mapped water and latitude - nobody tags trees): realistic models for the nearest trees on the photo, low-poly for the rest and for Illustrated. Relief exaggeration is adjustable. A third style, Hybrid, blends the Illustrated map over the photo to find how far the two can be mixed: blend amount, method (mix, illustrated colour with the photo's detail, overlay), detail, photo colour, shading, where it applies (whole frame or chosen surfaces - greens, fairways, bunkers, water, woods, tees - with a feathered edge) and tree models; Copy settings puts a blend worth keeping on the clipboard as JSON. The scene is app/js/gd-course-3d.js, the same one GPS Play's 3D mode (the cube on its tool rail) draws its terrain with - there through Play's own framing and lock tilt, never a free camera - so the trees and ground here are exactly what a player sees. Whole course (top of the hole list) stands up the course map: every hole's scan composited once into one surface with the course terrain (functions/lib/gd-course-surface-core.mjs), built by the visual worker after each published export or on Build course map, with Go to for each hole's tee. Trim outline draws the course's outline on it - drag a point, drag a halfway dot to add one, right-click or hold to remove one, Undo, Start from the holes for a padded outline round everything mapped - and the ground outside is cut away here and on every hole. Save outline stores it (course_visuals.course_boundary) and rebuilds the course map cropped to it. The outline and build requests are the only things it writes.",
       owner: "scripts/studio/courses/course-3d/course-3d-page.js",
       runtime: { app: false, studio: true, server: true },
       code: [
@@ -329,16 +329,20 @@
         { role: "Species guess per tree from the photo", path: "scripts/trees/tree-species.js" },
         { role: "The app's mesh this mirrors (fixed camera, shear in frame)", path: "app/js/gd-terrain-mesh.js" },
         { role: "Course package surfaces for Illustrated", path: "scripts/gd-bubble-hazard-core.js" },
-        { role: "Course selection (pick-only mode, app-facing owner)", path: "scripts/inline/gd-course-picker-search-v2.js" }
+        { role: "Course selection (pick-only mode, app-facing owner)", path: "scripts/inline/gd-course-picker-search-v2.js" },
+        { role: "Course map API: save the outline, queue a build, the build jobs", path: "functions/course-map.mjs" },
+        { role: "Course map core: outline rules, the surface's ground, elevation resampling, the record", path: "functions/lib/gd-course-surface-core.mjs" },
+        { role: "Course map build (course_surface job)", path: "functions/course-visual-worker-background.mjs" }
       ],
-      inputs: ["Course selection from the real picker, or a typed course key", "GET /api/course-visuals (hole frames + elevation sidecars)", "GET /api/course-package (Illustrated only)"],
-      outputs: ["Display only - nothing is written"],
-      owns: ["The Studio controls round the 3D viewer"],
+      inputs: ["Course selection from the real picker, or a typed course key", "GET /api/course-visuals (hole frames + elevation sidecars, course_surface, course_boundary)", "GET /api/course-package (Illustrated, Start from the holes)", "GET /api/course-map (course map jobs)"],
+      outputs: ["POST /api/course-map: the course outline (course_visuals.course_boundary) and course map builds (course_visual_jobs kind course_surface)"],
+      owns: ["The Studio controls round the 3D viewer", "Trimming and saving the course outline"],
       doesNotOwn: [
         "The 3D scene, the viewer's camera and its renderer (owned by app/js/gd-course-3d.js, shared with GPS Play's 3D mode)",
         "The Play mesh (owned by app/js/gd-terrain-mesh.js)",
         "The illustrated painter and tree placement (owned by app/js/gd-illustrated-surface.js)",
-        "The baked frames and elevation (owned by the visual worker)"
+        "The baked frames and elevation (owned by the visual worker)",
+        "The course map's pixels (built by the visual worker's course_surface job)"
       ],
       connections: [
         { target: "courses", direction: "child-of", label: "" },
