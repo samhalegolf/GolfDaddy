@@ -46,6 +46,7 @@
      stays, and the flat frame is already a finished picture. */
   var mesh = null;
   var meshStyle = null;        // the look the mesh up now was built for (meshLook)
+  var greenDrawn = false;      // the mesh draws the green (Illustrated, or a Hybrid that reaches it)
   /* Backing store cap. Frames go to 3072, and a 3072-square canvas is ~37MB of GPU memory per
      hole on a device that also has the texture and the elevation resident. The canvas is
      stretched to the frame's own size by CSS, so this costs sharpness the tilt hides and
@@ -632,6 +633,10 @@
       green.style.width = ""; green.style.height = ""; green.style.transform = "";
       return;
     }
+    /* The green frame is a photo. Where the mesh draws the green - Illustrated, or a Hybrid
+       whose blend reaches it - that photo would sit over the drawn map as a bare patch, so it
+       stays off and the mesh's own green shows. */
+    if (greenDrawn) { green.style.display = "none"; return; }
     green.style.display = "";
     var k = Math.pow(2, Number(meta.captureZoom) - Number(gf.captureZoom));
     var dx = Number(gf.originPx.x) * k - Number(meta.originPx.x);
@@ -2045,6 +2050,7 @@
     var disposed = !!mesh;
     if (mesh && mesh.dispose) { try { mesh.dispose(); } catch (e) { /* context already lost */ } }
     mesh = null;
+    greenDrawn = false;
     document.body.classList.remove("surface-mesh");
     var canvas = el("surfaceMesh");
     if (!canvas) return;
@@ -2263,6 +2269,7 @@
            answered, and must not be rebuilt on every settings change. */
         meshStyle = meshLook();
         mesh.state.exaggeration = reliefExaggeration();
+        greenDrawn = !!drawn && (!hybrid || window.GDHybridLook.changesGreens(hybrid));
         applyMeshFrame();
         document.body.classList.add("surface-mesh");
         /* The green frame was placed on the flat frame before the mesh was up; now the ground

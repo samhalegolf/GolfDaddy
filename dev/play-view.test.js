@@ -44,6 +44,14 @@ const ok = (name) => { passed += 1; console.log("  ok  " + name); };
   assert.strictEqual(H.ambient(H.look({ shading: 25 }), 0.78, 0.5), 0.75, "set shading is the light, whatever the blend");
   ok("look is the renderers' fractions; ambient follows the blend unless shading is set");
 
+  /* ---- which looks change the green (Play leaves its sharper green photo off for them) ---- */
+  assert.strictEqual(H.changesGreens(null), true, "the default look blends everywhere");
+  assert.strictEqual(H.changesGreens({ blend: 0 }), false, "blend 0 is the photo");
+  assert.strictEqual(H.changesGreens({ blend: 0, saturation: 60 }), true, "photo colour changes every pixel");
+  assert.strictEqual(H.changesGreens({ where: "surfaces", surfaces: { greens: false } }), false, "masked off the greens");
+  assert.strictEqual(H.changesGreens({ where: "surfaces", surfaces: { greens: true } }), true, "masked onto the greens");
+  ok("changesGreens: any blend that reaches a green, or any change to the photo's colour");
+
   /* ---- Auto's rule: the watch maps' ---- */
   const green = { lat: -36.9, lng: 174.7 };
   const full = { status: "full-map-ready", holes: [{ holeNumber: 1, geometry: { green } }, { holeNumber: 2, geometry: { tee: green } }] };

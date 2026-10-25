@@ -11,6 +11,7 @@
      - drawMask()        where the illustrated picture applies, white on black (browser only)
      - meanLuma()        the photo's average brightness, the detail blend's 1.0 (browser only)
      - holeQualifies()   the Auto map style's rule: the same as watch maps'
+     - changesGreens()   whether the look draws anything but the plain photo on a green
 
    Renderers: app/js/gd-terrain-mesh.js (Play's plain mesh) and app/js/gd-course-3d.js (Play's
    3D mode and the Studio viewer). Pure apart from the two browser-only helpers, which only run
@@ -184,6 +185,16 @@
     }
   }
 
+  /* Does this look show the green as anything but the plain photo? Play lays a sharper photo
+     of the green over the hole (painter.js applyGreenFrame); where the blend reaches the green
+     that photo would cover it with a bare patch, so Play leaves it off. Blend 0 changes
+     nothing; photo colour (saturation) changes every pixel, mask or not. */
+  function changesGreens(settings) {
+    var s = normalize(settings);
+    if (s.saturation !== 100) return true;
+    return s.blend > 0 && (s.where !== "surfaces" || !!s.surfaces.greens);
+  }
+
   /* The Auto map style shows Hybrid on a hole that meets the watch maps' criteria, and the
      photo everywhere else. Those criteria (functions/course-watch-maps.mjs, and the frame
      builder in scripts/gd-watch-map-core.js) are: the course has a published map with
@@ -203,6 +214,6 @@
     DEFAULTS: DEFAULTS, SURFACES: SURFACES, METHODS: METHODS,
     normalize: normalize, look: look, ambient: ambient,
     GLSL: GLSL, UNIFORMS: UNIFORMS, setUniforms: setUniforms,
-    drawMask: drawMask, meanLuma: meanLuma, holeQualifies: holeQualifies
+    drawMask: drawMask, meanLuma: meanLuma, holeQualifies: holeQualifies, changesGreens: changesGreens
   };
 });

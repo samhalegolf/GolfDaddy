@@ -690,16 +690,23 @@ async function bootCheck() {
        enough to draw. Picking the photo turns it off; the look is what play-view.js read. */
     const autoBefore = app.gpsSettings.mapStyle();
     const ring = (p, d) => [{ lat: p.lat + d, lng: p.lng - d }, { lat: p.lat + d, lng: p.lng + d }, { lat: p.lat - d, lng: p.lng + d }, { lat: p.lat - d, lng: p.lng - d }];
-    const qualifying = { status: "full-map-ready", holes: [{ holeNumber: 1, geometry: { tee, green, greenShape: ring(green, 0.0002), route: [] }, visual: { url: PNG, playSurface: meta } }] };
+    /* With a green frame: the sharper photo of the green Play lays over the hole. */
+    const greenOrigin = app.playSurface.worldPx(green.lat + 0.0003, green.lng - 0.0003, 20);
+    const withGreen = Object.assign({}, meta, { greenFrame: { path: "auto-hybrid-course/frames/r1/h1.green.jpg", captureZoom: 20,
+      originPx: { x: greenOrigin.x, y: greenOrigin.y }, outputDimensions: { width: 220, height: 220 } } });
+    const qualifying = { status: "full-map-ready", holes: [{ holeNumber: 1, geometry: { tee, green, greenShape: ring(green, 0.0002), route: [] }, visual: { url: PNG, playSurface: withGreen } }] };
+    const greenShown = () => { const g = document.getElementById("surfaceGreen"); return !!(g && g.getAttribute("src") && getComputedStyle(g).display !== "none"); };
     const plainBefore = built.plain;
     await gd.open("auto-hybrid-course", qualifying, null);
     await gd.until(() => built.plain > plainBefore && document.body.classList.contains("surface-mesh"), "the qualifying hole's mesh");
     const autoHybrid = { overlay: !!(lastOptions && lastOptions.overlay), mask: !!(lastOptions && lastOptions.mask),
-      look: lastOptions && lastOptions.look, aerialIsPhoto: !!(lastOptions && lastOptions.aerial instanceof HTMLImageElement) };
+      look: lastOptions && lastOptions.look, aerialIsPhoto: !!(lastOptions && lastOptions.aerial instanceof HTMLImageElement),
+      greenPhotoShown: greenShown() };
     const plainAuto = built.plain;
     app.gpsSettings.set("mapStyle", "photo");
     await gd.until(() => built.plain > plainAuto && document.body.classList.contains("surface-mesh"), "the photo mesh after picking photo");
-    const photoChosen = { overlay: !!(lastOptions && lastOptions.overlay) };
+    await gd.wait(80);
+    const photoChosen = { overlay: !!(lastOptions && lastOptions.overlay), greenPhotoShown: greenShown() };
     app.gpsSettings.set("mapStyle", "auto");
     window.GDTerrainMesh.create = plain;
     window.GDCourse3D.createFramed = framedFn;
@@ -1964,6 +1971,8 @@ async function bootCheck() {
       "auto on a qualifying hole draws the hybrid: the drawn map over the photo: " + JSON.stringify(threeD.autoHybrid));
     assert.deepStrictEqual(threeD.autoHybrid.look, hybridLookOf(threeD.savedLook), "with the look play-view.js holds");
     assert.ok(!threeD.photoChosen.overlay, "picking the photo turns the hybrid off");
+    assert.strictEqual(threeD.autoHybrid.greenPhotoShown, false, "under a hybrid that reaches the green, the green's sharper photo stays off");
+    assert.strictEqual(threeD.photoChosen.greenPhotoShown, true, "on the photo, the green's sharper photo is laid over the hole again");
   }
   {
     const v = surfaceFirst.view3d;
