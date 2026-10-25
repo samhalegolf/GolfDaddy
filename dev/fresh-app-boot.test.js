@@ -442,6 +442,9 @@ async function launchBrowser(playwright) {
   catch (e) { return playwright.chromium.launch({ channel: "chrome" }); }
 }
 
+/* The renderers' look for a saved hybrid, worked out the way painter.js does. */
+function hybridLookOf(saved) { return require(path.join(ROOT, "scripts", "gd-hybrid-look.js")).look(saved); }
+
 async function bootCheck() {
   const playwright = require("playwright-core");
   const server = await startServer();
@@ -647,7 +650,8 @@ async function bootCheck() {
     if (!document.createElement("canvas").getContext("webgl")) return { webgl: false };
     const built = { plain: 0, framed: 0 };
     const plain = window.GDTerrainMesh.create, framedFn = window.GDCourse3D.createFramed;
-    window.GDTerrainMesh.create = function () { built.plain++; return plain.apply(this, arguments); };
+    let lastOptions = null;
+    window.GDTerrainMesh.create = function (c, o) { built.plain++; lastOptions = o; return plain.apply(this, arguments); };
     window.GDCourse3D.createFramed = function () { built.framed++; return framedFn.apply(this, arguments); };
     /* Terrain-RGB rising 0-30m across the frame. */
     const dem = document.createElement("canvas"); dem.width = dem.height = 16;
@@ -680,9 +684,27 @@ async function bootCheck() {
     const on = Object.assign({}, built);
     cube.click();
     await gd.until(() => built.plain > on.plain && document.body.classList.contains("surface-mesh"), "3D mode off to bring the plain mesh back");
+    const afterOff = Object.assign({}, built);
+    /* Auto, the default map style, is the hybrid on a hole that meets the watch maps'
+       criteria: a published map (the package's status) and a green on the hole, mapped well
+       enough to draw. Picking the photo turns it off; the look is what play-view.js read. */
+    const autoBefore = app.gpsSettings.mapStyle();
+    const ring = (p, d) => [{ lat: p.lat + d, lng: p.lng - d }, { lat: p.lat + d, lng: p.lng + d }, { lat: p.lat - d, lng: p.lng + d }, { lat: p.lat - d, lng: p.lng - d }];
+    const qualifying = { status: "full-map-ready", holes: [{ holeNumber: 1, geometry: { tee, green, greenShape: ring(green, 0.0002), route: [] }, visual: { url: PNG, playSurface: meta } }] };
+    const plainBefore = built.plain;
+    await gd.open("auto-hybrid-course", qualifying, null);
+    await gd.until(() => built.plain > plainBefore && document.body.classList.contains("surface-mesh"), "the qualifying hole's mesh");
+    const autoHybrid = { overlay: !!(lastOptions && lastOptions.overlay), mask: !!(lastOptions && lastOptions.mask),
+      look: lastOptions && lastOptions.look, aerialIsPhoto: !!(lastOptions && lastOptions.aerial instanceof HTMLImageElement) };
+    const plainAuto = built.plain;
+    app.gpsSettings.set("mapStyle", "photo");
+    await gd.until(() => built.plain > plainAuto && document.body.classList.contains("surface-mesh"), "the photo mesh after picking photo");
+    const photoChosen = { overlay: !!(lastOptions && lastOptions.overlay) };
+    app.gpsSettings.set("mapStyle", "auto");
     window.GDTerrainMesh.create = plain;
     window.GDCourse3D.createFramed = framedFn;
-    return { webgl: true, before, on, after: Object.assign({}, built), pinOnScreen, published: app.painter.presentation().kind };
+    return { webgl: true, before, on, after: afterOff, pinOnScreen, published: app.painter.presentation().kind,
+      autoBefore, autoHybrid, photoChosen, savedLook: app.playView && app.playView.hybrid() };
   }, AKARANA_H1);
 
   const play = await page.evaluate(async (h1) => {
@@ -1937,6 +1959,11 @@ async function bootCheck() {
     assert.ok(threeD.pinOnScreen, "the overlays still project onto the 3D hole");
     assert.ok(threeD.after.plain === threeD.on.plain + 1 && threeD.after.framed === 1, "3D mode off rebuilds the plain mesh: " + JSON.stringify(threeD));
     assert.strictEqual(threeD.published, "published", "the hole stays on its published surface throughout");
+    assert.strictEqual(threeD.autoBefore, "auto", "a fresh device's map style is auto");
+    assert.ok(threeD.autoHybrid.overlay && threeD.autoHybrid.mask && threeD.autoHybrid.aerialIsPhoto,
+      "auto on a qualifying hole draws the hybrid: the drawn map over the photo: " + JSON.stringify(threeD.autoHybrid));
+    assert.deepStrictEqual(threeD.autoHybrid.look, hybridLookOf(threeD.savedLook), "with the look play-view.js holds");
+    assert.ok(!threeD.photoChosen.overlay, "picking the photo turns the hybrid off");
   }
   {
     const v = surfaceFirst.view3d;

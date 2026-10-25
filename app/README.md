@@ -105,6 +105,12 @@ or writes course data back.
 - `js/tool-rail.js` — the tab/rail toggle, and wires each rail button to its
   tool module's entry point. Each tool module wires its own panel/popover
   internals itself.
+- `js/play-view.js` — the hybrid look saved in Clarity Studio (GET
+  `/api/play-view`), kept on the device for rounds with no signal. GPS
+  Settings' map style defaults to Auto: Hybrid (the drawn map blended over the
+  photo, `scripts/gd-hybrid-look.js`) on a hole that meets the watch maps'
+  criteria — a published map and a green on the hole — and the photo
+  elsewhere. Both meshes draw it.
 - `js/gd-course-3d.js` — the 3D scene: ground on the DEM and every tree a 3D
   model of its species. 3D mode (the cube on the rail, GPS Settings `view3d`,
   kept across holes and rounds) has painter.js build the mesh with its

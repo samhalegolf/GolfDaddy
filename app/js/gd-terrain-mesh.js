@@ -26,6 +26,11 @@
 (function (root) {
   "use strict";
 
+  /* The hybrid map style: the illustrated picture blended over the photo by the shared code in
+     scripts/gd-hybrid-look.js. Without that library the picture is drawn as it is. */
+  const HYBRID = root.GDHybridLook || null;
+  const HYBRID_GLSL = HYBRID ? HYBRID.GLSL : "vec3 hybridColour(vec3 photo, vec2 uv) { return photo; }";
+
   const VERT = `
     attribute vec2 aGrid;              // 0..1 across the frame
     uniform sampler2D uElevation;
@@ -81,7 +86,7 @@
       vec3 c = texture2D(uElevation, uv).rgb * 255.0;
       return -10000.0 + (c.r * 65536.0 + c.g * 256.0 + c.b) * 0.1;
     }
-
+  ` + HYBRID_GLSL + `
     void main() {
       /* Normals per fragment rather than per vertex: the mesh is coarser than the DEM, so
          sampling the heightfield here keeps detail the geometry alone would lose. */
@@ -95,7 +100,7 @@
         (hD - hU) * uExaggeration / (2.0 * uMetresPerTexel.y)
       ));
       float lit = uAmbient + (1.0 - uAmbient) * max(dot(n, normalize(uLight)), 0.0);
-      vec3 base = texture2D(uAerial, vUv).rgb;
+      vec3 base = hybridColour(texture2D(uAerial, vUv).rgb, vUv);
       gl_FragColor = vec4(base * lit, 1.0);
     }
   `;
@@ -412,10 +417,14 @@
     const aGrid = gl.getAttribLocation(prog, "aGrid");
     const u = {};
     ["uElevation", "uAerial", "uExaggeration", "uSeaLevel", "uShear", "uImagePx", "uTexel", "uMetresPerTexel", "uLight", "uAmbient"]
+      .concat(HYBRID ? HYBRID.UNIFORMS : [])
       .forEach(name => { u[name] = gl.getUniformLocation(prog, name); });
 
     const elevation = texture(gl, options.elevation);
     const aerial = texture(gl, options.aerial, true);
+    /* Hybrid: the illustrated picture (overlay) over the photo (aerial), where the mask says. */
+    const overlay = HYBRID && options.overlay && options.mask ? texture(gl, options.overlay, true) : null;
+    const mask = overlay ? texture(gl, options.mask, true) : null;
     if (mesh.type === gl.UNSIGNED_INT) gl.getExtension("OES_element_index_uint");
     gl.enable(gl.DEPTH_TEST);
 
@@ -428,7 +437,8 @@
       demSize: options.demSize || [1024, 1024],
       imagePx: options.imagePx || [1024, 1024],
       seaLevel: options.seaLevel || 0,
-      light: [-0.6, 0.75, -0.35]
+      light: [-0.6, 0.75, -0.35],
+      look: options.look || null      // GDHybridLook.look()'s shape, for a hybrid picture
     };
 
     function render() {
@@ -456,6 +466,7 @@
 
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, elevation); gl.uniform1i(u.uElevation, 0);
       gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, aerial); gl.uniform1i(u.uAerial, 1);
+      if (HYBRID) HYBRID.setUniforms(gl, u, { overlay: overlay, mask: mask, fallback: aerial }, state.look, options.lumaMean);
 
       gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vb);
       gl.enableVertexAttribArray(aGrid);
@@ -517,6 +528,8 @@
       try {
         gl.deleteTexture(elevation);
         gl.deleteTexture(aerial);
+        if (overlay) gl.deleteTexture(overlay);
+        if (mask) gl.deleteTexture(mask);
         gl.deleteBuffer(mesh.vb);
         gl.deleteBuffer(mesh.ib);
         gl.deleteProgram(prog);
