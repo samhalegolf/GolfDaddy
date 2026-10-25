@@ -114,17 +114,19 @@ body[data-frame-stage="zoom"] #map .holeGreen { display: inline; }
    needs ~2.04 and crops everything else to nothing. So the tilted box is
    over-provisioned instead and clipped back to the screen, the same trick #map
    uses to stop rotation exposing a corner.
-   How much it takes grows with screen HEIGHT, because the perspective is a
-   fixed 900px: 0.34 of height at 667px, 0.49 at 852px, 0.60 at 956px. 1 / 0.5
-   covers every phone with room to spare and holds to ~1180px tall. Past that
-   (a full-height iPad, a tall desktop window) the far edge creeps back on
-   screen; the honest fix there is scaling --tiltPerspective with the viewport
-   so the tilt reads the same on every screen, which is a look change, not this.
+   How much it takes grows with screen HEIGHT and with the tilt, because the
+   perspective is a fixed 900px. At 32 degrees 1 / 0.5 held to ~1180px tall. At
+   40 the far edge reaches further and the top corners pinch in harder: 1.5 up
+   and 0.75 each side covers every phone to 956px tall (the tallest iPhone),
+   measured in Chromium. Past that (an iPad, a tall desktop window) the far edge
+   creeps back on screen; the honest fix there is scaling --tiltPerspective with
+   the viewport so the tilt reads the same on every screen, which is a look
+   change, not this.
    Overscan beyond what the tilt pulls into view is never visible, so erring
    generous costs compositing area and nothing else. */
 :root {
-  --tiltDeg: 32; --tiltPerspective: 900; --tiltScale: 1.213; --tiltOriginY: 0.7;
-  --surfaceOverscanX: 0.5; --surfaceOverscanY: 1;
+  --tiltDeg: 40; --tiltPerspective: 900; --tiltScale: 1.213; --tiltOriginY: 0.7;
+  --surfaceOverscanX: 0.75; --surfaceOverscanY: 1.5;
 }
 
 /* The tilted stage: the screen grown by the overscan (upward and sideways only

@@ -2019,7 +2019,7 @@ async function bootCheck() {
   assert.ok(!stages.atTee.tilt, "the pre-frame hole view is flat");
   assert.strictEqual(stages.lock.mode, "aim", "placing yourself IS the lock-in");
   assert.strictEqual(stages.lock.stage, "lock", "AIM is the locked shot view");
-  assert.ok(stages.lock.tilt, "the lock stage carries the 32° tilt");
+  assert.ok(stages.lock.tilt, "the lock stage carries the lock tilt");
   assert.strictEqual(stages.gpsHold.stage, "lock", "a same-stage fix stays in lock");
   assert.ok(stages.gpsHold.frameHeld, "a same-stage fix must NOT re-anchor the locked frame");
   assert.ok(stages.gpsHold.dotAppeared, "a trusted fix still draws the dot - it is the locator, in either flow");
