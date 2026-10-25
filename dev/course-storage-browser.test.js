@@ -52,8 +52,13 @@ const settled = async (page) => {
   const base = "http://127.0.0.1:" + server.address().port + "/";
   let browser;
   try {
-    try { browser = await playwright.chromium.launch(); }
-    catch (e) { browser = await playwright.chromium.launch({ executablePath: "/opt/pw-browsers/chromium" }); }
+    /* The same launch as the other browser tests: an explicit Chromium, else Playwright's own,
+       else the machine's Chrome (CI's runner Chromium need not match playwright-core). */
+    if (process.env.GD_BOOT_CHROMIUM) browser = await playwright.chromium.launch({ executablePath: process.env.GD_BOOT_CHROMIUM });
+    else {
+      try { browser = await playwright.chromium.launch(); }
+      catch (e) { browser = await playwright.chromium.launch({ channel: "chrome" }); }
+    }
 
     /* ---- migration from an existing localStorage library ---- */
     const context = await browser.newContext();
