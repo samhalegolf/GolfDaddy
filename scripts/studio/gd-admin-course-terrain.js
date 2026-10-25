@@ -11,6 +11,11 @@
   "use strict";
 
   var API = "/api/course-terrain";
+  /* GSPro / OPCD export (functions/course-opcd-export.mjs) - a section of this tab, since the
+     export is the terrain asset (plus surfaces and trees) written out for a Unity build. */
+  var OPCD_API = "/api/course-opcd-export";
+  var opcd = {};   // courseId -> {status, data, error}
+  var opcdPolls = {};
   var POLL_MS = 6000;
   var state = {};   // courseId -> {status, data, error}
   var polls = {};
@@ -20,10 +25,12 @@
   function toast(text) { if (typeof gdAdminCourseVisualToast === "function") gdAdminCourseVisualToast(text); else console.log(text); }
   function token() { return typeof gdAdminCourseDbAccessToken === "function" ? gdAdminCourseDbAccessToken() : Promise.resolve(""); }
 
-  function call(method, query, body) {
+  function call(method, query, body) { return request(API + (query || ""), method, body); }
+
+  function request(url, method, body) {
     return token().then(function (t) {
       if (!t) throw new Error("Sign in again - no session token");
-      return fetch(API + (query || ""), {
+      return fetch(url, {
         method: method,
         headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: "Bearer " + t },
         cache: "no-store",
@@ -69,6 +76,73 @@
       load(id);
     }).catch(function (error) { toast("Terrain rebuild not started: " + (error && error.message || error)); });
     return false;
+  }
+
+  function opcdLive(data) {
+    return !!(data && (data.jobs || []).some(function (j) { return j.status === "queued" || j.status === "running"; }));
+  }
+
+  function loadOpcd(courseId) {
+    if (opcdPolls[courseId]) { clearTimeout(opcdPolls[courseId]); opcdPolls[courseId] = null; }
+    return request(OPCD_API + "?courseId=" + encodeURIComponent(courseId), "GET").then(function (data) {
+      opcd[courseId] = { status: "ready", data: data };
+    }, function (error) {
+      opcd[courseId] = { status: "error", error: String(error && error.message || error) };
+    }).then(function () {
+      rerender();
+      var entry = opcd[courseId];
+      if (entry && entry.status === "ready" && opcdLive(entry.data)) {
+        opcdPolls[courseId] = setTimeout(function () { opcdPolls[courseId] = null; if (isShowing(courseId)) loadOpcd(courseId); }, POLL_MS);
+      }
+    });
+  }
+
+  function exportOpcd(courseId) {
+    var id = String(courseId || "");
+    if (!id) return false;
+    request(OPCD_API, "POST", { courseId: id }).then(function (data) {
+      toast(data && data.existing ? "A GSPro export is already running for this course" : "GSPro export queued");
+      return loadOpcd(id);
+    }).catch(function (error) { toast("GSPro export not started: " + (error && error.message || error)); });
+    return false;
+  }
+
+  function bytes(n) {
+    n = Number(n) || 0;
+    return n > 1048576 ? (n / 1048576).toFixed(1) + " MB" : n > 1024 ? Math.round(n / 1024) + " KB" : n + " B";
+  }
+
+  function opcdMarkup(courseId, id) {
+    var entry = opcd[courseId] || { status: "loading" };
+    var head = '<div class="gdAdminCourseActionHead"><div><h5>GSPro / OPCD export</h5>'
+      + "<span>The course as the inputs to an OPCD Unity build: a 1 m UTM heightmap (16-bit RAW + GeoTIFF), surfaces as GeoJSON, trees and holes as CSV, with a README of the Unity import settings. Reads the terrain asset above; a course without one gets it baked first.</span></div>"
+      + '<div class="gdAdminCourseVisualActions"><button type="button" onclick="return gdAdminCourseOpcdExport(' + id + ')">Export for GSPro</button>'
+      + '<button type="button" onclick="return gdAdminCourseOpcdRefresh(' + id + ')">Refresh</button></div></div>';
+    if (entry.status === "loading") return head + '<div class="gdCoursePlayDebugEmpty">Reading exports…</div>';
+    if (entry.status === "error") return head + '<div class="gdCoursePlayDebugEmpty">Could not read exports: ' + esc(entry.error) + "</div>";
+    var d = entry.data || {}, latest = d.latest, body = "";
+    var live = (d.jobs || []).filter(function (j) { return j.status === "queued" || j.status === "running"; })[0];
+    if (live) body += '<div class="gdCoursePlayDebugEmpty">Export ' + esc(live.status) + (live.progress && live.progress.stage ? " · " + esc(live.progress.stage) : "") + "…</div>";
+    if (latest) {
+      var f = latest.frame || {}, h = latest.heightmap || {};
+      var files = (latest.files || []).map(function (x) {
+        return '<li><a href="' + esc(x.url) + '" target="_blank" rel="noopener">' + esc(x.name) + "</a> · " + esc(bytes(x.bytes)) + "</li>";
+      }).join("");
+      body += '<table class="gdAdminCourseHoleTable"><tbody>'
+        + row("Exported", esc(when(latest.finishedAt)) + " · " + esc(latest.version || ""))
+        + row("Frame", esc(f.sideM + " m square, " + f.samples + " × " + f.samples + " at " + f.sampleM + " m, " + f.crs + ", origin E " + f.originEasting + " N " + f.originNorthing + (f.clipped ? " - COURSE WIDER THAN FRAME" : "")), !!f.clipped)
+        + row("Heights", esc("base " + h.baseElevationM + " m, range " + h.heightRangeM + " m, ground " + h.groundMinM + "–" + h.groundMaxM + " m · Unity Import Raw: 16-bit, Windows byte order, flip vertically"))
+        + row("Terrain", esc((latest.qualityClass || "—") + " · v" + (latest.terrainVersion || "?")), !!latest.qualityClass && latest.qualityClass !== "lidar")
+        + row("Trees", latest.trees ? esc(latest.trees.count + " (" + latest.trees.inside + " in frame, " + latest.trees.measured + " with a measured height)") : "—")
+        + row("Holes", latest.holes ? esc(latest.holes.count + " (par known for " + latest.holes.parKnown + ")") : "—")
+        + "</tbody></table><ul class=\"gdAdminTerrainLog\">" + files + "</ul>"
+        + ((latest.warnings || []).length ? "<ul>" + latest.warnings.map(function (w) { return '<li class="gdStudioWarnText">' + esc(w) + "</li>"; }).join("") + "</ul>" : "");
+    } else if (!live) {
+      body += '<div class="gdCoursePlayDebugEmpty">No export yet.</div>';
+    }
+    var failed = (d.jobs || []).filter(function (j) { return j.status === "failed"; })[0];
+    if (failed && (!latest || String(failed.createdAt) > String(latest.finishedAt))) body += '<div class="gdStudioWarnText">Last export failed: ' + esc(failed.error || "") + "</div>";
+    return head + body;
   }
 
   function when(iso) {
@@ -134,6 +208,7 @@
     return '<div class="gdAdminSnapPanel">' + head
       + '<table class="gdAdminCourseHoleTable"><tbody>' + rows.join("") + "</tbody></table>"
       + (failures ? "<h5>Provider failures at the last bake</h5><ul>" + failures + "</ul>" : "")
+      + opcdMarkup(courseId, id)
       + "<h5>Resolver log</h5><ul class=\"gdAdminTerrainLog\">" + log + "</ul>"
       + (jobs ? '<h5>Terrain jobs</h5><table class="gdAdminCourseHoleTable"><thead><tr><th>Queued</th><th>State</th><th>Result</th></tr></thead><tbody>' + jobs + "</tbody></table>" : "")
       + "</div>";
@@ -142,10 +217,13 @@
   function afterRender(selected) {
     var courseId = String(selected && selected.id || "");
     if (courseId && !state[courseId]) load(courseId);
+    if (courseId && !opcd[courseId]) loadOpcd(courseId);
   }
 
   window.gdAdminCourseTerrainMarkup = markup;
   window.gdAdminCourseTerrainAfterRender = afterRender;
   window.gdAdminCourseTerrainRebuild = rebuild;
   window.gdAdminCourseTerrainRefresh = function (courseId) { load(String(courseId || "")); return false; };
+  window.gdAdminCourseOpcdExport = exportOpcd;
+  window.gdAdminCourseOpcdRefresh = function (courseId) { loadOpcd(String(courseId || "")); return false; };
 })();

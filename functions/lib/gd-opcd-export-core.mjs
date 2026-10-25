@@ -1,0 +1,495 @@
+/* OPCD export core - a Clarity course as the files a GSPro course build starts from.
+
+   GSPro courses are built in Unity with the OPCD toolkit (QGIS -> Blender/Inkscape -> Unity).
+   Nothing here builds that course; it writes the INPUTS that workflow is otherwise assembled
+   by hand from LiDAR downloads and tracing:
+
+     heightmap.raw      16-bit unsigned little-endian, S x S samples at 1 m, north row first
+                        (tick "Flip Vertically" on Unity's Import Raw), 0 = baseElevationM,
+                        65535 = baseElevationM + heightRangeM
+     heightmap.tif      the same ground as float32 metres, GeoTIFF in the course's UTM zone -
+                        what QGIS reads, and the file to check the RAW against
+     surfaces.geojson   every published surface (fairway, green, tee, bunker, water, woods,
+                        hazard, waste), green centres, tee points, each hole's route and the
+                        terrain frame itself, WGS84 as GeoJSON requires
+     trees.csv          every tree the course holds (Studio-placed and finder-found): position,
+                        local metres, ground height, crown radius, height
+     holes.csv          tee and green per hole with par and length where known
+     manifest.json      the frame, the encoding, provenance and attributions
+     README.md          how to import it
+
+   THE FRAME. One square of UTM ground, side 2^n metres (1024, 2048 or 4096 - Unity wants
+   2^n+1 samples, OPCD builds on 2048 m squares), at exactly 1 m a sample, origin snapped to
+   whole metres, centred on the course's play geometry. Unity terrain coordinates fall out of
+   it: X = easting - originE, Z = northing - originN, Y = height - baseElevationM.
+
+   THE GROUND. Sampled from the course's baked terrain asset (functions/lib/terrain/), the
+   same heights the phone's mesh and the green contours read, so what a player sees in Clarity
+   and what GSPro is built on are one measurement. Catmull-Rom between the asset's samples;
+   ground the asset does not cover is nearest-filled and the fraction reported, never hidden.
+
+   Pure: no network, no sharp, no Supabase. dev/opcd-export.test.mjs runs it on synthetic
+   ground; functions/lib/gd-opcd-export-job.mjs wires it to storage. */
+
+import { fromLngLat, toLngLat, utmCrsFor } from "./terrain/gd-terrain-crs.mjs";
+import { sampleRaw, fillGaps } from "./terrain/gd-terrain-normalise.mjs";
+import { lngLatToWorldPx, mercMetresPerPixel } from "./terrain/gd-terrain-adapters.mjs";
+import { packageHoleData } from "./gd-visual-plan-core.mjs";
+
+/* The course_visual_jobs kind. Mirrored as a literal in functions/course-visual-jobs.mjs
+   (which must not load this module's imports on a player poll); dev/opcd-export.test.mjs
+   asserts the two agree. */
+export const OPCD_EXPORT_KIND = "opcd_export";
+export const OPCD_FORMAT_VERSION = 1;
+export const OPCD_SAMPLE_M = 1;
+/* Unity heightmap resolutions: 2^n + 1. 513 is too small for a real course; 8193 is a
+   270 MB float raster a function cannot hold. */
+export const OPCD_SIDES = [1025, 2049, 4097];
+export const OPCD_MARGIN_M = 100;
+/* A tree whose height nothing measured: crowns on a mature parkland tree run about 40% of
+   its height, so height ~ 2.4 x crown radius. Marked "estimated" in the CSV. */
+export const TREE_HEIGHT_PER_CROWN_RADIUS = 2.4;
+
+const MERC_R = 6378137;
+const MERC_HALF = 20037508.342789244;
+const DEG = Math.PI / 180;
+
+function mercator(lat, lng) {
+  const clamped = Math.max(-85.05112878, Math.min(85.05112878, lat));
+  return { x: MERC_R * lng * DEG, y: MERC_R * Math.log(Math.tan(Math.PI / 4 + (clamped * DEG) / 2)) };
+}
+
+function point(p) {
+  const lat = Number(p && p.lat), lng = Number(p && p.lng);
+  return Number.isFinite(lat) && Number.isFinite(lng) ? { lat, lng } : null;
+}
+function ring(shape) {
+  const out = (Array.isArray(shape) ? shape : []).map(point).filter(Boolean);
+  return out.length >= 3 ? out : null;
+}
+function ringKey(r) { return r.length + ":" + r[0].lat.toFixed(7) + "," + r[0].lng.toFixed(7); }
+function round(v, places) { const f = Math.pow(10, places); return Math.round(v * f) / f; }
+
+/* ---------- the frame ------------------------------------------------------------------- */
+
+/* planOpcdFrame(courseBounds WGS84, {marginM, sides}) -> the UTM square the export covers.
+   `clipped` when the course is wider than the largest side allows even with no margin; the
+   square is then centred on the course and the edges fall outside it. */
+export function planOpcdFrame(bounds, { marginM = OPCD_MARGIN_M, sides = OPCD_SIDES } = {}) {
+  if (!bounds || !(bounds.north > bounds.south) || !(bounds.east > bounds.west)) throw new Error("course bounds required");
+  const lat = (bounds.north + bounds.south) / 2, lng = (bounds.west + bounds.east) / 2;
+  const crs = utmCrsFor(lat, lng);
+  const corners = [[bounds.south, bounds.west], [bounds.south, bounds.east], [bounds.north, bounds.west], [bounds.north, bounds.east]]
+    .map(([a, b]) => fromLngLat(crs, a, b));
+  const minE = Math.min(...corners.map(c => c[0])), maxE = Math.max(...corners.map(c => c[0]));
+  const minN = Math.min(...corners.map(c => c[1])), maxN = Math.max(...corners.map(c => c[1]));
+  const spanE = maxE - minE, spanN = maxN - minN;
+  const need = Math.max(spanE, spanN) + 2 * marginM;
+  let samples = sides.find(s => s - 1 >= need);
+  let clipped = false;
+  if (!samples) { samples = sides[sides.length - 1]; clipped = Math.max(spanE, spanN) > samples - 1; }
+  const sideM = (samples - 1) * OPCD_SAMPLE_M;
+  const originE = Math.round((minE + maxE) / 2 - sideM / 2);
+  const originN = Math.round((minN + maxN) / 2 - sideM / 2);
+  const frameCorners = [[originE, originN], [originE + sideM, originN], [originE + sideM, originN + sideM], [originE, originN + sideM]]
+    .map(([e, n]) => toLngLat(crs, e, n));
+  const m = /^EPSG:32([67])(\d\d)$/.exec(crs);
+  return {
+    crs, epsg: Number(crs.slice(5)), utmZone: Number(m[2]), hemisphere: m[1] === "7" ? "S" : "N",
+    samples, sideM, sampleM: OPCD_SAMPLE_M, originE, originN,
+    centre: { lat, lng },
+    bounds: {
+      north: Math.max(...frameCorners.map(c => c.lat)), south: Math.min(...frameCorners.map(c => c.lat)),
+      east: Math.max(...frameCorners.map(c => c.lng)), west: Math.min(...frameCorners.map(c => c.lng))
+    },
+    courseSpanM: { east: round(spanE, 1), north: round(spanN, 1) },
+    marginM, clipped
+  };
+}
+
+/* WGS84 -> the frame's metres: UTM easting/northing and Unity-style local X (east) / Z (north)
+   from the square's south-west corner. */
+export function toLocal(frame, lat, lng) {
+  const [e, n] = fromLngLat(frame.crs, lat, lng);
+  return { easting: e, northing: n, x: e - frame.originE, z: n - frame.originN };
+}
+
+export function insideFrame(frame, local) {
+  return local.x >= 0 && local.z >= 0 && local.x <= frame.sideM && local.z <= frame.sideM;
+}
+
+/* ---------- the ground ------------------------------------------------------------------ */
+
+/* Whether a terrain asset's grid holds the whole frame. A bake pads the course by its own
+   margin (450 m today); a 2048 m square round a narrow course reaches past that. */
+export function assetCovers(manifest, bounds) {
+  const b = manifest && manifest.grid && manifest.grid.bounds;
+  return !!b && bounds.south >= b.south && bounds.north <= b.north && bounds.west >= b.west && bounds.east <= b.east;
+}
+
+/* The web-mercator window (gd-terrain-window's grid shape) that covers the frame with a few
+   pixels to spare, at the asset's zoom or the first coarser one that fits maxSidePx. */
+export function windowGridFor(frame, { zoom = 17, maxSidePx = 3072, padPx = 3 } = {}) {
+  let z = Math.max(1, Math.round(zoom));
+  for (;;) {
+    const nw = lngLatToWorldPx(frame.bounds.north, frame.bounds.west, z);
+    const se = lngLatToWorldPx(frame.bounds.south, frame.bounds.east, z);
+    const left = Math.floor(nw.x) - padPx, top = Math.floor(nw.y) - padPx;
+    const width = Math.ceil(se.x) + padPx - left, height = Math.ceil(se.y) + padPx - top;
+    if ((width <= maxSidePx && height <= maxSidePx) || z <= 1) return { zoom: z, originPx: { x: left, y: top }, width, height };
+    z -= 1;
+  }
+}
+
+/* Heights read for such a window, as a raw grid sampleHeightmap can take. */
+export function rawFromWindow(grid, heights) {
+  const mpp = mercMetresPerPixel(grid.zoom);
+  return {
+    sourceId: "window", crs: "EPSG:3857", width: grid.width, height: grid.height, heights,
+    transform: { originX: grid.originPx.x * mpp - MERC_HALF, originY: MERC_HALF - grid.originPx.y * mpp, pixelSize: mpp }
+  };
+}
+
+/* sampleHeightmap(frame, raw) - raw is a RawTerrainData in EPSG:3857 (the baked asset through
+   gd-terrain-window's assetAsRaw). Row 0 is the frame's NORTH edge, column 0 its west edge,
+   one sample a metre. Projected positions are computed on a lattice every `lattice` samples
+   and interpolated between (the normaliser's trick: over 16 m the projection is linear to
+   well under a centimetre). A sample the asset does not hold is taken from `fallback` (the
+   same ground read for the whole frame, when the job could get it) and counted in
+   fallbackFraction; what neither holds is nearest-filled and counted in filledFraction. */
+export function sampleHeightmap(frame, raw, { lattice = 16, fallback = null } = {}) {
+  if (!raw || raw.crs !== "EPSG:3857") throw new Error("sampleHeightmap reads an EPSG:3857 raw grid");
+  if (fallback && fallback.crs !== "EPSG:3857") throw new Error("the fallback grid must be EPSG:3857 too");
+  const S = frame.samples;
+  const heights = new Float32Array(S * S);
+  const L = Math.ceil((S - 1) / lattice) + 1;
+  const mx = new Float64Array(L * L), my = new Float64Array(L * L);
+  for (let b = 0; b < L; b++) {
+    for (let a = 0; a < L; a++) {
+      const e = frame.originE + Math.min(S - 1, a * lattice) * frame.sampleM;
+      const n = frame.originN + frame.sideM - Math.min(S - 1, b * lattice) * frame.sampleM;
+      const ll = toLngLat(frame.crs, e, n);
+      const m = mercator(ll.lat, ll.lng);
+      mx[b * L + a] = m.x; my[b * L + a] = m.y;
+    }
+  }
+  const t = raw.transform, f = fallback && fallback.transform;
+  let missing = 0, fromFallback = 0;
+  for (let j = 0; j < S; j++) {
+    const gy = j / lattice, b = Math.min(L - 2, Math.floor(gy)), v = gy - b;
+    for (let i = 0; i < S; i++) {
+      const gx = i / lattice, a = Math.min(L - 2, Math.floor(gx)), u = gx - a;
+      const k00 = b * L + a, k10 = k00 + 1, k01 = k00 + L, k11 = k01 + 1;
+      const X = (mx[k00] * (1 - u) + mx[k10] * u) * (1 - v) + (mx[k01] * (1 - u) + mx[k11] * u) * v;
+      const Y = (my[k00] * (1 - u) + my[k10] * u) * (1 - v) + (my[k01] * (1 - u) + my[k11] * u) * v;
+      let h = sampleRaw(raw, (X - t.originX) / t.pixelSize - 0.5, (t.originY - Y) / t.pixelSize - 0.5);
+      if (!Number.isFinite(h)) {
+        missing++;
+        if (f) {
+          h = sampleRaw(fallback, (X - f.originX) / f.pixelSize - 0.5, (f.originY - Y) / f.pixelSize - 0.5);
+          if (Number.isFinite(h)) fromFallback++;
+        }
+      }
+      heights[j * S + i] = h;
+    }
+  }
+  let filledFraction = 0;
+  if (missing > fromFallback) filledFraction = fillGaps(heights, new Uint8Array(S * S), S, S).filledFraction;
+  return { heights, filledFraction, outsideAssetFraction: missing / (S * S), fallbackFraction: fromFallback / (S * S) };
+}
+
+export function heightStats(heights) {
+  let min = Infinity, max = -Infinity;
+  for (let i = 0; i < heights.length; i++) {
+    const v = heights[i];
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  return { min, max };
+}
+
+/* The RAW's vertical encoding: a whole-metre base just under the lowest ground and a
+   whole-metre range just over the highest, so the file has headroom and the Unity terrain
+   height setting is an integer. Resolution is range / 65535 - 1.5 mm per 100 m of range. */
+export function rawEncoding(stats) {
+  const base = Math.floor(stats.min) - 1;
+  const range = Math.max(2, Math.ceil(stats.max - base) + 1);
+  return { baseElevationM: base, heightRangeM: range, stepM: range / 65535 };
+}
+
+export function encodeRaw16(heights, encoding) {
+  const out = Buffer.alloc(heights.length * 2);
+  const scale = 65535 / encoding.heightRangeM;
+  for (let i = 0; i < heights.length; i++) {
+    const v = Math.max(0, Math.min(65535, Math.round((heights[i] - encoding.baseElevationM) * scale)));
+    out.writeUInt16LE(v, i * 2);
+  }
+  return out;
+}
+
+/* Float32 GeoTIFF of the same samples, pixel-is-area with the tie point half a metre outside
+   the north-west sample so every pixel CENTRE sits on the whole-metre grid the RAW describes.
+   writeArrayBuffer is geotiff.js's; injected so the core stays import-light. */
+export async function heightmapGeoTiff(frame, heights, { writeArrayBuffer } = {}) {
+  const write = writeArrayBuffer || (await import("geotiff")).writeArrayBuffer;
+  const S = frame.samples;
+  const meta = {
+    width: S, height: S,
+    ModelPixelScale: [frame.sampleM, frame.sampleM, 0],
+    ModelTiepoint: [0, 0, 0, frame.originE - frame.sampleM / 2, frame.originN + frame.sideM + frame.sampleM / 2, 0],
+    GTModelTypeGeoKey: 1, GTRasterTypeGeoKey: 1, ProjectedCSTypeGeoKey: frame.epsg,
+    SampleFormat: [3], BitsPerSample: [32], SamplesPerPixel: 1, PhotometricInterpretation: 1, PlanarConfiguration: 1
+  };
+  return Buffer.from(await write(heights, meta));
+}
+
+/* Ground height at local metres (bilinear between samples), null outside the frame. */
+export function groundAt(frame, heights, x, z) {
+  const S = frame.samples;
+  const fx = x / frame.sampleM, fy = (frame.sideM - z) / frame.sampleM;
+  if (!(fx >= 0 && fy >= 0 && fx <= S - 1 && fy <= S - 1)) return null;
+  const x0 = Math.min(S - 2, Math.floor(fx)), y0 = Math.min(S - 2, Math.floor(fy));
+  const u = fx - x0, v = fy - y0;
+  const h = (xx, yy) => heights[yy * S + xx];
+  return (h(x0, y0) * (1 - u) + h(x0 + 1, y0) * u) * (1 - v) + (h(x0, y0 + 1) * (1 - u) + h(x0 + 1, y0 + 1) * u) * v;
+}
+
+/* An 8-bit greyscale preview of the heightmap (black = base, white = top) - for a human to
+   eyeball orientation against the aerial. Same row order as the RAW. */
+export function previewGrey(heights, encoding) {
+  const out = Buffer.alloc(heights.length);
+  const scale = 255 / encoding.heightRangeM;
+  for (let i = 0; i < heights.length; i++) out[i] = Math.max(0, Math.min(255, Math.round((heights[i] - encoding.baseElevationM) * scale)));
+  return out;
+}
+
+/* ---------- surfaces -------------------------------------------------------------------- */
+
+const SURFACE_KIND = { fairway_area: "fairway", bunker: "bunker", water: "water", trees: "woods", hazard: "hazard", waste: "waste" };
+
+function closedRing(r) {
+  const coords = r.map(p => [round(p.lng, 7), round(p.lat, 7)]);
+  const first = coords[0], last = coords[coords.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) coords.push([first[0], first[1]]);
+  return coords;
+}
+function feature(geometry, properties) { return { type: "Feature", geometry, properties }; }
+function holeOf(o) { const h = Number(o && o.holeNumber); return Number.isFinite(h) && h > 0 ? h : null; }
+
+/* surfacesGeoJson(pkg {objects, holes, courseId, courseName}, frame, {par: Map hole -> par})
+   One FeatureCollection. A surface stored once per hole it shows on (the mapper's clone rule)
+   is written once; the hole it is first seen on is the one it carries. */
+export function surfacesGeoJson(pkg, frame, { par } = {}) {
+  const features = [];
+  const local = p => { const l = toLocal(frame, p.lat, p.lng); return { x_m: round(l.x, 2), z_m: round(l.z, 2) }; };
+  const frameRing = [[frame.originE, frame.originN], [frame.originE + frame.sideM, frame.originN], [frame.originE + frame.sideM, frame.originN + frame.sideM], [frame.originE, frame.originN + frame.sideM]]
+    .map(([e, n]) => toLngLat(frame.crs, e, n));
+  features.push(feature({ type: "Polygon", coordinates: [closedRing(frameRing)] }, {
+    kind: "terrain_frame", crs: frame.crs, origin_easting: frame.originE, origin_northing: frame.originN, side_m: frame.sideM
+  }));
+  const seen = new Set();
+  const greensByHole = new Map(), teesByHole = new Map();
+  Object.values(pkg && pkg.objects || {}).forEach(o => {
+    if (!o) return;
+    if (SURFACE_KIND[o.type]) {
+      const r = ring(o.shape);
+      if (!r) return;
+      const key = o.type + ":" + ringKey(r);
+      if (seen.has(key)) return;
+      seen.add(key);
+      const props = { kind: SURFACE_KIND[o.type], hole: holeOf(o), osm_id: o.osmId || null, source: o.source || null };
+      if (o.type === "water") props.hazard_class = o.hazardClass || "water";
+      features.push(feature({ type: "Polygon", coordinates: [closedRing(r)] }, props));
+    } else if (o.type === "green") {
+      const hole = holeOf(o);
+      if (hole && greensByHole.has(hole)) return;
+      const r = ring(o.greenShape || o.shape);
+      const centre = point(o.greenCenter) || point(o.position);
+      if (hole) greensByHole.set(hole, true);
+      if (r) features.push(feature({ type: "Polygon", coordinates: [closedRing(r)] }, { kind: "green", hole, source: o.greenSource || o.source || null }));
+      if (centre) features.push(feature({ type: "Point", coordinates: [round(centre.lng, 7), round(centre.lat, 7)] }, Object.assign({ kind: "green_centre", hole }, local(centre))));
+    } else if (o.type === "tee") {
+      const hole = holeOf(o);
+      if (hole && teesByHole.has(hole)) return;
+      const r = ring(o.shape);
+      const centre = point(o.position);
+      if (hole) teesByHole.set(hole, true);
+      if (r) features.push(feature({ type: "Polygon", coordinates: [closedRing(r)] }, { kind: "tee_area", hole, source: o.source || null }));
+      if (centre) features.push(feature({ type: "Point", coordinates: [round(centre.lng, 7), round(centre.lat, 7)] }, Object.assign({ kind: "tee", hole, par: par && par.get(hole) || null }, local(centre))));
+    }
+  });
+  const holeData = packageHoleData(pkg);
+  Object.keys(holeData).map(Number).sort((a, b) => a - b).forEach(h => {
+    const route = holeData[h].route;
+    if (route.length < 2) return;
+    features.push(feature({ type: "LineString", coordinates: route.map(p => [round(p.lng, 7), round(p.lat, 7)]) }, { kind: "hole_route", hole: h, par: par && par.get(h) || null }));
+  });
+  return {
+    type: "FeatureCollection",
+    name: String(pkg && (pkg.courseName || pkg.courseId) || "course") + " surfaces",
+    crs_note: "Coordinates are WGS84 longitude/latitude (GeoJSON). x_m/z_m on points are metres east/north of the terrain frame's south-west corner in " + frame.crs + ".",
+    features
+  };
+}
+
+/* ---------- trees ----------------------------------------------------------------------- */
+
+function csvLine(cells) {
+  return cells.map(c => {
+    if (c == null || c === "") return "";
+    const s = String(c);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }).join(",");
+}
+
+/* The trees as a finder/overlay list: [{lat, lng, r (crown radius m), source, level?}].
+   canopyAt(lat, lng) -> metres or null (the Meta/WRI canopy raster where it has data).
+   Trees outside the frame are kept, with blank local coordinates - the frame is a terrain
+   choice, not a judgement about which trees exist. */
+export function treesCsv(trees, frame, heights, { canopyAt } = {}) {
+  const lines = [csvLine(["id", "source", "lat", "lng", "easting", "northing", "x_m", "z_m", "ground_m", "crown_radius_m", "height_m", "height_source", "level"])];
+  let measured = 0, inside = 0;
+  (trees || []).forEach((t, index) => {
+    const p = point(t);
+    const r = Number(t && t.r);
+    if (!p || !(r > 0)) return;
+    const l = toLocal(frame, p.lat, p.lng);
+    const within = insideFrame(frame, l);
+    if (within) inside++;
+    const ground = within && heights ? groundAt(frame, heights, l.x, l.z) : null;
+    const canopy = canopyAt ? canopyAt(p.lat, p.lng) : null;
+    const height = canopy > 0 ? canopy : round(r * TREE_HEIGHT_PER_CROWN_RADIUS, 1);
+    if (canopy > 0) measured++;
+    lines.push(csvLine([
+      "t" + (index + 1), t.source || "finder", round(p.lat, 7), round(p.lng, 7), round(l.easting, 2), round(l.northing, 2),
+      within ? round(l.x, 2) : "", within ? round(l.z, 2) : "", ground == null ? "" : round(ground, 2),
+      round(r, 1), round(height, 1), canopy > 0 ? "canopy" : "estimated", Number.isFinite(Number(t.level)) ? Number(t.level) : ""
+    ]));
+  });
+  return { csv: lines.join("\n") + "\n", count: lines.length - 1, inside, measured };
+}
+
+/* ---------- holes ----------------------------------------------------------------------- */
+
+function haversineM(a, b) {
+  const dLat = (b.lat - a.lat) * DEG, dLng = (b.lng - a.lng) * DEG;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * DEG) * Math.cos(b.lat * DEG) * Math.sin(dLng / 2) ** 2;
+  return 2 * MERC_R * Math.asin(Math.sqrt(s));
+}
+
+/* Par per hole from a shared scorecard's holes list ({holeNumber|hole|number, par}), or an
+   empty map. */
+export function parByHole(scorecardHoles) {
+  const out = new Map();
+  (Array.isArray(scorecardHoles) ? scorecardHoles : []).forEach(h => {
+    const n = Number(h && (h.holeNumber != null ? h.holeNumber : h.hole != null ? h.hole : h.number));
+    const par = Number(h && h.par);
+    if (Number.isFinite(n) && n > 0 && Number.isFinite(par) && par >= 3 && par <= 6 && !out.has(n)) out.set(n, par);
+  });
+  return out;
+}
+
+export function holesCsv(pkg, frame, heights, { par } = {}) {
+  const holeData = packageHoleData(pkg);
+  const lines = [csvLine(["hole", "par", "length_m", "tee_lat", "tee_lng", "tee_x_m", "tee_z_m", "tee_ground_m", "green_lat", "green_lng", "green_x_m", "green_z_m", "green_ground_m"])];
+  const cell = p => {
+    if (!p) return ["", "", "", "", ""];
+    const l = toLocal(frame, p.lat, p.lng);
+    const within = insideFrame(frame, l);
+    const g = within && heights ? groundAt(frame, heights, l.x, l.z) : null;
+    return [round(p.lat, 7), round(p.lng, 7), within ? round(l.x, 2) : "", within ? round(l.z, 2) : "", g == null ? "" : round(g, 2)];
+  };
+  Object.keys(holeData).map(Number).sort((a, b) => a - b).forEach(h => {
+    const d = holeData[h];
+    const tee = d.tee && d.tee.position, green = d.green && d.green.position;
+    let length = null;
+    if (d.route.length >= 2) { length = 0; for (let i = 1; i < d.route.length; i++) length += haversineM(d.route[i - 1], d.route[i]); }
+    lines.push(csvLine([h, par && par.get(h) || "", length == null ? "" : Math.round(length), ...cell(tee), ...cell(green)]));
+  });
+  return { csv: lines.join("\n") + "\n", count: lines.length - 1 };
+}
+
+/* ---------- manifest + readme ----------------------------------------------------------- */
+
+export function opcdManifest({ courseId, courseName, frame, encoding, stats, sampled, terrain, trees, holes, surfaces, files, generatedAt, warnings }) {
+  return {
+    formatVersion: OPCD_FORMAT_VERSION,
+    courseId, courseName, generatedAt,
+    frame: {
+      crs: frame.crs, utmZone: frame.utmZone, hemisphere: frame.hemisphere,
+      originEasting: frame.originE, originNorthing: frame.originN,
+      sideM: frame.sideM, samples: frame.samples, sampleM: frame.sampleM,
+      centre: frame.centre, boundsWgs84: frame.bounds, courseSpanM: frame.courseSpanM, marginM: frame.marginM, clipped: frame.clipped
+    },
+    heightmap: {
+      file: "heightmap.raw", bitDepth: 16, byteOrder: "little-endian", rowOrder: "north-first",
+      unityImportRaw: { depth: "Bit 16", byteOrder: "Windows", flipVertically: true, resolution: frame.samples, width: frame.sideM, length: frame.sideM, height: encoding.heightRangeM },
+      baseElevationM: encoding.baseElevationM, heightRangeM: encoding.heightRangeM, stepM: round(encoding.stepM, 5),
+      groundMinM: round(stats.min, 2), groundMaxM: round(stats.max, 2),
+      outsideAssetFraction: round(sampled.outsideAssetFraction, 4), fallbackFraction: round(sampled.fallbackFraction || 0, 4), filledFraction: round(sampled.filledFraction, 4),
+      groundBeyondAsset: sampled.beyondAsset || (sampled.outsideAssetFraction > 0 ? "nearest-filled" : "none needed"),
+      geotiff: "heightmap.tif (float32 metres, pixel centres on the metre grid, " + frame.crs + ")"
+    },
+    terrain: terrain ? {
+      terrainVersion: terrain.terrainVersion, sourceIds: terrain.sourceIds, sourceResolutionM: terrain.sourceResolutionM,
+      gridMetresPerPixel: terrain.grid && terrain.grid.metresPerPixel, qualityClass: terrain.quality && terrain.quality.class,
+      greenDetail: terrain.quality && terrain.quality.greenDetail, verticalDatum: terrain.verticalDatum,
+      attribution: (terrain.sources || []).map(s => s.attribution && s.attribution.text).filter(Boolean)
+    } : null,
+    trees, holes, surfaces, files, warnings: warnings || []
+  };
+}
+
+export function opcdReadme(m) {
+  const f = m.frame, h = m.heightmap, u = h.unityImportRaw;
+  const lines = [
+    "# " + m.courseName + " - OPCD / GSPro export",
+    "",
+    "Generated " + m.generatedAt + " by Clarity Studio (format v" + m.formatVersion + "). These are the inputs to the OPCD course-build workflow (QGIS -> Blender/Inkscape -> Unity), not a finished GSPro course.",
+    "",
+    "## Terrain frame",
+    "",
+    "- CRS: " + f.crs + " (WGS84 / UTM zone " + f.utmZone + f.hemisphere + "), units metres",
+    "- Square: " + f.sideM + " m a side, south-west corner at easting " + f.originEasting + ", northing " + f.originNorthing,
+    "- Samples: " + f.samples + " x " + f.samples + " at " + f.sampleM + " m" + (f.clipped ? " - WARNING: the course is wider than the frame; its edges are cut" : ""),
+    "- Unity terrain coordinates: X = easting - " + f.originEasting + ", Z = northing - " + f.originNorthing + ", Y = height - " + h.baseElevationM,
+    "",
+    "## heightmap.raw",
+    "",
+    "16-bit unsigned, little-endian, " + f.samples + " x " + f.samples + ", NORTH row first. 0 = " + h.baseElevationM + " m, 65535 = " + (h.baseElevationM + h.heightRangeM) + " m (" + h.stepM + " m a step). Ground runs " + h.groundMinM + " to " + h.groundMaxM + " m.",
+    "",
+    "Unity > Terrain > Terrain Settings > Import Raw:",
+    "- Depth: " + u.depth,
+    "- Byte order: " + u.byteOrder,
+    "- Resolution: " + u.resolution + " x " + u.resolution,
+    "- Flip Vertically: " + (u.flipVertically ? "ON (the file is north-first; Unity fills from the south edge)" : "off"),
+    "- Terrain size: width " + u.width + ", length " + u.length + ", height " + u.height,
+    "",
+    "Check the orientation against heightmap.tif in QGIS (same samples as float32 metres, georeferenced) or heightmap-preview.png (black = lowest, white = highest) before building on it.",
+    "",
+    "## surfaces.geojson",
+    "",
+    "WGS84 GeoJSON. `kind` is one of terrain_frame, fairway, green, green_centre, tee, tee_area, bunker, water, woods, hazard, waste, hole_route. Point features carry x_m/z_m in the terrain frame. Load into QGIS and reproject to " + f.crs + " for the OPCD SVG/Blender steps.",
+    "",
+    "## trees.csv",
+    "",
+    m.trees.count + " trees (" + m.trees.inside + " inside the frame): position, frame metres, ground height, crown radius and height. height_source is `canopy` where the Meta/WRI canopy raster measured it (" + m.trees.measured + " trees), `estimated` (" + TREE_HEIGHT_PER_CROWN_RADIUS + " x crown radius) otherwise.",
+    "",
+    "## holes.csv",
+    "",
+    m.holes.count + " holes: tee and green with frame metres and ground heights, par and route length where the scorecard is known.",
+    "",
+    "## Provenance",
+    ""
+  ];
+  if (m.terrain) {
+    lines.push("- Elevation: " + (m.terrain.sourceIds || []).join(", ") + " at " + m.terrain.sourceResolutionM + " m (" + m.terrain.qualityClass + "), vertical datum " + m.terrain.verticalDatum + ", Clarity terrain v" + m.terrain.terrainVersion);
+    (m.terrain.attribution || []).forEach(a => lines.push("  - " + a));
+  }
+  lines.push("- Surfaces and holes: the course's published Clarity geometry (OpenStreetMap contributors, ODbL, plus Studio edits)");
+  lines.push("- Tree heights: Meta & World Resources Institute global canopy height, CC BY 4.0, where used");
+  if (h.fallbackFraction > 0) lines.push("- " + round(h.fallbackFraction * 100, 1) + "% of the frame lies outside Clarity's terrain asset and was read for this export from " + h.groundBeyondAsset + ".");
+  if (h.filledFraction > 0) lines.push("- " + round(h.filledFraction * 100, 1) + "% of the frame had no ground from any source and was nearest-filled; treat those edges as approximate.");
+  (m.warnings || []).forEach(w => lines.push("- WARNING: " + w));
+  return lines.join("\n") + "\n";
+}
