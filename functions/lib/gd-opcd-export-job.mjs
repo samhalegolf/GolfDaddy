@@ -19,7 +19,8 @@
 
    Output layout (course-visuals bucket, public like the frames):
      <courseId>/opcd/<version>/heightmap.raw | heightmap.tif | heightmap-preview.png |
-                               surfaces.geojson | trees.csv | holes.csv | manifest.json | README.md
+                               surfaces.geojson | surfaces-opcd.svg | trees.csv | holes.csv |
+                               manifest.json | README.md
    A version is a timestamp; nothing is overwritten and the job result names the folder. */
 
 import { courseBoundsFor } from "./gd-visual-plan-core.mjs";
@@ -28,7 +29,7 @@ import { liveTrees } from "./gd-course-trees-core.mjs";
 import watchMapCore from "../../scripts/gd-watch-map-core.js";
 import {
   planOpcdFrame, sampleHeightmap, heightStats, rawEncoding, encodeRaw16, heightmapGeoTiff, previewGrey,
-  surfacesGeoJson, treesCsv, holesCsv, parByHole, opcdManifest, opcdReadme, assetCovers, windowGridFor, rawFromWindow
+  surfacesGeoJson, treesCsv, holesCsv, parByHole, opcdManifest, opcdReadme, assetCovers, windowGridFor, rawFromWindow, opcdSvg
 } from "./gd-opcd-export-core.mjs";
 
 export const OPCD_ROOT = "opcd";
@@ -143,6 +144,8 @@ export async function runOpcdExport({ courseId, pkg }, deps) {
   }
   const geojson = surfacesGeoJson(pkg, frame, { par });
   const holesOut = holesCsv(pkg, frame, sampled.heights, { par });
+  const svgOut = opcdSvg(pkg, frame, { courseName: pkg.courseName || courseId, generatedAt: now.toISOString() });
+  svgOut.warnings.forEach(w => warnings.push("svg: " + w));
 
   await beat("writing");
   const version = opcdVersion(now);
@@ -164,6 +167,7 @@ export async function runOpcdExport({ courseId, pkg }, deps) {
     }
   }
   await put("surfaces.geojson", JSON.stringify(geojson), "application/geo+json");
+  await put("surfaces-opcd.svg", svgOut.svg, "image/svg+xml");
   await put("trees.csv", treesOut.csv, "text/csv");
   await put("holes.csv", holesOut.csv, "text/csv");
 
@@ -174,6 +178,7 @@ export async function runOpcdExport({ courseId, pkg }, deps) {
     trees: { count: treesOut.count, inside: treesOut.inside, measured: treesOut.measured, file: "trees.csv" },
     holes: { count: holesOut.count, parKnown: par.size, file: "holes.csv" },
     surfaces: { counts: surfaceCounts, file: "surfaces.geojson" },
+    svg: svgOut,
     files: files.map(f => ({ name: f.name, bytes: f.bytes })),
     generatedAt: now.toISOString(), warnings
   });
@@ -185,7 +190,7 @@ export async function runOpcdExport({ courseId, pkg }, deps) {
     version, root, files,
     frame: manifest.frame, heightmap: manifest.heightmap,
     terrainVersion: terrain.terrainVersion, qualityClass: quality || null,
-    trees: manifest.trees, holes: manifest.holes, surfaces: manifest.surfaces,
+    trees: manifest.trees, holes: manifest.holes, surfaces: manifest.surfaces, opcdSvg: manifest.opcdSvg,
     warnings
   };
 }
