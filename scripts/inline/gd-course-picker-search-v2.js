@@ -99,7 +99,7 @@
      guard lapses so a check that never returned cannot lock a course out. */
   const SELECTING_GUARD_MS=20000;
   function rowKey(course){
-    return String(course?.courseId||course?.canonicalKey||course?.name||course?.courseName||"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
+    return String(course?.courseId||course?.canonicalKey||course?.name||course?.courseName||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"");
   }
   function requestRender(){
     if(view.renderQueued)return;
@@ -757,7 +757,7 @@
   function selectionKey(course,opts={}){
     const point=opts.fromPinnedSeed?finitePoint(course)&&course:null;
     const seed=point?`:pin:${Number(point.lat).toFixed(5)},${Number(point.lng).toFixed(5)}`:"";
-    return `${String(course?.courseId||course?.id||course?.canonicalKey||course?.name||course?.courseName||"course").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"course"}:h1${seed}`;
+    return `${String(course?.courseId||course?.id||course?.canonicalKey||course?.name||course?.courseName||"course").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"")||"course"}:h1${seed}`;
   }
   function mappingController(){
     const controller=window.runCourseMappingAttempt||window.gdRunCourseMappingAttempt;

@@ -31,6 +31,7 @@ import { fetchFacilityRows } from "./lib/gd-facility-scorecards.mjs";
 import { scorecardCourseKey, cardNameMatchesCourse } from "./lib/gd-scorecard-resolve.mjs";
 import { splitCourseName } from "./lib/gd-automapper-core.mjs";
 import store from "../clarity-caddy-app-store.js";
+import { courseSlug } from "./lib/gd-course-slug.mjs";
 
 const MAPS_TABLE = "course_maps";
 const VISUALS_TABLE = "course_visuals";
@@ -79,7 +80,7 @@ const FRAMES = [
 const imageStore = createSupabaseStorage({ base: supabaseBase, key: supabaseKey, bucket: IMAGE_BUCKET });
 
 function slug(value) {
-  return String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 160);
+  return courseSlug(value).slice(0, 160);
 }
 
 function esc(value) {

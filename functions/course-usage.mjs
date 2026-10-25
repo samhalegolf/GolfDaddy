@@ -1,6 +1,7 @@
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import { verifiedAdminEmail } from "./lib/gd-map-overlay-store.mjs";
 import { courseVersion } from "./lib/gd-course-package-shape.mjs";
+import { courseSlug } from "./lib/gd-course-slug.mjs";
 /* Course map usage: one anonymous +1 per POST, and an admin-only GET that reads the report
  * back for the Studio Course Usage page (scripts/studio/gd-admin-course-usage.js).
  *
@@ -52,7 +53,7 @@ function json(status, body) {
   });
 }
 
-function slug(value) { return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90); }
+function slug(value) { return courseSlug(value).slice(0, 90); }
 
 function countryOf(context) {
   const code = String((context && context.geo && context.geo.country && context.geo.country.code) || "").toUpperCase();

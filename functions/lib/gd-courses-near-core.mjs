@@ -19,6 +19,7 @@
  * hierarchy - see the picker's meta line. */
 
 import { distance } from "./gd-automapper-core.mjs";
+import { courseSlug } from "./gd-course-slug.mjs";
 
 /* Matches the picker's own NEARBY_M. St Andrews is the case that sets it:
    Castle sits ~1.6km from the Old Course and Craigtoun ~4km, so anything
@@ -31,11 +32,6 @@ export const COURSES_NEAR_RADIUS_M = 5200;
    those are properly far apart. Two DIFFERENT courses whose centroids fall
    within 600m of each other are rare enough to accept the odd merge. */
 const SAME_COURSE_M = 600;
-
-export function courseSlug(value) {
-  return String(value || "").toLowerCase().trim()
-    .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-}
 
 /* Both tags, because many courses carry only one. golf=course is the golf
    schema's own; leisure=golf_course is what most mappers actually reach for. */

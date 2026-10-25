@@ -235,7 +235,7 @@
           (data.queued || []).forEach(function (id) { byId[id] = { queued: true }; });
           (data.skipped || []).forEach(function (s) { byId[s.courseId] = { reason: s.reason }; });
           part.forEach(function (c) {
-            var slug = String(c.name || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
+            var slug = String(c.name || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90);
             outcome[c.name] = byId[slug] || { reason: "insert-failed" };
             if (outcome[c.name].queued) queued += 1; else skipped += 1;
           });

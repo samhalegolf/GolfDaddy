@@ -23,6 +23,7 @@ import { buildCoursePackage } from "./course-package.mjs";
 import emailNotification from "./email-notification.js";
 import { createSupabaseFetch } from "./lib/gd-supabase-fetch.mjs";
 import authUtils from "./auth-utils.js";
+import { courseSlug } from "./lib/gd-course-slug.mjs";
 
 const TABLE = "course_map_notify_requests";
 /* An address can wait on a handful of courses, not the whole directory: every pending course
@@ -42,7 +43,7 @@ const supabaseFetch = createSupabaseFetch({ base: supabaseBase, key: supabaseKey
 
 /* Same id normalisation course-package.mjs applies, so the row and the package agree on
    which course this is. */
-function slug(value) { return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 90); }
+function slug(value) { return courseSlug(value).slice(0, 90); }
 function text(value, limit) { const input = String(value || "").trim(); return input.length > limit ? input.slice(0, limit) : input; }
 export function cleanEmail(value) { const input = text(value, 240).toLowerCase(); return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input) ? input : ""; }
 

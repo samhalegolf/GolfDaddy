@@ -52,6 +52,22 @@
     saveScores(all);
   }
 
+  /* Courses named with a macron or accent used to get a mangled id - "Ngāruawāhia
+     Golf Club" became "ng-ruawahia-golf-club" - and were re-keyed on the server when
+     courseKey() learned to fold ā into a. Scores a phone saved under the old id move
+     to the new one the first time the course opens. The old id is the old rule run on
+     the course name, which is how those ids were minted. */
+  function adoptLegacyScores(name) {
+    var legacy = String(name || "").toLowerCase().trim()
+      .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    if (!courseKey || !legacy || legacy === courseKey) return;
+    var all = scores();
+    if (!all[legacy] || all[courseKey]) return;
+    all[courseKey] = all[legacy];
+    delete all[legacy];
+    saveScores(all);
+  }
+
   function setPar(hole, par) {
     parByHole[hole] = par > 0 ? par : null;
   }
@@ -305,6 +321,7 @@
     setCourse: async function (key, name) {
       var token = ++loadToken;
       courseKey = app.courseKey(key);
+      adoptLegacyScores(name);
       parByHole = {};
       card = { holes: {}, tees: [] };
       var found = await fetchCard(scorecardCourseKey(name || key));
