@@ -29,7 +29,8 @@ import {
   assetCovers, windowGridFor, rawFromWindow, opcdSvg, OPCD_CLASSES, TEE_PAD_M
 } from "../functions/lib/gd-opcd-export-core.mjs";
 import { gridPixelLatLng } from "../functions/lib/terrain/gd-terrain-normalise.mjs";
-import { runOpcdExport, canopySampler, loadCourseTrees } from "../functions/lib/gd-opcd-export-job.mjs";
+import { runOpcdExport, canopySampler } from "../functions/lib/gd-opcd-export-job.mjs";
+import { courseSingleTrees } from "../functions/lib/gd-course-single-trees.mjs";
 
 const MERC_R = 6378137;
 const mercator = (lat, lng) => ({ x: MERC_R * lng * Math.PI / 180, y: MERC_R * Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI / 180) / 2)) });
@@ -310,7 +311,13 @@ const sampledWide = sampleHeightmap(wide, assetAsRaw(wideAsset.manifest, wideAss
   const treeRow = { trees: packTrees([{ lat: -45.0230, lng: 168.7320, r: 2.6, l: 1, h: 0 }, { lat: -45.0222, lng: 168.7352, r: 2.1, l: 5, h: 1 }]), level: 2 };
   const overlayTree = { kind: "tree", points: quad({ lat: -45.0218, lng: 168.7340 }, 0.00003) };
   const deps = {
-    supabaseFetch: async q => q.startsWith("course_trees") ? [treeRow] : q.startsWith("course_map_overlays") ? [{ features: [overlayTree, { kind: "bunker", points: [] }] }] : [],
+    /* test-course is the second course at a facility: the Studio overlay is on the facility
+       owner's row, not its own, and its hand-placed tree must still reach the export. */
+    supabaseFetch: async q => q.startsWith("course_trees") ? [treeRow]
+      : q === "course_maps?select=course_id,facility_key&course_id=eq.test-course&limit=1" ? [{ course_id: "test-course", facility_key: "test-facility" }]
+      : q === "course_maps?select=course_id&course_id=eq.test-facility&limit=1" ? [{ course_id: "test-facility" }]
+      : q.startsWith("course_map_overlays?select=features&course_id=eq.test-facility&") ? [{ features: [overlayTree, { kind: "bunker", points: [] }] }]
+      : [],
     loadTerrain: async () => jobAsset.manifest,
     download: async path => { assert.equal(path, jobAsset.manifest.files.heights); return png; },
     decodeTerrainPng: async buffer => {
@@ -326,9 +333,10 @@ const sampledWide = sampleHeightmap(wide, assetAsRaw(wideAsset.manifest, wideAss
     heartbeat: async stage => { beats.push(stage); },
     now: () => new Date("2026-10-25T03:04:05Z")
   };
-  const trees = await loadCourseTrees("test-course", deps.supabaseFetch);
-  assert.equal(trees.length, 2, "studio tree + the finder tree at or under the live level (level 5 stays out)");
+  const trees = await courseSingleTrees(deps.supabaseFetch, "test-course");
+  assert.equal(trees.length, 2, "the facility overlay's studio tree + the finder tree at or under the live level (level 5 stays out)");
   assert.equal(trees[0].source, "studio");
+  assert.equal(trees[1].source, "finder"); assert.equal(trees[1].level, 1);
   const result = await runOpcdExport({ courseId: "test-course", pkg }, deps);
   assert.equal(result.version, "20261025-030405Z");
   assert.equal(result.root, "test-course/opcd/20261025-030405Z");
@@ -346,6 +354,8 @@ const sampledWide = sampleHeightmap(wide, assetAsRaw(wideAsset.manifest, wideAss
   assert.equal(manifest.terrain.terrainVersion, 3);
   assert.deepEqual(manifest.terrain.attribution, ["Sourced from LINZ, CC BY 4.0"]);
   assert.equal(manifest.trees.count, 2); assert.equal(manifest.trees.measured, 2, "canopy answered both");
+  const treesCsvOut = uploads.get(result.root + "/trees.csv").buffer.toString("utf8").trim().split("\n");
+  assert.deepEqual(treesCsvOut.slice(1).map(line => line.split(",")[1]), ["studio", "finder"], "the facility owner's hand-placed tree is in trees.csv");
   assert.equal(manifest.holes.parKnown, 2);
   assert.ok(manifest.files.some(f => f.name === "README.md"));
   const readme = uploads.get(result.root + "/README.md").buffer.toString("utf8");

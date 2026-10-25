@@ -25,32 +25,17 @@
 
 import { courseBoundsFor } from "./gd-visual-plan-core.mjs";
 import { assetAsRaw } from "./terrain/gd-terrain-window.mjs";
-import { liveTrees, TREES_TABLE } from "./gd-course-trees-store.mjs";
-import watchMapCore from "../../scripts/gd-watch-map-core.js";
+import { courseSingleTrees } from "./gd-course-single-trees.mjs";
 import {
   planOpcdFrame, sampleHeightmap, heightStats, rawEncoding, encodeRaw16, heightmapGeoTiff, previewGrey,
   surfacesGeoJson, treesCsv, holesCsv, parByHole, opcdManifest, opcdReadme, assetCovers, windowGridFor, rawFromWindow, opcdSvg
 } from "./gd-opcd-export-core.mjs";
 
 export const OPCD_ROOT = "opcd";
-const OVERLAYS_TABLE = "course_map_overlays";
 const MERC_R = 6378137;
 
 export function opcdVersion(now) {
   return now.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z").replace("T", "-");
-}
-
-/* Studio-placed single trees plus the finder's live level, each tagged with where it came
-   from. Either table missing is an empty list, not a failure. */
-export async function loadCourseTrees(courseId, supabaseFetch) {
-  const [treeRows, overlayRows] = await Promise.all([
-    supabaseFetch(TREES_TABLE + "?select=trees,level&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => []),
-    supabaseFetch(OVERLAYS_TABLE + "?select=features&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => [])
-  ]);
-  const found = liveTrees(Array.isArray(treeRows) ? treeRows[0] : null).map(t => ({ lat: t.lat, lng: t.lng, r: t.r, level: t.l, source: "finder" }));
-  const features = Array.isArray(overlayRows) && overlayRows[0] && Array.isArray(overlayRows[0].features) ? overlayRows[0].features : [];
-  const placed = watchMapCore.singleTreesFromOverlay(features).map(t => ({ lat: t.lat, lng: t.lng, r: t.r, source: "studio" }));
-  return placed.concat(found);
 }
 
 /* A sampler over the canopy grids gd-canopy-height's readCanopy returns (EPSG:3857 or 4326,
@@ -124,7 +109,7 @@ export async function runOpcdExport({ courseId, pkg }, deps) {
   if (quality && quality !== "lidar" && quality !== "high-resolution") warnings.push("terrain is " + quality + " (" + terrain.sourceResolutionM + " m source) - fine for routing, not for greens");
 
   await beat("trees");
-  const trees = await loadCourseTrees(courseId, deps.supabaseFetch);
+  const trees = await courseSingleTrees(deps.supabaseFetch, courseId);
   let canopyAt = null;
   if (deps.readCanopy && trees.length) {
     try {
