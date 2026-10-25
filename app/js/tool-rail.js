@@ -253,6 +253,22 @@
       if (fix && app.marshal) app.marshal.signal("PLACED", { point: fix });
     });
 
+    /* 3D mode: the cube switches it on or off, and it stays that way across holes and rounds.
+       It is a way of drawing the same hole (painter.js swaps gd-course-3d.js in for the plain
+       terrain mesh), so lock, tilt, taps and every overlay carry on exactly as they were. The
+       button shows the state the way the pin does, lit while it is on. */
+    var view3dBtn = document.getElementById("railView3d");
+    function markView3d() {
+      var on = !!(app.gpsSettings && app.gpsSettings.view3d());
+      if (view3dBtn) view3dBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    }
+    if (view3dBtn) view3dBtn.addEventListener("click", function () {
+      close();
+      if (app.gpsSettings) app.gpsSettings.set("view3d", !app.gpsSettings.view3d());
+    });
+    if (app.gpsSettings) app.gpsSettings.onChange(markView3d);
+    markView3d();
+
     /* The scorecard is round history, so a rangefinder-only session is offered
        the way in rather than shown an empty card that will not save. The bag
        beside it stays open to everyone: club distances are local, and they are

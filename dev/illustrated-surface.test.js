@@ -202,8 +202,8 @@ function launch(store) {
 // painter wiring
 assert.ok(/aerial: drawn \? drawn\.picture : aerialImg/.test(PAINTER_SRC), 'the drawn map replaces the photo on the mesh');
 assert.ok(/trees: drawn \? drawn\.trees : null/.test(PAINTER_SRC), 'its trees go to the mesh');
-assert.ok(/if \(!drawn\) aerialImg\.src/.test(PAINTER_SRC), 'the photo is not fetched for the mesh when drawn');
+assert.ok(/if \(!drawn \|\| threeD\) aerialImg\.src/.test(PAINTER_SRC), 'the photo is not fetched for the plain mesh when drawn (3D mode reads species off it)');
 assert.ok(/mapStyle\(\) !== "illustrated"/.test(PAINTER_SRC), 'photo style never paints');
-assert.ok(/meshStyle === mapStyle\(\)/.test(PAINTER_SRC), 'a style change rebuilds the mesh');
+assert.ok(/meshStyle === meshLook\(\)/.test(PAINTER_SRC) && /return mapStyle\(\) \+ \(view3d\(\)/.test(PAINTER_SRC), 'a style change, or 3D on or off, rebuilds the mesh');
 
 console.log('illustrated-surface: all assertions passed');

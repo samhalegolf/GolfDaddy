@@ -317,13 +317,12 @@
 
     {
       id: "course-3d", label: "3D Course Viewer", parent: "courses",
-      function: "View-only 3D model of a hole with a camera you move freely: orbit round it, walk on it, or jump to overhead, from-the-tee and round-the-green views. Built from exactly what GPS Play stands up - the published hole frame (or the Illustrated map painted from the course package by the app's own painter), draped over the published terrain-RGB elevation, with the same tree placement - but drawn through a real perspective camera instead of the app's fixed tilt. Every tree stands as a 3D model of its species (guessed from the photo under its crown, mapped water and latitude - nobody tags trees): realistic models for the nearest trees on the photo, low-poly for the rest and for Illustrated. Relief exaggeration is adjustable. The viewer itself is app/js/gd-course-3d.js, the same one GPS Play opens from the cube on its tool rail (app/js/view-3d.js), so this shows exactly what a player sees. Writes nothing.",
+      function: "View-only 3D model of a hole with a camera you move freely: orbit round it, walk on it, or jump to overhead, from-the-tee and round-the-green views. Built from exactly what GPS Play stands up - the published hole frame (or the Illustrated map painted from the course package by the app's own painter), draped over the published terrain-RGB elevation, with the same tree placement - but drawn through a real perspective camera instead of the app's fixed tilt. Every tree stands as a 3D model of its species (guessed from the photo under its crown, mapped water and latitude - nobody tags trees): realistic models for the nearest trees on the photo, low-poly for the rest and for Illustrated. Relief exaggeration is adjustable. The scene is app/js/gd-course-3d.js, the same one GPS Play's 3D mode (the cube on its tool rail) draws its terrain with - there through Play's own framing and lock tilt, never a free camera - so the trees and ground here are exactly what a player sees. Writes nothing.",
       owner: "scripts/studio/courses/course-3d/course-3d-page.js",
       runtime: { app: false, studio: true, server: true },
       code: [
         { role: "Page (owner): course and hole pickers, style, relief, view buttons", path: "scripts/studio/courses/course-3d/course-3d-page.js" },
-        { role: "The viewer: perspective renderer, camera, input, picture and tree building (shared with GPS Play)", path: "app/js/gd-course-3d.js" },
-        { role: "GPS Play's 3D view, the other surface on the same viewer", path: "app/js/view-3d.js" },
+        { role: "The scene and its free-camera viewer; also GPS Play's 3D mode (createFramed)", path: "app/js/gd-course-3d.js" },
         { role: "Illustrated picture + tree placement (the app's own, loaded not copied)", path: "app/js/gd-illustrated-surface.js" },
         { role: "Low-poly tree models, one per NZ species", path: "scripts/trees/nz-trees.js" },
         { role: "Realistic tree models (bark + leaf cards) for the photo", path: "scripts/trees/nz-trees-real.js" },
@@ -336,7 +335,7 @@
       outputs: ["Display only - nothing is written"],
       owns: ["The Studio controls round the 3D viewer"],
       doesNotOwn: [
-        "The 3D viewer, its camera and its renderer (owned by app/js/gd-course-3d.js, shared with GPS Play)",
+        "The 3D scene, the viewer's camera and its renderer (owned by app/js/gd-course-3d.js, shared with GPS Play's 3D mode)",
         "The Play mesh (owned by app/js/gd-terrain-mesh.js)",
         "The illustrated painter and tree placement (owned by app/js/gd-illustrated-surface.js)",
         "The baked frames and elevation (owned by the visual worker)"

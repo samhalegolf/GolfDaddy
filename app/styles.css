@@ -1168,24 +1168,3 @@ body.watchGarmin.watchCard #toolRail { top: calc(env(safe-area-inset-top, 0px) +
 .holePickerGrid.logMode .holeTile { opacity: .38; }
 .holePickerGrid.logMode .holeTile.loggable, .holePickerGrid.logMode .holeTile.logged { opacity: 1; }
 .holePickerGrid.logMode .holeTile.loggable { box-shadow: inset 0 0 0 2px rgba(255, 182, 77, .75); }
-
-/* 3D view (view-3d.js). Its own screen, over everything including the top bar. The
-   background is the scene's own sky, so the moment before the first frame matches it. */
-#view3dScreen { position: fixed; inset: 0; z-index: 720; background: #9ebdd6; color: #f2f7f2; }
-#view3dScreen.hiddenState { display: none; }
-#view3dStage { position: absolute; inset: 0; outline: none; touch-action: none; }
-.view3dCanvas { display: block; width: 100%; height: 100%; touch-action: none; }
-.view3dTop { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 12px); left: 12px; right: 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; pointer-events: none; }
-.view3dTop > * { pointer-events: auto; }
-.view3dClose { width: 44px; height: 44px; border: 0; border-radius: 14px; padding: 0; display: grid; place-items: center; background: rgba(3, 8, 6, .82); color: #f2f7f2; }
-.view3dClose svg { width: 22px; height: 22px; display: block; }
-.view3dSegment { display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(3, 8, 6, .82); }
-.view3dSegment.hiddenState { display: none; }
-.view3dSegment button { border: 0; border-radius: 999px; padding: 9px 14px; background: transparent; color: #f2f7f2; font-size: 13px; font-weight: 800; }
-.view3dSegment button[aria-pressed="true"] { background: #1fd36d; color: #06110b; }
-.view3dStatus { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 66px); left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 32px); margin: 0; padding: 8px 12px; border-radius: 12px; background: rgba(3, 8, 6, .78); font-size: 12px; font-weight: 700; text-align: center; pointer-events: none; }
-.view3dStatus.hiddenState { display: none; }
-.view3dViews { position: absolute; left: 12px; right: 12px; bottom: calc(env(safe-area-inset-bottom, 0px) + 16px); display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
-.view3dViews.hiddenState { display: none; }
-.view3dViews button { border: 0; border-radius: 999px; padding: 10px 14px; background: rgba(3, 8, 6, .82); color: #f2f7f2; font-size: 13px; font-weight: 800; }
-.view3dViews button.hiddenState { display: none; }

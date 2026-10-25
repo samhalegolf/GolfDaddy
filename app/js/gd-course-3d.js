@@ -1,28 +1,29 @@
-/* 3D course view - a hole's 3D model with a camera you move freely. View only.
+/* 3D course scene - a hole's 3D model: the ground draped over the terrain-RGB, and every tree
+ * stood up as a 3D model of its species. One scene, drawn two ways:
  *
- * One renderer for two surfaces: GPS Play's 3D view (app/js/view-3d.js, the rail's cube) and
- * Clarity Studio's 3D Course Viewer (scripts/studio/courses/course-3d/course-3d-page.js). Each
- * brings its own buttons; this owns the scene, the camera, the touch/mouse/keyboard input and
- * how the hole's picture and trees are built.
+ *   - createViewer  Clarity Studio's 3D Course Viewer
+ *                   (scripts/studio/courses/course-3d/course-3d-page.js): a real perspective
+ *                   camera you move freely - orbit, walk, preset views. Studio only.
+ *   - createFramed  GPS Play's 3D mode (the cube on the tool rail): no camera of its own. It
+ *                   draws through Play's framing exactly as app/js/gd-terrain-mesh.js does - the
+ *                   published frame, its CSS matrix and the lock tilt - so shot lock, tilt
+ *                   framing, the overlays and the taps all work as they do on the plain mesh.
+ *                   painter.js swaps it in for that mesh; nothing roams in the app.
  *
- * Why it has its own renderer rather than reusing app/js/gd-terrain-mesh.js: Play's mesh
- * deliberately owns no camera. It shears height inside the published frame so the projector
- * and the tap maths stay untouched, which is right for playing and useless for looking round a
- * hill. This draws the same inputs - the published frame (or the illustrated picture) draped
- * over the published terrain-RGB, trees from the same placement - through a real perspective
- * camera. Same pictures, same heights, same trees; only the viewpoint is free.
+ * Same pictures, same heights, same trees either way; only how it is looked at differs.
  *
  * Two styles, the same two GPS Settings offers:
  *   - photo        the published frame, realistic tree models near the camera, low-poly beyond
  *   - illustrated  the hole painted from the course map by app/js/gd-illustrated-surface.js,
  *                  low-poly trees. A hole with no green or fairway mapped shows the photo.
  *
- * What a load needs, from whichever surface is asking:
+ * What the viewer's load needs:
  *   - meta          the frame's playSurface metadata (origin, zoom, size, elevation sidecar)
  *   - frameUrl      the frame JPEG
  *   - elevationUrl  the terrain-RGB PNG (none: the hole stands flat)
  *   - course()      a promise of {pkg, surfaces}: the course package and its collected
  *                   surfaces, for the illustrated picture and for where the trees stand
+ * Play hands createFramed the pictures it already has instead.
  *
  * Libraries it reads but does not own: app/js/gd-illustrated-surface.js (painter + tree
  * placement), scripts/gd-watch-map-core.js (the placement recipe), scripts/trees/nz-trees.js
@@ -93,6 +94,18 @@
     }
   `;
 
+  /* Play's mesh drops the frame's outermost ring back to the ground plane, so a lifted edge
+     never opens a seam onto the background (gd-terrain-mesh.js). Drawn through Play's framing
+     this does the same, which is also what the overlays' lift assumes. Off for the Studio. */
+  var TUCK = `
+    uniform float uEdgeTuck;
+    float tuck(vec2 uv) {
+      if (uEdgeTuck < 0.5) return 1.0;
+      vec2 e = min(uv, 1.0 - uv);
+      return smoothstep(0.0, 0.012, min(e.x, e.y));
+    }
+  `;
+
   /* Ground: x east and z south in metres from the frame's centre, y up. */
   var GROUND_VERT = `
     attribute vec2 aGrid;
@@ -103,10 +116,10 @@
     uniform float uSeaLevel;
     varying vec2 vUv;
     varying vec3 vWorld;
-  ` + DECODE + `
+  ` + DECODE + TUCK + `
     void main() {
       vUv = aGrid;
-      float h = (heightAt(aGrid) - uSeaLevel) * uExaggeration;
+      float h = (heightAt(aGrid) - uSeaLevel) * uExaggeration * tuck(aGrid);
       vWorld = vec3((aGrid.x - 0.5) * uMetres.x, h, (aGrid.y - 0.5) * uMetres.y);
       gl_Position = uViewProj * vec4(vWorld, 1.0);
     }
@@ -175,12 +188,12 @@
     varying vec2 vUv;
     varying vec2 vFootUv;
     varying vec3 vWorld;
-  ` + DECODE + `
+  ` + DECODE + TUCK + `
     void main() {
       float c = cos(aInst.w), s = sin(aInst.w);
       vec3 p = aPos * vec3(aInst.z, aInst.z * aStretch, aInst.z);
       p = vec3(c * p.x + s * p.z, p.y, -s * p.x + c * p.z);
-      float h = (heightAt(aInst.xy) - uSeaLevel) * uExaggeration;
+      float h = (heightAt(aInst.xy) - uSeaLevel) * uExaggeration * tuck(aInst.xy);
       vWorld = vec3((aInst.x - 0.5) * uMetres.x, h, (aInst.y - 0.5) * uMetres.y) + p;
       vNormal = vec3(c * aNor.x + s * aNor.z, aNor.y, -s * aNor.x + c * aNor.z);
       vColour = aCol;
@@ -250,7 +263,7 @@
     varying vec2 vQ;
     varying float vSeed;
     varying vec3 vWorld;
-  ` + DECODE + `
+  ` + DECODE + TUCK + `
     void main() {
       float r = aTree.z;
       float seed = fract(sin(dot(aTree.xy, vec2(12.9898, 78.233))) * 43758.5453);
@@ -260,7 +273,8 @@
       vec2 q = vec2(aCorner.x, aCorner.y * 2.0 - 1.0);
       vec2 foot = vec2((aTree.x - 0.5) * uMetres.x, (aTree.y - 0.5) * uMetres.y);
       vec2 p = foot + dir * len * 0.6 + dir * q.y * (r * 1.1 + len * 0.5) + side * q.x * r * 1.1;
-      float h = (heightAt(clamp(p / uMetres + 0.5, 0.0, 1.0)) - uSeaLevel) * uExaggeration + 0.25;
+      vec2 uv = clamp(p / uMetres + 0.5, 0.0, 1.0);
+      float h = (heightAt(uv) - uSeaLevel) * uExaggeration * tuck(uv) + 0.25;
       vQ = q;
       vSeed = seed;
       vWorld = vec3(p.x, h, p.y);
@@ -405,11 +419,11 @@
     var gl = canvas.getContext("webgl", { antialias: true, alpha: false });
     if (!gl) throw new Error("WebGL is not available in this browser");
     var ground = program(gl, GROUND_VERT, GROUND_FRAG, ["aGrid"],
-      ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uPicture", "uTexel", "uMetresPerTexel", "uLight", "uAmbient", "uEye", "uSky", "uFogFar"]);
+      ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uEdgeTuck", "uPicture", "uTexel", "uMetresPerTexel", "uLight", "uAmbient", "uEye", "uSky", "uFogFar"]);
     var mesh = program(gl, MESH_VERT, MESH_FRAG, ["aPos", "aNor", "aCol", "aUv", "aInst", "aStretch"],
-      ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uTex", "uPicture", "uTextured", "uLeaf", "uTint", "uLight", "uEye", "uSky", "uFogFar"]);
+      ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uEdgeTuck", "uTex", "uPicture", "uTextured", "uLeaf", "uTint", "uLight", "uEye", "uSky", "uFogFar"]);
     var shadows = program(gl, SHADOW_VERT, SHADOW_FRAG, ["aTree", "aCorner"],
-      ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uShadowDir", "uEye", "uFogFar"]);
+      ["uElevation", "uViewProj", "uMetres", "uExaggeration", "uSeaLevel", "uEdgeTuck", "uShadowDir", "uEye", "uFogFar"]);
     var instanced = gl.getExtension("ANGLE_instanced_arrays");
     var wideIndex = !!gl.getExtension("OES_element_index_uint");
     var instanceBuffer = gl.createBuffer();
@@ -511,8 +525,9 @@
     }
 
     /* input: {picture, elevation (image|null), demSize, metres, seaLevel, ambient, realistic,
-       trees:[{u, v, r, species}]} - realistic is the photo: realistic models near the camera,
-       and the trees' shadows on the ground. */
+       edgeTuck, trees:[{u, v, r, species}]} - realistic is the photo: realistic models near
+       the camera, and the trees' shadows on the ground. edgeTuck is Play's: the frame's edge
+       held on the ground plane. */
     function setHole(input) {
       release();
       /* Realistic models are only for the photo: switching to Illustrated stops building them. */
@@ -563,6 +578,7 @@
         seaLevel: dem ? input.seaLevel : 0,
         ambient: input.ambient,
         realistic: !!input.realistic,
+        edgeTuck: !!input.edgeTuck,
         heightAt: heightAt
       };
       return trees ? trees.list.length : 0;
@@ -576,16 +592,60 @@
       return (hole.heightAt(u, v) - hole.seaLevel) * exaggeration;
     }
 
+    /* Through a real perspective camera, for the Studio's free viewer. */
     function render(camera, exaggeration) {
+      var span = hole ? Math.max(hole.metres[0], hole.metres[1]) : 1;
+      var view = lookAt(camera.eye, camera.target);
+      draw({
+        viewProj: multiply(perspective(50 * Math.PI / 180, canvas.width / Math.max(1, canvas.height), 0.5, span * 4), view.matrix),
+        eye: camera.eye, fogFar: span * 2.2, clear: sky
+      }, exaggeration);
+    }
+
+    /* Through Play's own framing instead of a camera (createFramed below): the canvas IS the
+       frame, and the frame's CSS matrix and lock tilt put it on screen exactly as they put the
+       flat picture there. So ground at height zero lands on its own frame pixel, and height
+       moves a point up the screen by gd-terrain-mesh.js's shear, h . pxPerMetre . tan(tilt)
+       along the way that becomes screen-up - the same offset the overlays' lift applies. That
+       is one affine map of the world, so it is a matrix like any other and the scene draws
+       through it unchanged. Depth is distance along the leaning view: further up the screen
+       is further away, higher is nearer. Flat (tilt 0) that is the hole seen from above.
+
+       frame: {tiltDeg, frameRotationDeg, exaggeration, ambient, focusUv} - focusUv is where
+       the realistic tree models gather (the player), the frame's centre without one. */
+    var FRAME_CLEAR = [0.055, 0.075, 0.06];   // gd-terrain-mesh.js's background
+    function renderFramed(frame) {
+      var exaggeration = Number(frame.exaggeration) || 0;
+      if (!hole) { draw({ clear: FRAME_CLEAR }, exaggeration); return; }
+      var mx = hole.metres[0], mz = hole.metres[1], w = canvas.width, h = canvas.height;
+      var tilt = (Number(frame.tiltDeg) || 0) * Math.PI / 180;
+      var rot = -(Number(frame.frameRotationDeg) || 0) * Math.PI / 180;
+      var up = [Math.sin(rot), -Math.cos(rot)];
+      var shearPx = (w / mx) * Math.tan(tilt);
+      var sin = Math.sin(tilt), cos = Math.cos(tilt), depth = Math.max(mx, mz) * 2 + 4000;
+      var viewProj = [
+        2 / mx, 0, sin * up[0] / depth, 0,
+        2 * up[0] * shearPx / w, -2 * up[1] * shearPx / h, -cos / depth, 0,
+        0, -2 / mz, sin * up[1] / depth, 0,
+        0, 0, 0, 1
+      ];
+      var f = frame.focusUv;
+      var fx = f ? (f[0] - 0.5) * mx : 0, fz = f ? (f[1] - 0.5) * mz : 0;
+      draw({
+        viewProj: viewProj, eye: [fx, groundAt(fx, fz, exaggeration), fz], fogFar: 1e9,
+        clear: FRAME_CLEAR, ambient: frame.ambient
+      }, exaggeration);
+    }
+
+    /* view: {viewProj, eye, fogFar, clear, ambient (the hole's own when left out)}. */
+    function draw(view, exaggeration) {
       var w = canvas.width, h = canvas.height;
       gl.viewport(0, 0, w, h);
-      gl.clearColor(sky[0], sky[1], sky[2], 1);
+      gl.clearColor(view.clear[0], view.clear[1], view.clear[2], 1);
       gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
       if (!hole) return;
-      var span = Math.max(hole.metres[0], hole.metres[1]);
-      var fogFar = span * 2.2;
-      var view = lookAt(camera.eye, camera.target);
-      var viewProj = multiply(perspective(50 * Math.PI / 180, w / Math.max(1, h), 0.5, span * 4), view.matrix);
+      var viewProj = view.viewProj, fogFar = view.fogFar, eye = view.eye;
+      var tuck = hole.edgeTuck ? 1 : 0;
 
       gl.enable(gl.DEPTH_TEST);
       gl.depthMask(true);
@@ -594,11 +654,12 @@
       gl.uniform2f(ground.uMetres, hole.metres[0], hole.metres[1]);
       gl.uniform1f(ground.uExaggeration, exaggeration);
       gl.uniform1f(ground.uSeaLevel, hole.seaLevel);
+      gl.uniform1f(ground.uEdgeTuck, tuck);
       gl.uniform2f(ground.uTexel, 1 / hole.demSize[0], 1 / hole.demSize[1]);
       gl.uniform2f(ground.uMetresPerTexel, hole.metres[0] / hole.demSize[0], hole.metres[1] / hole.demSize[1]);
       gl.uniform3fv(ground.uLight, new Float32Array(LIGHT));
-      gl.uniform1f(ground.uAmbient, hole.ambient);
-      gl.uniform3fv(ground.uEye, new Float32Array(camera.eye));
+      gl.uniform1f(ground.uAmbient, view.ambient != null ? view.ambient : hole.ambient);
+      gl.uniform3fv(ground.uEye, new Float32Array(eye));
       gl.uniform3fv(ground.uSky, new Float32Array(sky));
       gl.uniform1f(ground.uFogFar, fogFar);
       gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, hole.elevation); gl.uniform1i(ground.uElevation, 0);
@@ -611,8 +672,8 @@
       gl.disableVertexAttribArray(ground.aGrid);
 
       if (!hole.trees) return;
-      if (hole.realistic) drawShadows(viewProj, exaggeration, camera.eye, fogFar);
-      drawTrees(viewProj, exaggeration, camera.eye, fogFar);
+      if (hole.realistic) drawShadows(viewProj, exaggeration, eye, fogFar);
+      drawTrees(viewProj, exaggeration, eye, fogFar);
     }
 
     /* Shadows first, lying on the ground: away from the sun by each tree's height. */
@@ -622,6 +683,7 @@
       gl.uniform2f(shadows.uMetres, hole.metres[0], hole.metres[1]);
       gl.uniform1f(shadows.uExaggeration, exaggeration);
       gl.uniform1f(shadows.uSeaLevel, hole.seaLevel);
+      gl.uniform1f(shadows.uEdgeTuck, hole.edgeTuck ? 1 : 0);
       gl.uniform2f(shadows.uShadowDir, -LIGHT[0] / LIGHT[1], -LIGHT[2] / LIGHT[1]);
       gl.uniform3fv(shadows.uEye, new Float32Array(eye));
       gl.uniform1f(shadows.uFogFar, fogFar);
@@ -681,6 +743,7 @@
       gl.uniform2f(mesh.uMetres, mx, mz);
       gl.uniform1f(mesh.uExaggeration, exaggeration);
       gl.uniform1f(mesh.uSeaLevel, hole.seaLevel);
+      gl.uniform1f(mesh.uEdgeTuck, hole.edgeTuck ? 1 : 0);
       gl.uniform3fv(mesh.uLight, new Float32Array(LIGHT));
       gl.uniform3fv(mesh.uEye, new Float32Array(eye));
       gl.uniform3fv(mesh.uSky, new Float32Array(sky));
@@ -768,8 +831,10 @@
     }
 
     return {
-      setHole: setHole, render: render, dispose: dispose, groundAt: groundAt,
+      setHole: setHole, render: render, renderFramed: renderFramed, dispose: dispose, groundAt: groundAt,
       metres: function () { return hole ? hole.metres : null; },
+      /* The DEM's own heights (not exaggerated) at frame uv, sampled as the GPU samples them. */
+      heightAt: function (u, v) { return hole ? hole.heightAt(u, v) : 0; },
       /* Realistic species still being built, for the readout. */
       pending: function () { return realQueue.length; },
       maxTexture: gl.getParameter(gl.MAX_TEXTURE_SIZE)
@@ -936,6 +1001,86 @@
       if (!pt || !Number.isFinite(Number(pt.lat)) || !Number.isFinite(Number(pt.lng))) return null;
       var p = worldPx(pt.lat, pt.lng, zoom);
       return [((p.x - meta.originPx.x) / w - 0.5) * metres[0], ((p.y - meta.originPx.y) / h - 0.5) * metres[1]];
+    };
+  }
+
+  /* ------------------------------------------------------------------ Play's 3D mode */
+
+  /* Where the trees stand on a frame and which species each is, as the scene takes them:
+     the same placement and the same guess the viewer makes, for the frame Play has up.
+     photo is the frame's aerial (the species are read from it; null guesses on size alone).
+     Empty when anything it needs is missing - the hole still stands up, bare. */
+  function frameTrees(opts) {
+    var meta = opts.meta || {};
+    var space = frameSpace(meta, ILLUSTRATED_PX), metresX = holeMetres(meta)[0];
+    if (!space || !metresX || !window.GDIllustratedSurface) return [];
+    try {
+      var surfaces = opts.surfaces || {};
+      var trees = placeTrees(space, surfaces, metresX, opts.pkg || null);
+      return treesInMetres(withSpecies(trees, space, metresX, opts.photo || null, surfaces, meta), space, metresX);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  /* GPS Play's terrain drawn by this scene - the 3D tree models, their shadows on the photo,
+     the realistic ones round the player - but through Play's own framing (renderFramed), so
+     shot lock, the tilt, the overlays and the taps are exactly what they are on Play's plain
+     mesh. Same contract as GDTerrainMesh.create, which painter.js swaps it in for:
+     {state, render, dispose, lift, ground, offsetAt}, with the lift being that mesh's own
+     displacer over this scene's heights.
+
+     options: GDTerrainMesh.create's (aerial, elevation, metres, demSize, imagePx, framePx,
+     seaLevel), plus trees (frameTrees) and illustrated (the aerial is the drawn map: low-poly
+     trees, no shadows - the picture paints its own). state.focusPx (frame pixels) is where the
+     realistic models gather. */
+  function createFramed(canvas, options) {
+    var framePx = options.framePx || null;
+    var state = {
+      tiltDeg: 32, frameRotationDeg: 0, exaggeration: 2.5, ambient: 0.55,
+      metres: options.metres || [300, 300],
+      demSize: options.demSize || [1024, 1024],
+      imagePx: options.imagePx || [canvas.width, canvas.height],
+      seaLevel: options.seaLevel || 0,
+      focusPx: null
+    };
+    var scene = createScene(canvas, render);
+    scene.setHole({
+      picture: options.aerial,
+      elevation: options.elevation,
+      demSize: state.demSize,
+      metres: state.metres,
+      seaLevel: state.seaLevel,
+      ambient: state.ambient,
+      realistic: !options.illustrated,
+      edgeTuck: true,
+      trees: options.trees || []
+    });
+    var disposed = false;
+    function render() {
+      if (disposed) return;
+      var f = state.focusPx;
+      scene.renderFramed({
+        tiltDeg: state.tiltDeg, frameRotationDeg: state.frameRotationDeg,
+        exaggeration: state.exaggeration, ambient: state.ambient,
+        focusUv: f && framePx ? [f.x / framePx[0], f.y / framePx[1]] : null
+      });
+    }
+    var mesh = window.GDTerrainMesh;
+    var displacer = framePx && mesh && mesh.makeDisplacer
+      ? mesh.makeDisplacer({ heightAt: scene.heightAt, framePx: framePx, metres: state.metres, state: state })
+      : { lift: function (px) { return px; }, ground: function (px) { return px; }, offsetAt: function () { return { x: 0, y: 0 }; } };
+    return {
+      state: state,
+      render: render,
+      dispose: function () {
+        if (disposed) return;
+        disposed = true;
+        scene.dispose();
+      },
+      lift: displacer.lift,
+      ground: displacer.ground,
+      offsetAt: displacer.offsetAt
     };
   }
 
@@ -1317,5 +1462,5 @@
     };
   }
 
-  window.GDCourse3D = { createViewer: createViewer };
+  window.GDCourse3D = { createViewer: createViewer, createFramed: createFramed, frameTrees: frameTrees };
 })();
