@@ -454,9 +454,7 @@
   function exitBack() {
     /* Back peels one layer at a time, and the Marshal owns what a layer is:
        it answers false when there was nothing to close, so Back falls through
-       to its next meaning rather than this file guessing at the play state.
-       The 3D view sits over all of it, so it is the first layer to peel. */
-    if (app.view3d && app.view3d.isOpen()) { app.view3d.close(); return; }
+       to its next meaning rather than this file guessing at the play state. */
     if (app.marshal && app.marshal.signal("BACK")) return;
     /* Then the player's own last change — a wind level, a dropped pin. Same
        shape as the Marshal above: undo.pop() answers false when the stack is

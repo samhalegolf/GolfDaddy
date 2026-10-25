@@ -4,9 +4,10 @@
  * terrain mesh, the illustrated map and its trees actually look like as geometry. Nothing here
  * writes anything.
  *
- * The scene, the camera and how the picture and trees are built are app/js/gd-course-3d.js,
- * the same viewer GPS Play opens from its rail - so what this shows is what a player sees.
- * This page owns only its controls: the course and hole pickers, style, relief and the views.
+ * The scene, the camera and how the picture and trees are built are app/js/gd-course-3d.js.
+ * GPS Play's 3D mode draws its terrain with the same scene (through Play's own framing, not
+ * this free camera), so the ground and trees here are what a player sees. This page owns only
+ * its controls: the course and hole pickers, style, relief and the views.
  *
  * What it reads, and from where:
  *   - GET /api/course-visuals?courseId=  the course's visual record: each hole's frame and its
@@ -56,7 +57,7 @@
     containerEl.innerHTML =
       '<div class="gdStudioLede" style="margin-bottom:12px">' +
       "<p>View only. A hole's 3D model, made from the same published picture, elevation and trees GPS Play uses, " +
-      "with a camera you can move anywhere - the same viewer players open from the cube on Play's tool rail. " +
+      "with a camera you can move anywhere. The same scene is what Play's 3D mode (the cube on its tool rail) plays on. " +
       "Pick a course, then a hole. Each tree's species is guessed from the photo; " +
       "on the photo the nearest trees are the realistic models, the rest low-poly.</p>" +
       "<p><strong>Orbit</strong>: drag to turn, right-drag or shift-drag to slide, scroll to zoom. " +

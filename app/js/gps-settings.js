@@ -14,6 +14,8 @@
      frameTightness - how much of the shot the lock stage fills
      relief         - how far the terrain mesh lifts the ground (off to 5x)
      mapStyle       - photo, or the hole drawn from the course map (gd-illustrated-surface.js)
+     view3d         - 3D mode: the mesh drawn with 3D tree models (gd-course-3d.js), in either
+                      map style. Switched from the cube on the tool rail, not this panel
      windGhost      - draw the wind ghost bubble beside the real one
      slopeBubble    - morph the bubble to the plays-like (slope) distance
 
@@ -53,7 +55,7 @@
   /* corridor is deliberately not in the panel yet: it is the dispersion
      corridor from the v2 bubble design, off until it has been played with.
      Stored like the rest so turning it on survives a reload. */
-  var DEFAULTS = { units: "m", aimLine: true, shotUp: true, frameTightness: "medium", relief: "enhanced", mapStyle: "photo", corridor: false,
+  var DEFAULTS = { units: "m", aimLine: true, shotUp: true, frameTightness: "medium", relief: "enhanced", mapStyle: "photo", view3d: false, corridor: false,
     windGhost: true, slopeBubble: false, hybridView: "composite", greenLinesCoarse: false };
 
   /* Operator-only debug views of the Clarity 3D Mesh picture (live-hybrid.js VIEWS - keep the
@@ -77,6 +79,7 @@
         frameTightness: TIGHTNESS[raw.frameTightness] ? raw.frameTightness : DEFAULTS.frameTightness,
         relief: RELIEF[raw.relief] ? raw.relief : DEFAULTS.relief,
         mapStyle: MAP_STYLE[raw.mapStyle] ? raw.mapStyle : DEFAULTS.mapStyle,
+        view3d: raw.view3d === true,
         hybridView: HYBRID_VIEWS.indexOf(raw.hybridView) !== -1 ? raw.hybridView : DEFAULTS.hybridView,
         greenLinesCoarse: raw.greenLinesCoarse === true,
         corridor: raw.corridor === true,
@@ -111,6 +114,7 @@
     /* 0 means no mesh at all, not a flat mesh. */
     reliefExaggeration: function () { return RELIEF[state.relief].factor; },
     mapStyle: function () { return state.mapStyle; },
+    view3d: function () { return state.view3d === true; },
     hybridView: function () { return state.hybridView; },
     hybridViews: function () { return HYBRID_VIEWS.slice(); },
     /* Operator test switch: draw green slope lines even from elevation too coarse to read a

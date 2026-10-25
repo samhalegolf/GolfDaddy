@@ -614,39 +614,76 @@ async function bootCheck() {
          presentation is up, so read it there. */
       presentation: window.ClarityApp.painter.presentation().kind
     };
-    /* The 3D view (the rail's cube) stands up the picture on screen, switches style in
-       place, and gives its canvas back on closing. Headless Chromium without WebGL can only
-       say it could not build, which is the honest answer there too. */
-    const statusKey = () => document.getElementById("view3dStatus").getAttribute("data-i18n");
-    const webgl = !!document.createElement("canvas").getContext("webgl");
-    document.getElementById("railView3d").click();
-    await gd.until(() => statusKey() !== "threeD.loading", "the 3D view to build hole 1");
+    /* 3D mode (the rail's cube) is a switch, not a screen: it lights the button, is kept
+       in GPS Settings so it lasts across holes and rounds, and leaves the hole being played
+       on the published surface. The drawing itself is dev/course-3d-framed.test.js's. */
+    const cube = document.getElementById("railView3d");
+    const settingsStore = () => JSON.parse(localStorage.getItem("clarity:gps-settings:v1") || "{}").view3d;
+    cube.click();
+    await gd.wait(120);
     const view3d = {
-      webgl,
-      open: gd.shown("view3dScreen"),
-      opened: statusKey(),
-      canvas: !!document.querySelector("#view3dStage canvas")
+      on: window.ClarityApp.gpsSettings.view3d(),
+      pressed: cube.getAttribute("aria-pressed"),
+      stored: settingsStore(),
+      stillPublished: window.ClarityApp.painter.presentation().kind
     };
-    if (webgl) {
-      document.querySelector('#view3dStyle [data-style="illustrated"]').click();
-      await gd.until(() => statusKey() !== "threeD.loading", "the 3D view to rebuild in Illustrated");
-      view3d.restyled = statusKey();
-      view3d.illustratedPressed = document.querySelector('#view3dStyle [data-style="illustrated"]').getAttribute("aria-pressed");
-    }
-    document.getElementById("view3dClose").click();
-    view3d.closed = !gd.shown("view3dScreen") && !document.querySelector("#view3dStage canvas");
+    cube.click();
+    await gd.wait(120);
+    view3d.off = !window.ClarityApp.gpsSettings.view3d() && cube.getAttribute("aria-pressed") === "false" && settingsStore() === false;
     await gd.goHole(2, 600);
     const h2State = {
       presented: document.body.classList.contains("surface-published"),
       mapCreated: document.getElementById("map").childElementCount > 0
     };
-    /* On the live map there is no picture to drape: the screen says so instead of a scene. */
-    document.getElementById("railView3d").click();
-    view3d.liveMap = statusKey();
-    view3d.liveMapCanvas = !!document.querySelector("#view3dStage canvas");
-    document.getElementById("view3dClose").click();
     return { h1State, h2State, view3d };
   });
+
+  /* 3D mode on a hole that stands up: the cube swaps the plain terrain mesh for the 3D scene
+     (gd-course-3d.js createFramed) on the same published frame, and back again, while the
+     projection the overlays draw through keeps answering. Counted by wrapping the two
+     builders, since which one drew is not on screen. */
+  const threeD = await page.evaluate(async (h1) => {
+    const app = window.ClarityApp, gd = window.__gd;
+    if (!document.createElement("canvas").getContext("webgl")) return { webgl: false };
+    const built = { plain: 0, framed: 0 };
+    const plain = window.GDTerrainMesh.create, framedFn = window.GDCourse3D.createFramed;
+    window.GDTerrainMesh.create = function () { built.plain++; return plain.apply(this, arguments); };
+    window.GDCourse3D.createFramed = function () { built.framed++; return framedFn.apply(this, arguments); };
+    /* Terrain-RGB rising 0-30m across the frame. */
+    const dem = document.createElement("canvas"); dem.width = dem.height = 16;
+    const ctx = dem.getContext("2d");
+    for (let x = 0; x < 16; x++) {
+      const v = Math.round((x * 2 + 10000) / 0.1);
+      ctx.fillStyle = "rgb(" + (v >> 16) + "," + ((v >> 8) & 255) + "," + (v & 255) + ")";
+      ctx.fillRect(x, 0, 1, 16);
+    }
+    const PNG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+    const tee = { lat: h1.tee.lat - 2, lng: h1.tee.lng }, green = { lat: h1.green.lat - 2, lng: h1.green.lng };
+    const origin = app.playSurface.worldPx(green.lat + 0.004, green.lng - 0.004, 18);
+    const meta = {
+      captureZoom: 18, originPx: { x: origin.x, y: origin.y },
+      outputDimensions: { width: 1341, height: 1889 }, anchorPins: { tee, green },
+      elevation: { url: dem.toDataURL(), width: 16, height: 16, metresPerPixel: 40, elevationRange: { min: 0, max: 30 } }
+    };
+    const pkg = { holes: [{ holeNumber: 1, geometry: { tee, green, greenShape: [], route: [] }, visual: { url: PNG, playSurface: meta } }] };
+    await gd.open("three-d-course", pkg, null);
+    await gd.until(() => document.body.classList.contains("surface-mesh"), "the plain mesh to stand the hole up");
+    const before = Object.assign({}, built);
+    const cube = document.getElementById("railView3d");
+    cube.click();
+    await gd.until(() => built.framed > before.framed && document.body.classList.contains("surface-mesh"), "3D mode to rebuild the mesh");
+    app.pin.set(tee);
+    await gd.wait(80);
+    const marker = document.getElementById("pinMarker");
+    const pinOnScreen = Number.isFinite(parseFloat(marker.style.left)) && Number.isFinite(parseFloat(marker.style.top));
+    app.pin.clear();
+    const on = Object.assign({}, built);
+    cube.click();
+    await gd.until(() => built.plain > on.plain && document.body.classList.contains("surface-mesh"), "3D mode off to bring the plain mesh back");
+    window.GDTerrainMesh.create = plain;
+    window.GDCourse3D.createFramed = framedFn;
+    return { webgl: true, before, on, after: Object.assign({}, built), pinOnScreen, published: app.painter.presentation().kind };
+  }, AKARANA_H1);
 
   const play = await page.evaluate(async (h1) => {
     const app = window.ClarityApp, gd = window.__gd;
@@ -1894,21 +1931,18 @@ async function bootCheck() {
     "the presentation up must be the published surface, got: " + surfaceFirst.h1State.presentation);
   assert.strictEqual(surfaceFirst.h2State.presented, false, "no visual on hole 2 → back on the live map");
   assert.ok(surfaceFirst.h2State.mapCreated, "the map is created the moment absence is the answer");
+  if (threeD.webgl) {
+    assert.strictEqual(threeD.before.framed, 0, "with 3D mode off the hole stands up on the plain mesh: " + JSON.stringify(threeD));
+    assert.ok(threeD.on.framed === 1 && threeD.on.plain === threeD.before.plain, "3D mode rebuilds the same hole on the 3D scene: " + JSON.stringify(threeD));
+    assert.ok(threeD.pinOnScreen, "the overlays still project onto the 3D hole");
+    assert.ok(threeD.after.plain === threeD.on.plain + 1 && threeD.after.framed === 1, "3D mode off rebuilds the plain mesh: " + JSON.stringify(threeD));
+    assert.strictEqual(threeD.published, "published", "the hole stays on its published surface throughout");
+  }
   {
     const v = surfaceFirst.view3d;
-    assert.ok(v.open, "the rail's cube opens the 3D view");
-    if (v.webgl) {
-      assert.strictEqual(v.opened, "threeD.hint", "a published hole stands up in 3D, got: " + v.opened);
-      assert.ok(v.canvas, "the 3D view draws on its own canvas");
-      assert.ok(["threeD.hint", "threeD.illustratedUnavailable"].includes(v.restyled),
-        "switching to Illustrated rebuilds the hole (or says it shows the photo), got: " + v.restyled);
-      assert.strictEqual(v.illustratedPressed, "true", "the style switch shows Illustrated as chosen");
-    } else {
-      assert.strictEqual(v.opened, "threeD.failed", "no WebGL says the 3D view could not be built, got: " + v.opened);
-    }
-    assert.ok(v.closed, "closing the 3D view hides it and gives its canvas back");
-    assert.strictEqual(v.liveMap, "threeD.unavailable", "a live map hole says 3D needs a picture, got: " + v.liveMap);
-    assert.ok(!v.liveMapCanvas, "no scene is built on the live map");
+    assert.ok(v.on && v.pressed === "true" && v.stored === true, "the cube turns 3D mode on, lit and kept: " + JSON.stringify(v));
+    assert.strictEqual(v.stillPublished, "published", "3D mode keeps the hole on its published surface");
+    assert.ok(v.off, "a second tap turns 3D mode off again");
   }
   assert.ok(!framed.scrollJumped, "clicking the pill must not scroll-jump the play screen");
   assert.ok(!framed.bubbleUnderBar, "the bubble Head To the Tee raises must not hide under the distance bar");

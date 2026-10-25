@@ -45,7 +45,7 @@
      elevation beside the frame, or a texture that would not load - all mean the flat frame
      stays, and the flat frame is already a finished picture. */
   var mesh = null;
-  var meshStyle = null;        // the map style the mesh up now was built for
+  var meshStyle = null;        // the look the mesh up now was built for (meshLook)
   /* Backing store cap. Frames go to 3072, and a 3072-square canvas is ~37MB of GPU memory per
      hole on a device that also has the texture and the elevation resident. The canvas is
      stretched to the frame's own size by CSS, so this costs sharpness the tilt hides and
@@ -2202,7 +2202,10 @@
     /* Illustrated: the hole drawn from the course map replaces the photo as the mesh's
        picture. Null (photo style, or nothing mapped here) keeps the photo. */
     var drawn = illustratedPicture(meta, frameW, frameH);
-    var loaded = 0, needed = drawn ? 1 : 2, aerialImg = new Image(), elevationImg = new Image();
+    /* 3D mode draws the same frame through gd-course-3d.js: every tree a 3D model of its
+       species, which it reads off the photo - so the photo is wanted under Illustrated too. */
+    var threeD = view3d();
+    var loaded = 0, needed = drawn && !threeD ? 1 : 2, aerialImg = new Image(), elevationImg = new Image();
     aerialImg.crossOrigin = elevationImg.crossOrigin = "anonymous";
 
     function ready() {
@@ -2216,7 +2219,7 @@
         var metresX = Number(elevation.metresPerPixel) * Number(elevation.width) || 0;
         var metresY = Number(elevation.metresPerPixel) * Number(elevation.height) || 0;
         if (!metresX || !metresY) { noMesh(""); return; }
-        mesh = window.GDTerrainMesh.create(canvas, {
+        var meshOptions = {
           aerial: drawn ? drawn.picture : aerialImg,
           trees: drawn ? drawn.trees : null,
           elevation: elevationImg,
@@ -2225,7 +2228,14 @@
           imagePx: [canvas.width, canvas.height],
           framePx: [frameW, frameH],
           seaLevel: elevation.elevationRange ? Number(elevation.elevationRange.min) : 0
-        });
+        };
+        if (threeD) {
+          meshOptions.illustrated = !!drawn;
+          meshOptions.trees = window.GDCourse3D.frameTrees({
+            meta: meta, photo: aerialImg, surfaces: courseHazardSurfaces(), pkg: marshal && marshal.pkg ? marshal.pkg() : null
+          });
+        }
+        mesh = threeD ? window.GDCourse3D.createFramed(canvas, meshOptions) : window.GDTerrainMesh.create(canvas, meshOptions);
         /* The texture is the published frame, which already carries baked relief aimed off
            this hole's play axis. Lighting it again from scratch would shade it twice, so the
            mesh runs mostly ambient and contributes geometry - the silhouette, the pad edges,
@@ -2238,7 +2248,7 @@
         if (drawn) mesh.state.ambient = ILLUSTRATED_MESH_AMBIENT;
         /* The style asked for, not the one drawn: an unmapped hole on Illustrated is still
            answered, and must not be rebuilt on every settings change. */
-        meshStyle = mapStyle();
+        meshStyle = meshLook();
         mesh.state.exaggeration = reliefExaggeration();
         applyMeshFrame();
         document.body.classList.add("surface-mesh");
@@ -2275,13 +2285,25 @@
     }
     aerialImg.onload = elevationImg.onload = ready;
     aerialImg.onerror = elevationImg.onerror = failed;
-    if (!drawn) aerialImg.src = surfaceUrlValue;
+    if (!drawn || threeD) aerialImg.src = surfaceUrlValue;
     elevationImg.src = elevationUrl;
   }
 
   function mapStyle() {
     var s = settings();
     return s && s.mapStyle ? s.mapStyle() : "photo";
+  }
+
+  /* The 3D mode switch (the rail's cube). Needs the scene library; without it the plain mesh
+     is the answer, which is still a complete picture. */
+  function view3d() {
+    var s = settings();
+    return !!(s && s.view3d && s.view3d() && window.GDCourse3D && window.GDCourse3D.createFramed);
+  }
+
+  /* What a mesh is built for: a change of either is a new mesh, not a re-light. */
+  function meshLook() {
+    return mapStyle() + (view3d() ? ":3d" : "");
   }
 
   /* The illustrated picture for this frame and the trees that stand on it, {picture, trees},
@@ -2335,10 +2357,12 @@
     }
   }
 
-  /* The player's Terrain relief setting. 0 means no mesh at all. */
+  /* The player's Terrain relief setting. 0 means no mesh at all - except in 3D mode, which
+     is a mesh by definition: with relief off it stands at true scale. */
   function reliefExaggeration() {
     var s = settings();
-    return s && s.reliefExaggeration ? s.reliefExaggeration() : 2.5;
+    var factor = s && s.reliefExaggeration ? s.reliefExaggeration() : 2.5;
+    return factor > 0 ? factor : (view3d() ? 1 : 0);
   }
 
   /* A settings change can turn relief off, on, or to a new height. Off drops the mesh back
@@ -2347,8 +2371,9 @@
   function syncMeshRelief() {
     var exaggeration = reliefExaggeration();
     if (!(exaggeration > 0)) { disposeMesh(); return; }
-    /* A new map style is a new picture on the same ground: rebuilt, not re-lit. */
-    if (mesh && meshStyle === mapStyle()) { mesh.state.exaggeration = exaggeration; return; }
+    /* A new map style, or 3D on or off, is a new picture on the same ground: rebuilt, not
+       re-lit. */
+    if (mesh && meshStyle === meshLook()) { mesh.state.exaggeration = exaggeration; return; }
     var img = el("surfaceImage");
     if (!published || !publishedFrameUrl || !img || !img.dataset.playSurface) return;
     var meta;
@@ -2623,7 +2648,17 @@
     /* Only the lock stage is tilted (styles.css), so anywhere else the height offset must be
        zero or the surface shears against a frame that is not leaning. */
     mesh.state.tiltDeg = document.body.classList.contains("tilt-lock") && isFinite(tilt) ? tilt : 0;
+    /* 3D mode stands the realistic tree models round the player (gd-course-3d.js). */
+    if ("focusPx" in mesh.state) mesh.state.focusPx = playerFramePx();
     try { mesh.render(); } catch (e) { disposeMesh(); }
+  }
+
+  /* Where the player stands, in the frame's pixels, or null. */
+  function playerFramePx() {
+    var img = el("surfaceImage");
+    var who = marshal && marshal.player ? marshal.player() : null;
+    if (!who || !img || !img.dataset.playSurface) return null;
+    try { return surfaceLib.projectToSurface(JSON.parse(img.dataset.playSurface), who.lat, who.lng); } catch (e) { return null; }
   }
 
   function presentSurface(asset) {
@@ -3196,28 +3231,6 @@
       var proj = projector();
       var at = unTilt(clientX, clientY);
       return proj ? proj.toLatLng({ left: at.left, top: at.top }) : null;
-    },
-    /* The picture on screen, for the 3D view (view-3d.js) to stand up: the frame and its
-       metadata, the elevation sidecar, the course it is painted and planted from, and the
-       hole's own tee and green. Null on the live map - there is no picture to drape. */
-    view3d: function () {
-      var img = el("surfaceImage");
-      if (!published || !publishedFrameUrl || !img || !img.dataset.playSurface) return null;
-      var meta;
-      try { meta = JSON.parse(img.dataset.playSurface); } catch (e) { return null; }
-      if (!meta) return null;
-      var elevation = meta.elevation || {};
-      var r = currentScene && currentScene.hole.rec;
-      return {
-        holeNumber: loadedHole,
-        meta: meta,
-        frameUrl: publishedFrameUrl,
-        elevationUrl: elevation.url || (elevation.path ? apiUrl(surfaceLib.assetUrl(elevation.path)) : null),
-        pkg: marshal && marshal.pkg ? marshal.pkg() : null,
-        surfaces: courseHazardSurfaces(),
-        tee: r && r.tee ? { lat: r.tee.lat, lng: r.tee.lng } : null,
-        green: r && r.green ? { lat: r.green.lat, lng: r.green.lng } : null
-      };
     },
     /* The current hole's green, for tools that compute against it (Pin Lock). */
     holeGeometry: function () {

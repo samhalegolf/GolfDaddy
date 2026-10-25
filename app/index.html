@@ -373,7 +373,8 @@
     <button id="railPin" type="button" class="railBtn" aria-label="Pin" data-i18n-aria-label="rail.pin" aria-pressed="false"><img src="../assets/icons/flag.svg" alt="" draggable="false"></button>
     <button id="railGpsPin" type="button" class="railBtn" aria-label="GPS locate" data-i18n-aria-label="rail.gpsLocate"><img src="../assets/brand/cg-gps-pin.png?v=deb3313b" alt=""></button>
     <button id="railScorecard" type="button" class="railBtn" aria-label="Scorecard" data-i18n-aria-label="rail.scorecard"><img src="../assets/icons/scorecard.png" alt=""></button>
-    <button id="railView3d" type="button" class="railBtn" aria-label="3D view" data-i18n-aria-label="rail.threeD">
+    <!-- 3D mode on/off, kept across holes and rounds (GPS Settings view3d). -->
+    <button id="railView3d" type="button" class="railBtn" aria-label="3D view" data-i18n-aria-label="rail.threeD" aria-pressed="false">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 2.5 20.5 7v10L12 21.5 3.5 17V7z"></path><path d="M3.5 7 12 11.5 20.5 7M12 11.5v10"></path></svg>
     </button>
     <button id="railGpsSettings" type="button" class="railBtn" aria-label="GPS Settings" data-i18n-aria-label="gpsSettings.openButton">
@@ -382,30 +383,6 @@
   </div>
 
   <div id="pinGhost" class="hiddenState"><img src="../assets/icons/flag.svg" alt="" draggable="false"></div>
-
-  <!-- 3D view (view-3d.js): the hole on screen as a model you can walk round, in either map
-       style. View only, over everything including the top bar, and closed straight back to
-       Play. The canvas is made on opening and thrown away on closing. -->
-  <div id="view3dScreen" class="hiddenState">
-    <div id="view3dStage" tabindex="-1"></div>
-    <div class="view3dTop">
-      <button id="view3dClose" type="button" class="view3dClose" aria-label="Close 3D view" data-i18n-aria-label="threeD.close">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"></path></svg>
-      </button>
-      <div id="view3dStyle" class="view3dSegment" role="group" aria-label="Map style" data-i18n-aria-label="gpsSettings.mapStyle">
-        <button type="button" data-style="photo" aria-pressed="true" data-i18n="gpsSettings.mapStylePhoto">Photo</button>
-        <button type="button" data-style="illustrated" aria-pressed="false" data-i18n="gpsSettings.mapStyleIllustrated">Illustrated</button>
-      </div>
-    </div>
-    <p id="view3dStatus" class="view3dStatus hiddenState" role="status"></p>
-    <div id="view3dViews" class="view3dViews">
-      <button id="view3dOverhead" type="button" data-i18n="threeD.overhead">Overhead</button>
-      <button id="view3dTee" type="button" data-i18n="threeD.fromTee">Tee</button>
-      <button id="view3dGreen" type="button" data-i18n="threeD.green">Green</button>
-      <button id="view3dHere" type="button" data-i18n="threeD.fromHere">From here</button>
-      <button id="view3dMode" type="button" data-i18n="threeD.walk">Walk</button>
-    </div>
-  </div>
 
   <!-- The pin tool reveals its two placement methods rather than placing
        anything itself. Crosshair = calculated Pin Lock; flag = pick it up and
@@ -759,7 +736,7 @@
 <script src="js/pin.js"></script>
 <script src="js/gps.js?v=log-popup-20260917"></script>
 <script src="js/wake-lock.js"></script>
-<script src="js/gps-settings.js"></script>
+<script src="js/gps-settings.js?v=view3d-20261025"></script>
 <script src="js/plays-like.js"></script>
 <!-- Course Data. GPS Play's only analytical output: at shot completion it
      submits an immutable raw snapshot here and returns. The Conditions Engine
@@ -802,19 +779,19 @@
 <script src="js/gd-terrain-mesh.js"></script>
 <script src="../scripts/gd-watch-map-core.js"></script>
 <script src="js/gd-illustrated-surface.js?v=view3d-20261025"></script>
-<!-- The 3D view's tree models and species guesser, and the viewer itself (shared with
-     Clarity Studio's 3D Course Viewer). Nothing is built until the view is opened. -->
+<!-- 3D mode (the rail's cube): the tree models, the species guesser and the scene that draws
+     the mesh with them (shared with Clarity Studio's 3D Course Viewer). Nothing is built
+     until 3D mode is on. -->
 <script src="../scripts/trees/nz-trees.js"></script>
 <script src="../scripts/trees/nz-trees-real.js"></script>
 <script src="../scripts/trees/tree-species.js"></script>
-<script src="js/gd-course-3d.js"></script>
+<script src="js/gd-course-3d.js?v=view3d-mode-20261025"></script>
 <script src="js/live-hybrid.js"></script>
 <script src="js/live-terrain.js?v=mesh-all-players-20261001"></script>
 <script src="js/gd-green-contours.js"></script>
-<script src="js/painter.js?v=view3d-20261025"></script>
+<script src="js/painter.js?v=view3d-mode-20261025"></script>
 <script src="js/resume.js?v=live-hole-20261001"></script>
-<script src="js/tool-rail.js?v=log-popup-20260917c"></script>
-<script src="js/view-3d.js"></script>
+<script src="js/tool-rail.js?v=view3d-20261025"></script>
 <!-- Password-reset and account-setup links land on whatever page the app has
      open, including this one. The handler hands them to the root shell, which
      is the only surface that reads those parameters. Inert on web, where the
@@ -826,6 +803,6 @@
      on the first Back press, the exact failure it was written to prevent.
      boot.js wires Android's Back to this page's own exitBack instead. -->
 <script src="../scripts/inline/gd-native-deep-links.js"></script>
-<script src="js/boot.js?v=view3d-20261025"></script>
+<script src="js/boot.js?v=recording-20261017"></script>
 </body>
 </html>
