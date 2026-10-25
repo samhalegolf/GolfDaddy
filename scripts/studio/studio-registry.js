@@ -424,6 +424,10 @@
         { role: "Test bakes API — admin-only queue + signed links to the private test bucket", path: "functions/course-test-bakes.mjs" },
         { role: "Terrain — Studio view: resolver result + log, asset provenance/quality, rebuild", path: "scripts/studio/gd-admin-course-terrain.js" },
         { role: "Terrain API — status, source/upgrade reports, rebuild (one course or every course a source improves)", path: "functions/course-terrain.mjs" },
+        { role: "GSPro / OPCD export — section of the Terrain tab: queue an export, status, links to the files", path: "scripts/studio/gd-admin-course-terrain.js" },
+        { role: "GSPro / OPCD export API — queue one export per course, latest files with URLs", path: "functions/course-opcd-export.mjs" },
+        { role: "GSPro / OPCD export job — UTM frame, 1 m heightmap (RAW16 + GeoTIFF), surfaces GeoJSON, trees + holes CSV, README", path: "functions/lib/gd-opcd-export-job.mjs" },
+        { role: "GSPro / OPCD export core — pure frame/sampling/encoding/file writers", path: "functions/lib/gd-opcd-export-core.mjs" },
         { role: "Terrain system — registry, resolver, adapters, normaliser, bake, versioned asset", path: "functions/lib/terrain/" },
         { role: "Test bake rules — job kinds, private bucket, run roots, 7-day purge", path: "functions/lib/gd-test-bake-core.mjs" }
       ],
