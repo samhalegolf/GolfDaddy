@@ -100,7 +100,9 @@ test("the player-facing build state never sees a test job", () => {
   assert.equal(failed.state, "none", "a failed test must not read as this course failing");
   const jobsSrc = read("functions/course-visual-jobs.mjs");
   assert.ok(jobsSrc.includes("&kind=in.(snapshot,export)&order=created_at.desc&limit=8"), "the single-course job list must not include test jobs");
-  assert.ok(jobsSrc.includes("if (!id || isTestKind(job.kind)) return;"), "the bulk list must not include test jobs");
+  /* Test jobs are side jobs, with the OPCD export and the course map: none is a build. */
+  assert.ok(/const sideJobKind = kind => isTestKind\(kind\) \|\|/.test(jobsSrc), "test jobs are side jobs");
+  assert.ok(jobsSrc.includes("if (!id || sideJobKind(job.kind)) return;"), "the bulk list must not include test jobs");
 });
 
 test("the worker keeps a test job inside its private space", () => {
