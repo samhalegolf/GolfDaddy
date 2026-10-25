@@ -2211,8 +2211,10 @@
     var drawn = illustratedPicture(meta, frameW, frameH);
     var hybrid = drawn && mapStyle() === "hybrid" ? hybridSettings() : null;
     /* 3D mode draws the same frame through gd-course-3d.js: every tree a 3D model of its
-       species, which it reads off the photo - so the photo is wanted under Illustrated too. */
-    var threeD = view3d();
+       species, which it reads off the photo - so the photo is wanted under Illustrated too.
+       A Hybrid hole always does: its look's tree models (realistic, unless the Studio chose
+       low-poly) are the 3D scene's - the plain mesh only has flat sprites. */
+    var threeD = view3d() || !!(hybrid && window.GDCourse3D && window.GDCourse3D.createFramed);
     var loaded = 0, needed = drawn && !threeD && !hybrid ? 1 : 2, aerialImg = new Image(), elevationImg = new Image();
     aerialImg.crossOrigin = elevationImg.crossOrigin = "anonymous";
 
@@ -2335,10 +2337,11 @@
   }
 
   /* What a mesh is built for: a change of any of these is a new mesh, not a re-light - the
-     style, 3D on or off, and for a hybrid the look itself. */
+     style, 3D on or off, and for a hybrid the look itself. A hybrid stands on the 3D scene
+     either way (attachMesh), so the cube does not rebuild it. */
   function meshLook() {
     var style = mapStyle();
-    return style + (view3d() ? ":3d" : "") + (style === "hybrid" ? ":" + JSON.stringify(hybridSettings()) : "");
+    return style + (style === "hybrid" ? ":" + JSON.stringify(hybridSettings()) : view3d() ? ":3d" : "");
   }
 
   /* The illustrated picture for this frame and the trees that stand on it, {picture, trees,
