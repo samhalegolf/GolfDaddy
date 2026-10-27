@@ -200,6 +200,74 @@ async function claimScorecardBackfill() {
   return null;
 }
 
+/* Waiting for a card.
+ *
+ * A scan that found golf on the ground (greens, fairways, hole lines) but could not number
+ * it because there was no scorecard has not failed, it is early: the Kenya scans of
+ * 2026-10-27 failed at 05:42, their cards were stored by the backfill at 06:00-06:30 and by
+ * an AI ask at 21:20, and nothing ran the maps again until they were re-run by hand. So such
+ * a scan is parked: its job is marked awaitingCard, a card search is queued for its course
+ * straight away (queueCardSearch), and every worker pass looks for parked jobs whose course
+ * now has a card - from that search, the backfill, an upload, an imported AI ask, any source
+ * - and queues the map again (requeueMapsAwaitingCards). A course with no golf at all in OSM
+ * is not parked: a card cannot number holes that are not there.
+ *
+ * The mapper-debug Routine a player's failed scan would have fired is held while it waits,
+ * and sent once the course's card search has come back empty-handed. A parked job keeps
+ * waiting for a card from elsewhere for AWAITING_CARD_WINDOW_MS. The re-run has the card, so
+ * it cannot park again. */
+const AWAITING_CARD_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+async function queueCardSearch(courseId) {
+  const open = await supabaseFetch(JOBS_TABLE + "?select=id&course_id=eq." + encodeURIComponent(courseId) + "&kind=eq." + SCORECARD_KIND + "&status=in.(queued,running)&limit=1").catch(() => null);
+  if (Array.isArray(open) && open.length) return open[0].id;
+  const inserted = await supabaseFetch(JOBS_TABLE, {
+    method: "POST",
+    headers: { Prefer: "return=representation" },
+    body: JSON.stringify([{ course_id: courseId, kind: SCORECARD_KIND, status: "queued", requested_by: "awaiting-card" }])
+  }).catch(() => null);
+  return Array.isArray(inserted) && inserted[0] ? inserted[0].id : null;
+}
+
+/* The same two reads runMapperJob makes, so "has a card" here means the re-run will see it. */
+async function courseHasCard(courseId) {
+  const rows = await supabaseFetch(MAPS_TABLE + "?select=course_name&course_id=eq." + encodeURIComponent(courseId) + "&limit=1").catch(() => null);
+  const name = Array.isArray(rows) && rows[0] ? rows[0].course_name : "";
+  if (await fetchScorecardEvidence(name)) return true;
+  return (await fetchFacilityScorecardEvidence(courseId)).length > 0;
+}
+
+async function requeueMapsAwaitingCards() {
+  const cutoff = new Date(Date.now() - AWAITING_CARD_WINDOW_MS).toISOString();
+  const waiting = await supabaseFetch(JOBS_TABLE + "?select=id,course_id,kind,error,result&status=eq.failed&result->>awaitingCard=eq.true&created_at=gt." + encodeURIComponent(cutoff) + "&order=created_at.asc&limit=50").catch(() => null);
+  for (const job of Array.isArray(waiting) ? waiting : []) {
+    const result = job.result || {};
+    const patch = async changes => supabaseFetch(JOBS_TABLE + "?id=eq." + job.id, {
+      method: "PATCH", body: JSON.stringify({ result: Object.assign({}, result, changes) })
+    }).catch(() => {});
+    if (await courseHasCard(job.course_id)) {
+      const inserted = await supabaseFetch(JOBS_TABLE, {
+        method: "POST",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify([{ course_id: job.course_id, kind: job.kind, status: "queued", requested_by: "card-arrived", result: { rerunOf: job.id } }])
+      }).catch(() => null);
+      const rerun = Array.isArray(inserted) ? inserted[0] : null;
+      if (rerun) await patch({ awaitingCard: false, cardRerunJob: rerun.id });
+      continue;
+    }
+    if (!result.debugHeld) continue;
+    if (!result.cardJob) {
+      await patch({ cardJob: await queueCardSearch(job.course_id) });
+      continue;
+    }
+    const search = await supabaseFetch(JOBS_TABLE + "?select=status&id=eq." + encodeURIComponent(result.cardJob) + "&limit=1").catch(() => null);
+    const searchStatus = Array.isArray(search) && search[0] ? search[0].status : null;
+    if (searchStatus === "queued" || searchStatus === "running") continue;
+    const debug = await requestMapperDebug(job, { message: job.error, attempts: Number(result.attempts) || 1, diagnostics: result.diagnostics });
+    await patch(Object.assign({ debugHeld: false }, debug));
+  }
+}
+
 /* A background run takes the remainder of an invocation, never a fresh one's worth: started
    late, it could outlive the background-function limit and be reaped half done. The sweeper
    comes round every three minutes to carry on. */
@@ -781,8 +849,16 @@ async function requeryHoleGaps(job, course, payload, loops) {
  * scorecard site must cost this run its expectedHoles, never its result. Every
  * outcome lands on diagnostics.scorecardResolve so a course that keeps failing to
  * find a card says so in the job row rather than looking like a course that has
- * none. */
-const SCORECARD_RESOLVE_BUDGET_MS = 12000;
+ * none.
+ *
+ * Sixty seconds, not the twelve it was sized at for a search engine: the page search
+ * is Claude with web search now (lib/gd-scorecard-search-ai.js), which takes 20-40s,
+ * so twelve seconds aborted every search and threw its answer away - every Kenya scan
+ * of 2026-10-27 ran with "queries: []" while the same search, given longer by the
+ * backfill, found their cards. Kept under the stale reaper's two minutes (the
+ * heartbeat before it resets that clock). A course whose card is still not found in
+ * time waits for one instead - see requeueMapsAwaitingCards. */
+const SCORECARD_RESOLVE_BUDGET_MS = 60 * 1000;
 
 /* Every page read for a scorecard goes through lib/gd-polite-fetch: do-not-fetch
    hosts, robots.txt, hosts that refused us, one request a second per site. Module
@@ -810,7 +886,7 @@ async function searchScorecardPages(name, region, identity, origin, signal) {
   });
 }
 
-/* budgetMs: the mapper's own runs keep the 12-second box above (a card is a nice-to-have
+/* budgetMs: the mapper's own runs keep the box above (a card is a nice-to-have
    there); a scorecard run (runScorecardJob) exists for nothing else and gets its own. */
 async function resolveScorecardForCourse(course, origin, want, budgetMs = SCORECARD_RESOLVE_BUDGET_MS) {
   const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -3401,6 +3477,10 @@ async function runMapperJob(job, origin) {
       diagnostics.fit = { trusted: false, reason: "pin-off-golf", scope: "ground", detail: offGolf };
       diagnostics.fit.message = courseFitMessage(diagnostics.fit);
     }
+    /* Golf on the ground and no card to number it from: park the job until a card arrives
+       (see requeueMapsAwaitingCards) rather than failing it for good. */
+    const ground = diagnostics.osmFeatures || {};
+    if (!scorecardEvidence && !offGolf && (ground.greens || ground.fairways || ground.holes || ground.tees)) diagnostics.awaitingCard = true;
     /* The queried centre rides in the sentence itself: "no hole geometry HERE" is only
        actionable when the row says where "here" was - north-shore's centre sat in Michigan
        and nothing surfaced it. */
@@ -3599,6 +3679,7 @@ export default async function courseMapperWorker(req) {
   let origin = "";
   try { origin = new URL(req.url).origin; } catch (e) { origin = ""; }
   await reapStaleJobs();
+  await requeueMapsAwaitingCards();
   const startedAt = Date.now();
   let backfilled = false;
   const requeued = new Set();
@@ -3674,8 +3755,10 @@ export default async function courseMapperWorker(req) {
       const patch = retryable
         ? { status: "queued", error: null, result: Object.assign({}, job.result || {}, { attempts, lastTransientError: message }, diagnostics ? { diagnostics } : {}) }
         : { status: "failed", error: attempts > 1 ? message + " (after " + attempts + " attempts)" : message, result: Object.assign({}, job.result || {}, { attempts }, diagnostics ? { diagnostics } : {}) };
+      const awaitingCard = !retryable && !!(diagnostics && diagnostics.awaitingCard);
+      if (awaitingCard) Object.assign(patch.result, { awaitingCard: true, debugHeld: !quietKind(job.kind), cardJob: await queueCardSearch(job.course_id) });
       /* Neither a background neighbour, a tree run nor a scorecard run was promised to anyone: no debug session. */
-      if (!retryable && !quietKind(job.kind)) Object.assign(patch.result, await requestMapperDebug(job, { message, attempts, diagnostics }));
+      else if (!retryable && !quietKind(job.kind)) Object.assign(patch.result, await requestMapperDebug(job, { message, attempts, diagnostics }));
       await finishJob(job.id, patch).catch(() => {});
       if (retryable) requeued.add(job.id);
       /* A failed scan still says a player is golfing around here. */
@@ -3686,4 +3769,4 @@ export default async function courseMapperWorker(req) {
   return new Response("ok", { status: 200 });
 }
 
-export const __courseMapperWorkerTest = { claimJob, claimNextJob, claimTreeBackfill, claimScorecardBackfill, runTreeJob, runScorecardJob, queueNeighboursAfter, finishJob, heartbeatJob, reapStaleJobs, loadCourseCenter, ensureCoursePlace, runMapperJob, runObjectCollectionJob, runShapeRefineJob, publishedFramesByHole, surfaceCounts, chainVisualSnapshot, transientMapperFailure, requestMapperDebug, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, loopCourseId, MAX_TRANSIENT_ATTEMPTS };
+export const __courseMapperWorkerTest = { claimJob, claimNextJob, claimTreeBackfill, claimScorecardBackfill, queueCardSearch, requeueMapsAwaitingCards, runTreeJob, runScorecardJob, queueNeighboursAfter, finishJob, heartbeatJob, reapStaleJobs, loadCourseCenter, ensureCoursePlace, runMapperJob, runObjectCollectionJob, runShapeRefineJob, publishedFramesByHole, surfaceCounts, chainVisualSnapshot, transientMapperFailure, requestMapperDebug, golfFeatureCounts, publishSeparatedLoops, nameLoopsFromCards, loopCourseId, MAX_TRANSIENT_ATTEMPTS };

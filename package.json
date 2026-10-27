@@ -58,6 +58,7 @@
     "test:course-maps-scope": "node dev/course-maps-list-scope.test.js",
     "test:course-db-load": "node dev/course-db-load.test.js",
     "test:mapper-queue": "node dev/mapper-queue.test.mjs",
+    "test:awaiting-card": "node dev/mapper-awaiting-card.test.js",
     "test:player-requests": "node dev/player-requests.test.mjs && node dev/overlay-inbox.test.mjs",
     "test:course-versions": "node dev/course-versions.test.js",
     "test:course-map-notify": "node dev/course-map-notify.test.js",
