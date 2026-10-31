@@ -196,6 +196,36 @@ out.rows.forEach((row, r) => {
   assert.ok(g.bands.every((b) => !b.summaryZone), "no summary zone when the brand prints none");
 }
 
+/* ---- the adjust stage's lines win over the slots ---- */
+{
+  /* Lines a little off the real edges: used exactly, not snapped. */
+  const lines = COL_EDGES.slice(0, 11).map((x) => x + 7);
+  const adjusted = TPL.fitTemplate(layout, W, H, m, { columnBounds: lines, headerGuess: 95 });
+  assert.deepStrictEqual(adjusted.columns.map((c) => c.x0), lines, "every column starts on the player's line");
+  assert.strictEqual(adjusted.labelRight, lines[0], "the first line is the right edge of the label column");
+  assert.strictEqual(adjusted.columns[10].x1, W, "the last column runs to the edge");
+  assert.ok(adjusted.notes.some((n) => /adjust stage/.test(n)), "and the notes say where the lines came from");
+  assert.strictEqual(adjusted.headerBottom, fit.headerBottom, "the header line is a guess the ink still settles");
+  assert.strictEqual(adjusted.bands.length, fit.bands.length, "rows still come from the ink");
+
+  /* The player's header line is exact: anywhere in the gap under the header
+     ink (bottom at y110, first row from y140) gives the same ink row, with
+     none of the template's 15% slack that could swallow the first shot. */
+  const low = TPL.fitTemplate(layout, W, H, m, { headerGuess: 138 });
+  assert.strictEqual(low.headerBottom, fit.headerBottom, "a line just above the first row still ends the header at the ink");
+  assert.strictEqual(low.bands.length, fit.bands.length, "and keeps every shot row");
+  const intoRow = TPL.fitTemplate(layout, W, H, m, { headerGuess: 160 });
+  assert.ok(intoRow.headerBottom > fit.headerBottom && intoRow.bands.length === fit.bands.length - 1, "a line dragged into the first row makes that row header, as drawn");
+
+  /* Lines that cannot be right fall back to the slots. */
+  const wrongCount = TPL.fitTemplate(layout, W, H, m, { columnBounds: lines.slice(0, 5) });
+  assert.deepStrictEqual(wrongCount.columns.map((c) => c.x0), fit.columns.map((c) => c.x0), "wrong count: ignored");
+  const outOfOrder = TPL.fitTemplate(layout, W, H, m, { columnBounds: lines.slice().reverse() });
+  assert.deepStrictEqual(outOfOrder.columns.map((c) => c.x0), fit.columns.map((c) => c.x0), "out of order: ignored");
+  const offImage = TPL.fitTemplate(layout, W, H, m, { columnBounds: lines.map((x) => x + W) });
+  assert.deepStrictEqual(offImage.columns.map((c) => c.x0), fit.columns.map((c) => c.x0), "off the image: ignored");
+}
+
 /* ---- snapping rules ---- */
 {
   const gaps = [{ x0: 95, x1: 105, cx: 100, w: 10 }, { x0: 195, x1: 215, cx: 205, w: 20 }];
@@ -204,4 +234,4 @@ out.rows.forEach((row, r) => {
   assert.deepStrictEqual(TPL.snapBoundary(150, gaps, 30), { x: 150, snapped: false, gap: null }, "too far from any gap, the template stands");
 }
 
-console.log("ok - template OCR: header from ink, boundaries snap to real gaps, " + ROWS + " rows assembled, summary rows dropped, directions kept");
+console.log("ok - template OCR: header from ink, boundaries snap to real gaps or follow the adjust stage, " + ROWS + " rows assembled, summary rows dropped, directions kept");

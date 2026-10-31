@@ -40,6 +40,53 @@ the button goes where it always went.
   fallback, a template per layout, the cropped capture). Both run in
   `npm run test:practice`, which CI already runs.
 
+## 2026-10-31 - landscape viewfinder and the adjust stage
+
+The first cut framed the table on a portrait phone, which left a short frame
+(about 350 x 195 CSS px for a 1.8 table), and every camera photo then went to
+the 4-corner stretch - a stage for photos taken at an angle, which a guided
+shot is not. Both changed:
+
+- **Landscape first.** The stage (template, chips, controls) is a CSS grid
+  around an empty picture cell. On a landscape page the chips share the top
+  strip with the title and the shutter sits in a rail on the right, so the
+  frame gets the full height. On a portrait page framing a wide table
+  (`wantsTurn`: table aspect >= 1) the stage is turned a quarter turn
+  clockwise with `transform`, so the player holds the phone sideways. The
+  camera picture is not turned: with the phone on its side the sensor already
+  shows the table upright to the player. `turnedToPage` maps the frame back
+  to page pixels for the crop, and the saved JPEG is rotated the other way so
+  it is upright. A portrait-shaped table (the same-phone apps) keeps the
+  upright stage. On a 390 x 844 phone the Foresight frame is now about
+  560 x 310 CSS px, roughly 2.5x the area.
+- **The adjust stage instead of the corner pins.** The shutter freezes the
+  picture (a canvas with the full frame, the stream stops) and the same
+  screen shows the template's lines on it: the frame edges, the bottom of the
+  header, and the left edge of every column. Each one drags, kept in order
+  with a 12 px minimum gap; Reset puts them back; Retake goes live again.
+  Scan cuts the frame plus the 8% margin out of the still and puts the lines
+  on the file as `__gdTemplateFrame` = `{x, y, w, h, layout, columns[],
+  headerBottom}` (fractions of the saved picture, then of the frame). In
+  `gdHandleLaunchMonitorPhoto` a tagged photo goes to
+  `gdRunPracticeTemplateFrameScan`: the frame is flattened with the same warp
+  the pins use (`gdPracticeFlattenQuadCheckpoint`, now shared) and the scan
+  starts at once. `fitTemplate` takes `columnBounds` (used exactly) and
+  `headerGuess` (the ink still settles the header's bottom). A template scan
+  that finds no rows reopens the adjust stage on the same still
+  (`reopenAdjust`), with the reason in its status line; an uploaded photo
+  still gets the pins. Moving the pins drops the camera's lines.
+- The generic "any other shot table" layout has no columns, so a photo framed
+  with it now clears the Template select and goes down the discovery route
+  from the flattened frame, instead of a template scan that could read
+  nothing.
+- Three strings in all 23 languages: `dataPage.cameraGuideAdjust`,
+  `cameraGuideRetake`, `cameraGuideReset`. Scan reuses `dataPage.scan`.
+
+Not done: the turn is always clockwise (top of the phone to the left). Held
+the other way the stage is upside down and the player turns the phone round.
+The adjust stage has no magnifier; on a 20-column Trackman table each slot is
+about 36 px wide on a phone, which is workable but tight.
+
 ## Template mode (the second scan route)
 
 The scanner now has two routes from the same flattened checkpoint, chosen by
@@ -71,9 +118,9 @@ and the deep scan runs on exactly those. Left is negative on the way into the
 library, as everywhere else.
 
 The guided camera and template mode fit together: a photo from the camera
-carries where the frame sits in the saved picture, so in template mode the
-pins land on the frame instead of the value-shape finder's guess (which cuts
-the header off), and the camera's layout is pre-selected as the template.
+carries where the frame and the column lines sit in the saved picture, so the
+frame is flattened and scanned without any pins, the lines are the column
+boundaries, and the camera's layout is pre-selected as the template.
 
 Tests: `dev/clarity-template-ocr.test.js` draws a synthetic table with uneven
 columns, a rule, two header lines and two summary rows into an ink mask and
@@ -124,7 +171,8 @@ same apps run on a tablet or a second phone.
   whether the snap tolerance (a third of a slot) and the summary zone (1.4x
   the template's summary band) are right.
 - Template mode trusts the frame. A photo framed with the header cut off
-  reads the first shot row as the header; the pins hint says so.
+  reads the first shot row as the header; the adjust stage's top edge is
+  there to be dragged up before scanning.
 - No tilt or level reading. Keeping the phone square to the screen is said
   in words, not measured.
 - The layouts marked `typical` have not been checked against a live screen of

@@ -10,7 +10,9 @@
  *
  *   1. place the template on the flattened image - header band, label column,
  *      one slot per expected column - and nudge each boundary onto the nearest
- *      real gap in the ink so slightly uneven columns still cut cleanly;
+ *      real gap in the ink so slightly uneven columns still cut cleanly; or,
+ *      when the player put the lines on the column edges in the guided
+ *      camera's adjust stage, use those lines as they are;
  *   2. find the shot rows as bands of ink under the header;
  *   3. turn per-cell OCR text back into rows of {key, value, direction}.
  *
@@ -152,6 +154,22 @@
     return { x: x, snapped: false, gap: null };
   }
 
+  /* opts.columnBounds, checked: one number per column, in order, inside the
+     image, with room for a value between neighbours. Anything else is ignored
+     and the template slots are used. */
+  function playerBounds(list, count, width) {
+    if (!Array.isArray(list) || !count || list.length !== count) return null;
+    var out = [];
+    for (var i = 0; i < list.length; i += 1) {
+      var x = Math.round(Number(list[i]));
+      if (!Number.isFinite(x) || x < 0 || x >= width) return null;
+      if (i > 0 && x <= out[i - 1] + 2) return null;
+      out.push(x);
+    }
+    if (width - out[out.length - 1] <= 2) return null;
+    return out;
+  }
+
   function columnDirection(column) {
     if (!column) return false;
     if (column.direction === true) return true;
@@ -177,9 +195,18 @@
        Any band starting inside the template's header zone is header text (two
        stacked lines of header count as one), and the data begins under the
        lowest of them. With no ink up there, trust the template. */
-    var headerGuess = h * headerFrac;
+    /* The guided camera's adjust stage can say where the header ends: that
+       line replaces the template fraction as the guess, and the ink still
+       settles the exact row. */
+    var guessIn = Number(opts.headerGuess);
+    var playerLine = Number.isFinite(guessIn) && guessIn > 0 && guessIn < h;
+    var headerGuess = playerLine ? guessIn : h * headerFrac;
+    /* The template's fraction is rough, so the zone is a little deeper than
+       it says. The player's line is where the header ends, so anything
+       starting below it is data. */
+    var headerZone = playerLine ? headerGuess : headerGuess * 1.15;
     var allBands = maskObj ? rowBands(maskObj, { x0: 0, x1: w, y0: 0, y1: h }, opts) : [];
-    var headerBands = allBands.filter(function (b) { return b.y0 < headerGuess * 1.15 && b.y0 < h * 0.45; });
+    var headerBands = allBands.filter(function (b) { return b.y0 < headerZone && b.y0 < h * 0.45; });
     var headerBottom;
     if (headerBands.length) {
       headerBottom = Math.max.apply(null, headerBands.map(function (b) { return b.y1; }));
@@ -192,27 +219,40 @@
     }
     headerBottom = clamp(Math.round(headerBottom), 0, h - 1);
 
-    /* 2. Column boundaries: equal template slots, each boundary nudged onto the
-       nearest real gap in the ink below the header. */
+    /* 2. Column boundaries. When the player has put the lines on the column
+       edges (opts.columnBounds: the left edge of every column in image pixels,
+       the first one being the right edge of the label column), those are the
+       boundaries, exactly. Otherwise: equal template slots, each boundary
+       nudged onto the nearest real gap in the ink below the header. */
     var bodyRegion = { x0: 0, x1: w, y0: headerBottom, y1: h };
     var gaps = maskObj ? columnGaps(maskObj, bodyRegion, opts) : [];
+    var given = playerBounds(opts.columnBounds, cols.length, w);
     var labelRight = 0;
-    if (labelFrac > 0) {
-      var snapL = snapBoundary(w * labelFrac, gaps, w * labelFrac * 0.5);
-      labelRight = Math.round(snapL.x);
-      if (snapL.snapped) notes.push("label column snapped to x" + labelRight);
+    var bounds;
+    var slotW = cols.length ? w / cols.length : w;
+    if (given) {
+      labelRight = given[0];
+      bounds = given.slice();
+      bounds.push(w);
+      notes.push("column lines from the adjust stage");
+    } else {
+      if (labelFrac > 0) {
+        var snapL = snapBoundary(w * labelFrac, gaps, w * labelFrac * 0.5);
+        labelRight = Math.round(snapL.x);
+        if (snapL.snapped) notes.push("label column snapped to x" + labelRight);
+      }
+      slotW = cols.length ? (w - labelRight) / cols.length : (w - labelRight);
+      bounds = [labelRight];
+      for (var i = 1; i < cols.length; i += 1) {
+        var target = labelRight + slotW * i;
+        var snap = snapBoundary(target, gaps, slotW * 0.35);
+        var x = Math.round(snap.x);
+        /* Boundaries must stay in order with room for a value between them. */
+        if (x <= bounds[bounds.length - 1] + slotW * 0.3) x = Math.round(target);
+        bounds.push(x);
+      }
+      bounds.push(w);
     }
-    var slotW = cols.length ? (w - labelRight) / cols.length : (w - labelRight);
-    var bounds = [labelRight];
-    for (var i = 1; i < cols.length; i += 1) {
-      var target = labelRight + slotW * i;
-      var snap = snapBoundary(target, gaps, slotW * 0.35);
-      var x = Math.round(snap.x);
-      /* Boundaries must stay in order with room for a value between them. */
-      if (x <= bounds[bounds.length - 1] + slotW * 0.3) x = Math.round(target);
-      bounds.push(x);
-    }
-    bounds.push(w);
     var columns = cols.map(function (c, ci) {
       return {
         index: ci,
@@ -221,7 +261,7 @@
         direction: columnDirection(c),
         x0: bounds[ci],
         x1: bounds[ci + 1],
-        snapped: ci === 0 ? true : (Math.abs(bounds[ci] - (labelRight + slotW * ci)) > 0.5)
+        snapped: given ? true : (ci === 0 ? true : (Math.abs(bounds[ci] - (labelRight + slotW * ci)) > 0.5))
       };
     });
 
@@ -337,7 +377,7 @@
   }
 
   var api = {
-    version: "2026-10-19",
+    version: "2026-10-31",
     projection: projection,
     rowBands: rowBands,
     columnGaps: columnGaps,

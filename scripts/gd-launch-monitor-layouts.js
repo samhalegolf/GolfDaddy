@@ -15,8 +15,9 @@
  * may have re-ordered. The ribbon under the camera frame shows the order so a
  * player can tell at a glance whether their screen matches.
  *
- * Pure data plus one pure function (guideGeometry). No DOM. Loaded by
- * index.html and by dev/launch-monitor-layouts.test.js under Node.
+ * Pure data plus pure geometry (guideGeometry, the cover-crop mapping and the
+ * turned-viewport mapping). No DOM. Loaded by index.html and by
+ * dev/launch-monitor-layouts.test.js under Node.
  */
 (function () {
   'use strict';
@@ -431,13 +432,23 @@
     return Math.min(hi, Math.max(lo, value));
   }
 
+  /* A wide table wants a wide viewfinder. On a portrait page the camera turns
+   * its controls sideways for any table at least as wide as it is tall, so
+   * the player holds the phone the way the screen is shaped. */
+  function wantsTurn(layout, width, height) {
+    var lay = layout || get(DEFAULT_KEY) || {};
+    var aspect = clamp(Number(lay.tableAspect) || 1.8, 0.3, 6);
+    return aspect >= 1 && Number(width) < Number(height);
+  }
+
   /* Where the template sits on a viewport of width x height, in CSS pixels.
    *
    * The frame is the biggest rectangle of the layout's table aspect that fits
-   * between the top chrome and the bottom controls, with a side gutter. The
-   * header band, label column and summary band are fractions of it. When a
-   * wide table is framed on a portrait phone the frame comes out short, and
-   * rotateHint says so - the player gets a better photo sideways.
+   * inside the chrome (top strip, bottom strip, and the left and right rails
+   * when the controls sit beside the picture), with a side gutter. The header
+   * band, label column and summary band are fractions of it. rotateHint is
+   * true when the viewport is portrait and the table is wide: the camera then
+   * turns its controls sideways and asks the player to hold the phone that way.
    */
   function guideGeometry(layout, width, height, opts) {
     var o = opts || {};
@@ -446,8 +457,10 @@
     var vh = Math.max(1, Number(height) || 0);
     var top = Number.isFinite(o.top) ? o.top : Math.round(vh * 0.14);
     var bottom = Number.isFinite(o.bottom) ? o.bottom : Math.round(vh * 0.30);
+    var left = Number.isFinite(o.left) ? o.left : 0;
+    var right = Number.isFinite(o.right) ? o.right : 0;
     var gutter = Number.isFinite(o.gutter) ? o.gutter : Math.round(Math.min(vw, vh) * 0.05);
-    var availW = Math.max(40, vw - gutter * 2);
+    var availW = Math.max(40, vw - left - right - gutter * 2);
     var availH = Math.max(40, vh - top - bottom);
     var aspect = clamp(Number(lay.tableAspect) || 1.8, 0.3, 6);
 
@@ -459,7 +472,7 @@
     }
     w = Math.round(w);
     h = Math.round(h);
-    var x = Math.round((vw - w) / 2);
+    var x = Math.round(left + gutter + (availW - w) / 2);
     var y = Math.round(top + (availH - h) / 2);
 
     var headerH = Math.round(h * clamp(Number(lay.headerBand) || 0.12, 0.04, 0.3));
@@ -500,32 +513,46 @@
       summary: summaryH ? { x: x, y: y + h - summaryH, w: w, h: summaryH, rows: summaryRows.slice() } : null,
       rows: rows,
       columns: columns,
-      rotateHint: aspect >= 1.6 && vw < vh
+      rotateHint: wantsTurn(lay, vw, vh)
     };
   }
 
   /* The video fills the viewport with object-fit: cover. This maps a viewport
-   * rectangle back to source pixels, grown by `margin` (a fraction of the
-   * rectangle) on each side and clamped to the frame, so the saved photo is
-   * the table plus a little context for the corner finder. */
-  function coverCrop(videoW, videoH, viewW, viewH, rect, margin) {
+   * rectangle to source pixels, unclamped: a rectangle that runs past the
+   * picture comes back with coordinates outside 0..videoW. */
+  function coverRect(videoW, videoH, viewW, viewH, rect) {
     var sw = Math.max(1, Number(videoW) || 0);
     var sh = Math.max(1, Number(videoH) || 0);
     var vw = Math.max(1, Number(viewW) || 0);
     var vh = Math.max(1, Number(viewH) || 0);
     var scale = Math.max(vw / sw, vh / sh);
-    var shownW = sw * scale;
-    var shownH = sh * scale;
-    var offX = (vw - shownW) / 2;
-    var offY = (vh - shownH) / 2;
+    var offX = (vw - sw * scale) / 2;
+    var offY = (vh - sh * scale) / 2;
+    var r = rect || { x: 0, y: 0, w: vw, h: vh };
+    return {
+      x: (r.x - offX) / scale,
+      y: (r.y - offY) / scale,
+      w: r.w / scale,
+      h: r.h / scale
+    };
+  }
+
+  /* The same mapping grown by `margin` (a fraction of the rectangle) on each
+   * side and clamped to the picture, so the saved photo is the table plus a
+   * little context around it. */
+  function coverCrop(videoW, videoH, viewW, viewH, rect, margin) {
+    var sw = Math.max(1, Number(videoW) || 0);
+    var sh = Math.max(1, Number(videoH) || 0);
+    var vw = Math.max(1, Number(viewW) || 0);
+    var vh = Math.max(1, Number(viewH) || 0);
     var m = Number.isFinite(margin) ? margin : 0.08;
     var r = rect || { x: 0, y: 0, w: vw, h: vh };
-    var mx = r.w * m;
-    var my = r.h * m;
-    var x0 = clamp((r.x - mx - offX) / scale, 0, sw);
-    var y0 = clamp((r.y - my - offY) / scale, 0, sh);
-    var x1 = clamp((r.x + r.w + mx - offX) / scale, 0, sw);
-    var y1 = clamp((r.y + r.h + my - offY) / scale, 0, sh);
+    var grown = { x: r.x - r.w * m, y: r.y - r.h * m, w: r.w * (1 + 2 * m), h: r.h * (1 + 2 * m) };
+    var src = coverRect(sw, sh, vw, vh, grown);
+    var x0 = clamp(src.x, 0, sw);
+    var y0 = clamp(src.y, 0, sh);
+    var x1 = clamp(src.x + src.w, 0, sw);
+    var y1 = clamp(src.y + src.h, 0, sh);
     return {
       sx: Math.round(x0),
       sy: Math.round(y0),
@@ -534,14 +561,33 @@
     };
   }
 
+  /* When the camera's controls are turned a quarter turn clockwise on a
+   * portrait page, a rectangle drawn in that turned space sits elsewhere on
+   * the page: the turned space's top edge runs down the page's right side.
+   * `turnedH` is the turned space's height, which is the page's width. */
+  function turnedToPage(rect, turnedH) {
+    var r = rect || { x: 0, y: 0, w: 0, h: 0 };
+    var hh = Number(turnedH) || 0;
+    return { x: hh - r.y - r.h, y: r.x, w: r.h, h: r.w };
+  }
+
+  /* And back: a page point into the turned space. */
+  function pageToTurnedPoint(x, y, turnedH) {
+    return { x: Number(y) || 0, y: (Number(turnedH) || 0) - (Number(x) || 0) };
+  }
+
   var api = {
-    version: '2026-10-19',
+    version: '2026-10-31',
     DEFAULT_KEY: DEFAULT_KEY,
     layouts: layouts,
     list: list,
     get: get,
+    wantsTurn: wantsTurn,
     guideGeometry: guideGeometry,
-    coverCrop: coverCrop
+    coverRect: coverRect,
+    coverCrop: coverCrop,
+    turnedToPage: turnedToPage,
+    pageToTurnedPoint: pageToTurnedPoint
   };
 
   target.GolfDaddyLaunchMonitorLayouts = api;
