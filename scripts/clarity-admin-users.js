@@ -28,9 +28,20 @@
     return '<br><small style="opacity:.75">' + esc(label) + ': <code style="font-family:ui-monospace,monospace;user-select:all">' + esc(value) + '</code> <button class="saveBtn" type="button" onclick="ClarityAdminUsers.copyId(\'' + esc(value) + '\')">Copy</button></small>';
   }
 
+  /* What the bag really is (scripts/gd-bag-status.js): only "quick" and "custom" are the
+     player's own numbers. Stock and a quick set left at the default 7-iron are not. */
+  function bagLine(bag) {
+    bag = bag || {};
+    if (bag.status === "custom") return "Own distances (" + bag.clubs + " clubs)";
+    if (bag.status === "quick") return "Quick set from their 7-iron, " + bag.sevenIron + " m (" + bag.clubs + " clubs)";
+    if (bag.status === "quick-default") return "Not set: quick set left at the default 7-iron";
+    if (bag.status === "stock") return "Not set: stock distances";
+    return "Not set: no clubs";
+  }
+
   function row(r) {
     return '<article style="padding:12px 0;border-bottom:1px solid #334"><strong>' + esc(r.name) + '</strong> · ' + esc(r.email || 'No email') +
-      '<br><small>Login: ' + esc(r.login) + ' · Player: ' + esc(r.player) + ' · Coach: ' + esc(r.coach) + ' · Access: ' + esc(r.access || 'None') + ' · Bag: ' + r.bagCount + ' · Bubble: ' + esc(r.bubble) + ' · ' + esc(r.status) + '</small>' +
+      '<br><small>Login: ' + esc(r.login) + ' · Player: ' + esc(r.player) + ' · Coach: ' + esc(r.coach) + ' · Access: ' + esc(r.access || 'None') + ' · Bag: ' + esc(bagLine(r.bag)) + ' · Bubble: ' + esc(r.bubble) + ' · ' + esc(r.status) + '</small>' +
       idLine('Player ID', r.playerId) +
       idLine('Merged into', r.mergedIntoPlayerId) +
       (r.welcomeEmail ? '<br><small>Welcome Email: ' + esc(r.welcomeEmail.status === "sent" ? "Sent " + new Date(r.welcomeEmail.sentAt).toLocaleString() + " to " + r.welcomeEmail.recipientEmail : "Last attempt failed") + '</small>' : '') +
@@ -44,11 +55,18 @@
     n.innerHTML = '<section class="accountPanel" style="position:fixed;inset:5vh 5vw;z-index:9999;overflow:auto;background:#101815;padding:20px;border:1px solid #49604d;border-radius:16px;color:white">' +
       '<button class="saveBtn" style="float:right" type="button" onclick="ClarityAdminUsers.close()">Close</button>' +
       '<h2>Users</h2><p>Canonical Caddy players, including no-login and repair cases.</p>' +
+      bagSummary(rows) +
       '<button class="saveBtn" type="button" onclick="ClarityAdminUsers.createPlayer()">Create no-login player</button>' +
       /* The wording lives in Studio > Communications > Welcome Emails, and only there. Two
          boxes editing one customer email is how they stop agreeing. This screen sends. */
       '<p><small>Send Welcome uses the Studio-managed template that matches the player: Basic Sign Up, or Comped Sign Up if they hold comped access. Edit the wording in Studio &rsaquo; Communications &rsaquo; Welcome Emails.</small></p>' +
       '<div style="margin-top:16px">' + rows.map(row).join('') + '</div></section>';
+  }
+
+  function bagSummary(rows) {
+    var players = rows.filter(function (r) { return r.playerId; });
+    var set = players.filter(function (r) { return r.bag && r.bag.set; }).length;
+    return '<p><strong>Bags set: ' + set + ' of ' + players.length + ' players</strong> <small>(their own distances or a quick set from their own 7-iron)</small></p>';
   }
 
   async function list() {

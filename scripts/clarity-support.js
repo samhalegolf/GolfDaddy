@@ -343,7 +343,6 @@
       p.clubs = [];
       p.clubBag = [];
       p.bagSeededDefault = false;
-      p.ghostBagOnly = true;
       p.updatedAt = new Date().toISOString();
       safe(function(){ win.savePlayerProfiles(); }, null);
     }
