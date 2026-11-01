@@ -27,6 +27,16 @@
      and asks the Marshal fresh each time, so there is nothing to tear down. */
   var wiredSleepUnlock = false;
 
+  /* Whether an opened round was actually played (round-usage.js): one anonymous outcome per
+     round, counted once the round is over. A round left behind by a killed app is counted
+     the next time the app starts. */
+  var roundUsage = app.createRoundUsage ? app.createRoundUsage({
+    storage: (function () { try { return window.localStorage; } catch (e) { return null; } })(),
+    distance: app.distance,
+    report: function (event) { if (window.GDCourseUsage) window.GDCourseUsage.report(event); }
+  }) : null;
+  if (roundUsage) roundUsage.flushStale();
+
   function stopReadinessRetry() {
     if (readinessRetryTimer) clearTimeout(readinessRetryTimer);
     readinessRetryTimer = null;
@@ -161,8 +171,10 @@
         roundEnded: function () {
           if (app.gps) app.gps.stop();
           if (app.wakeLock) app.wakeLock.stop();
+          if (roundUsage && !inDemo()) roundUsage.end();
         },
         holeEntered: function (hole, rec) {
+          if (roundUsage && !inDemo()) roundUsage.hole(hole, rec);
           if (app.pin) app.pin.startHole(hole);
           if (app.undo) app.undo.clear();
           /* The first hole is where live wind is first read - from the
@@ -287,6 +299,11 @@
       if (window.GDWatchHandover && window.GDWatchHandover.attach) {
         window.GDWatchHandover.attach(app.caddyWatch);
       }
+      /* Once a watch is driving, the phone may sleep through the rest of the round, so how
+         far it went is the watch's to know, not this round's summary to guess. */
+      app.caddyWatch.onScene(function (scene) {
+        if (roundUsage && !inDemo() && scene && scene.surface && scene.surface.active === "watch") roundUsage.watchDriving();
+      });
     }
     /* The three things that turn the outside world into Signals. A fix that
        is not trusted is refused inside the Marshal, not here — this file does
@@ -301,6 +318,7 @@
           if (!app.demoApproach.endIfAtCourse(fix)) return;
         }
         app.marshal.signal("FIX_RECEIVED", { point: fix, speed: fix.speed });
+        if (roundUsage) roundUsage.fix(fix);
       });
       app.gps.onStatus(function (status) {
         renderGpsNotice(status);
@@ -354,6 +372,10 @@
   function startRound(course, pkg) {
     if (mapReadiness) mapReadiness.observePackage(pkg);
     if (app.demoApproach) app.demoApproach.reset();
+    /* Before ROUND_OPENED, whose first holeEntered is the round's first hole. */
+    if (roundUsage && !inDemo()) {
+      roundUsage.start({ courseId: course.courseId, courseName: course.courseName, mapType: mapTypeOf(pkg) || "live", version: versionLabelOf(pkg) });
+    }
     ensureMarshal().signal("ROUND_OPENED", {
       courseKey: app.courseKey(course.courseId),
       courseName: course.courseName || "",

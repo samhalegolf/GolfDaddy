@@ -6,6 +6,8 @@
  * ones the coach roster reads - so an assignment made here shows up there. */
 const { hasAuthWithServiceKey, json, linkCoachToPlayer, supabaseAuth, supabaseRest, text } = require("./auth-utils");
 const { resolveCaller } = require("./clarity-caller");
+/* Whether a bag is really the player's own, read from the distances, not the profile flags. */
+const { bagStatus } = require("../scripts/gd-bag-status.js");
 
 const SAM_ACCOUNT_ID = "acct_mq4k1ge6_5stlq";
 
@@ -53,14 +55,13 @@ async function listUsers() {
     const account = accountById[player.account_id] || {};
     const coach = coachOf(player.account_id, account, accounts || [], accountById);
     const bag = Array.isArray(player.bag_json) && player.bag_json.length ? player.bag_json : (profile.bag_json || []);
-    const generated = !!((player.profile_json || profile.profile_json || {}).bagSeededDefault || (player.profile_json || profile.profile_json || {}).ghostBagOnly);
     const playerEmail = email(player.normalized_email) || email(account.email);
     const entitlement = (entitlements || []).filter(function (e) { return e.user_id === player.account_id || e.profile_id === player.profile_id; }).sort(function(a,b){ return String(b.expires_at||"").localeCompare(String(a.expires_at||"")); })[0];
     const activeAccess = entitlement && entitlement.status === "active" && (!entitlement.expires_at || new Date(entitlement.expires_at) > new Date());
     const access = activeAccess ? (/comp|coach_issued/i.test(entitlement.entitlement_reason || "") ? "Comped" : "Active") : (entitlement ? "Expired" : "None");
     const welcome = (welcomeHistory || []).find(function (entry) { return entry.player_id === player.id; }) || null;
-    return { playerId: player.id, profileId: player.profile_id || "", accountId: player.account_id || "", authUserId: player.auth_user_id || "", name: player.display_name, email: playerEmail, login: player.auth_user_id ? "Active" : "No Login", player: player.status === "active" ? "Active" : "Merged / Archived", coach: coach ? coach.name || coach.email || "Coach" : "Unassigned", access: access, bagCount: bag.length || 0, bagKind: generated ? "generated" : "real", bubble: Object.keys(player.bubble_json || {}).length ? "Present" : "None", status: player.status === "active" && (!player.auth_user_id || !coach) ? "Needs Attention" : "OK", lastLoginAt: account.last_login_at || null, mergedIntoPlayerId: player.merged_into_player_id || null, welcomeEmail: welcome ? { status: welcome.status, sentAt: welcome.sent_at, recipientEmail: welcome.recipient_email } : null };
-  }).concat(((authOnly && authOnly.users) || []).filter(u => !known.has(u.id)).map(u => ({ playerId: "", profileId: "", accountId: "", authUserId: u.id || "", name: (u.user_metadata || {}).name || u.email || "Auth user", email: u.email || "", login: "Auth Only", player: "Missing", coach: "Unassigned", bagCount: 0, bubble: "None", status: "Needs Attention", lastLoginAt: u.last_sign_in_at || null })));
+    return { playerId: player.id, profileId: player.profile_id || "", accountId: player.account_id || "", authUserId: player.auth_user_id || "", name: player.display_name, email: playerEmail, login: player.auth_user_id ? "Active" : "No Login", player: player.status === "active" ? "Active" : "Merged / Archived", coach: coach ? coach.name || coach.email || "Coach" : "Unassigned", access: access, bag: bagStatus(bag), bubble: Object.keys(player.bubble_json || {}).length ? "Present" : "None", status: player.status === "active" && (!player.auth_user_id || !coach) ? "Needs Attention" : "OK", lastLoginAt: account.last_login_at || null, mergedIntoPlayerId: player.merged_into_player_id || null, welcomeEmail: welcome ? { status: welcome.status, sentAt: welcome.sent_at, recipientEmail: welcome.recipient_email } : null };
+  }).concat(((authOnly && authOnly.users) || []).filter(u => !known.has(u.id)).map(u => ({ playerId: "", profileId: "", accountId: "", authUserId: u.id || "", name: (u.user_metadata || {}).name || u.email || "Auth user", email: u.email || "", login: "Auth Only", player: "Missing", coach: "Unassigned", bag: bagStatus([]), bubble: "None", status: "Needs Attention", lastLoginAt: u.last_sign_in_at || null })));
 }
 /* A link claimed by either side is a link, exactly as coach-roster.js reads it. */
 function coachOf(accountId, account, accounts, accountById) {

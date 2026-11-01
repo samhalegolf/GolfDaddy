@@ -149,11 +149,13 @@ const durableKeys = [...durableList.matchAll(/"([^"]+)"/g)].map((m) => m[1]);
 assert.ok(durableKeys.length >= 8, "DURABLE_KEYS looks truncated: " + durableKeys.length);
 
 /* Documented exclusions, each for a stated reason - not an ignore list to grow
-   silently. Re-fetchable or cosmetic only. */
+   silently. Re-fetchable, cosmetic, or anonymous counting only - never anything the
+   player entered. */
 const EXCLUDED = {
   "clarity:course-library:v1": "large, and re-pulls from the server per course",
   "clarity:shot-card-boxes:v1": "cosmetic box positions",
-  "clarity:play-view:v1": "the Studio's hybrid look, re-read every launch; the defaults stand in until it is"
+  "clarity:play-view:v1": "the Studio's hybrid look, re-read every launch; the defaults stand in until it is",
+  "gd-round-usage:v1": "the anonymous round-usage tally in progress; losing it leaves one round uncounted, and it is rewritten every minute, which a native mirror would pay for on every write"
 };
 
 const declaredKeys = new Set();

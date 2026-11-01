@@ -21,7 +21,10 @@
     # Emails are written in the recipient's language from the app's own translations.
     "scripts/gd-i18n-node.js",
     "scripts/i18n/*.js",
-    "scripts/gd-course-version-label.js"
+    "scripts/gd-course-version-label.js",
+    # Bag status reads stored bags against the quick-set generator.
+    "scripts/gd-bag-status.js",
+    "scripts/gd-bag-generator-core.js"
   ]
 
 # Local dev with the /api/* functions actually running. `python3 -m http.server`

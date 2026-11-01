@@ -14,7 +14,8 @@
    An update also keys on its version, so two genuine updates in a day both count.
 
    report({courseId, event, origin?, mapType?, outcome?, version?, waitMs?, courseName?})
-     event    download | update | play | delivery-failed | delivery-confirmed
+     event    download | update | play | round | delivery-failed | delivery-confirmed
+              (round: how an opened round went, from app/js/round-usage.js)
      origin   defaults to this device's platform (web / ios / android); the watch
               delivery passes apple-watch or garmin
      mapType  full | lite | live
