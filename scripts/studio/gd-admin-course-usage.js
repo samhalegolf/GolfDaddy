@@ -35,6 +35,15 @@
     "too-large": "Map too large to send", "watch-memory": "Watch out of memory", "transfer-failed": "Transfer dropped"
   };
   var MAP_TYPES = [["full", "Full map"], ["lite", "Lite map"], ["live", "Live map only"], ["", "Not recorded"]];
+  /* How an opened round went (app/js/round-usage.js), counted once the round is over. On the
+     course means a GPS fix near the hole in play. App builds from November 2026 on. */
+  var ROUND_RESULTS = [
+    ["played", "Played", "On the course for 9+ holes or 90+ minutes", "good"],
+    ["part-round", "Part round", "On the course for 60-90 minutes, under 9 holes", "ok"],
+    ["stopped-early", "Stopped early", "On the course but stopped inside the hour, before hole 9 - worth a look", "bad"],
+    ["on-watch", "On the watch", "A watch took the round over, so the phone could not see how far it went", "fine"],
+    ["off-course", "Off the course", "Never on the course - looked at from somewhere else", "muted"]
+  ];
   var SLOW_WAIT_MS = 45000;
 
   var state = { status: "idle", data: null, error: "", range: "30", query: "", checkedAt: "" };
@@ -71,6 +80,9 @@
   }
 
   function tally(map, key, count) { map[key] = (map[key] || 0) + count; }
+  function resultsLine(e) {
+    return ROUND_RESULTS.map(function (r) { return e.results[r[0]] ? r[1] + " " + e.results[r[0]] : ""; }).filter(Boolean).join(" · ");
+  }
   function watchSlot(e, origin) { return e.watch[origin] || (e.watch[origin] = { sent: 0, confirmed: 0, failed: 0 }); }
   function watchName(origin) {
     var pair = WATCH_ORIGINS.filter(function (p) { return p[0] === origin; })[0];
@@ -103,8 +115,8 @@
     function blank(id, name, info) {
       return {
         id: id, name: name, inDatabase: info ? info.inDatabase : true, currentVersion: info ? info.currentVersion : null,
-        plays: 0, downloads: 0, updates: 0, watchDeliveries: 0, watchConfirmed: 0, watchFailures: 0,
-        playsBy: {}, downloadsBy: {}, watch: {}, watchFailuresBy: {}, mapTypes: {}, outcomes: {},
+        plays: 0, downloads: 0, updates: 0, watchDeliveries: 0, watchConfirmed: 0, watchFailures: 0, rounds: 0,
+        playsBy: {}, downloadsBy: {}, watch: {}, watchFailuresBy: {}, mapTypes: {}, outcomes: {}, results: {},
         waitMs: 0, waitedPlays: 0, versionedPlays: 0, latestPlays: 0, versions: {}, countries: {}, lastSeen: ""
       };
     }
@@ -129,6 +141,9 @@
         } else if (row.event === "download" && isWatch(row.origin)) {
           e.watchDeliveries += count;
           watchSlot(e, row.origin).sent += count;
+        } else if (row.event === "round") {
+          e.rounds += count;
+          tally(e.results, row.outcome || "", count);
         } else if (row.event === "delivery-confirmed") {
           e.watchConfirmed += count;
           watchSlot(e, row.origin).confirmed += count;
@@ -160,6 +175,7 @@
     });
     if (c.mapTypes.live) out.push({ weight: c.mapTypes.live, text: plural(c.mapTypes.live, "round") + " on the live map only" });
     if (c.waitedPlays && c.waitMs / c.waitedPlays > SLOW_WAIT_MS) out.push({ weight: c.waitedPlays, text: "Slow to open (avg " + seconds(c.waitMs / c.waitedPlays) + ")" });
+    if (c.results["stopped-early"]) out.push({ weight: c.results["stopped-early"], text: "Stopped early on the course ×" + c.results["stopped-early"] });
     Object.keys(c.watchFailuresBy).forEach(function (key) {
       var origin = key.split("|")[0], o = key.split("|")[1];
       out.push({ weight: c.watchFailuresBy[key], text: watchName(origin) + ": " + (WATCH_FAILURES[o] || o) + " ×" + c.watchFailuresBy[key] });
@@ -247,9 +263,10 @@
       ? '<button type="button" class="gdAdminUsageLink" onclick="return gdAdminCourseUsageOpenCourse(\'' + esc(c.id) + '\')">Open in Course Database</button>'
       : '<span class="gdAdminUsageTag">Not in Course Database</span>';
     var watch = watchLine(c);
+    var results = c.rounds ? "How it went: " + resultsLine(c) : "";
     return '<div class="gdAdminUsageRow">' +
       '<div class="gdAdminUsageName"><strong>' + esc(c.name) + "</strong><span>" + esc(countries) + (c.lastSeen ? " · last " + esc(c.lastSeen) : "") + "</span>" + open + "</div>" +
-      '<div class="gdAdminUsageNums"><b>' + plural(c.plays, "round") + "</b><span>" + esc(breakdown(PHONE_ORIGINS, c.playsBy)) + "</span><span>" + esc(breakdown(MAP_TYPES, c.mapTypes)) + "</span></div>" +
+      '<div class="gdAdminUsageNums"><b>' + plural(c.plays, "round") + "</b><span>" + esc(breakdown(PHONE_ORIGINS, c.playsBy)) + "</span><span>" + esc(breakdown(MAP_TYPES, c.mapTypes)) + "</span>" + (results ? "<span>" + esc(results) + "</span>" : "") + "</div>" +
       '<div class="gdAdminUsageNums"><b>' + plural(c.downloads, "download") + (c.updates ? " · " + plural(c.updates, "update") : "") + "</b><span>" + esc(breakdown(PHONE_ORIGINS, c.downloadsBy)) + "</span>" + (watch ? "<span>" + esc(watch) + "</span>" : "") + "</div>" +
       '<div class="gdAdminUsageNums"><b>' + esc(latest) + "</b><span>" + esc(others.length ? "Also played: " + others.join(", ") : (c.waitedPlays ? "Avg wait " + seconds(c.waitMs / c.waitedPlays) : "")) + "</span></div>" +
       "</div>";
@@ -296,7 +313,9 @@
     var failedOpens = Object.keys(t.outcomes).reduce(function (sum, o) { return sum + (BAD_OUTCOMES[o] ? t.outcomes[o] : 0); }, 0);
     var metrics = '<div class="gdAdminDatabaseSummary">' + [
       metric("Courses used", summary.courses.length),
-      metric("Rounds", t.plays),
+      metric("Rounds", t.plays, "Rounds opened"),
+      metric("Rounds played", t.rounds ? (t.results.played || 0) + " of " + t.rounds + (t.results["stopped-early"] ? " · " + t.results["stopped-early"] + " stopped early" : "") : "-",
+        "Of finished rounds the app could follow: on the course for 9+ holes or 90+ minutes"),
       metric("Downloads", t.downloads),
       metric("Updates", t.updates, "A newer map version replaced a device's copy"),
       metric("Watch deliveries", t.watchDeliveries + (t.watchConfirmed ? " · " + t.watchConfirmed + " confirmed" : "") + (t.watchFailures ? " · " + t.watchFailures + " failed" : ""),
@@ -309,12 +328,14 @@
       (watchLine(t) ? " · Watch: " + esc(watchLine(t)) : "") + "</p>";
 
     var outcomeParts = Object.keys(OUTCOMES).map(function (o) { return { label: OUTCOMES[o], count: t.outcomes[o] || 0, tone: outcomeTone(o) }; });
+    var resultParts = ROUND_RESULTS.map(function (r) { return { label: r[1], count: t.results[r[0]] || 0, tone: r[3] }; });
     var mapParts = MAP_TYPES.map(function (p) { return { label: p[1], count: t.mapTypes[p[0]] || 0, tone: p[0] === "full" ? "good" : p[0] === "lite" ? "ok" : p[0] === "live" ? "bad" : "muted" }; });
 
     root.innerHTML = rangeBtns + metrics +
       '<div class="gdAdminUsageCharts">' + trend(state.data.daily || []) +
       shareBar("How rounds opened", outcomeParts, t.plays) +
-      shareBar("Map played on", mapParts, t.plays) + "</div>" +
+      shareBar("Map played on", mapParts, t.plays) +
+      shareBar("How rounds went", resultParts, t.rounds) + "</div>" +
       '<input class="gdAdminUsageSearch" type="search" placeholder="Search courses" value="' + esc(state.query) + '" oninput="gdAdminCourseUsageSearch(this.value)">' +
       '<h4 class="gdAdminUsageHeading">Problem courses</h4><div class="gdAdminUsageList" data-gd-usage="problems">' + problemMarkup(summary) + "</div>" +
       '<h4 class="gdAdminUsageHeading">All courses</h4><div class="gdAdminUsageList" data-gd-usage="list">' + listMarkup(summary) + "</div>";

@@ -20,12 +20,13 @@ import { courseSlug } from "./lib/gd-course-slug.mjs";
  * most worth seeing.
  */
 
-const EVENTS = new Set(["download", "update", "play", "delivery-failed", "delivery-confirmed"]);
+const EVENTS = new Set(["download", "update", "play", "round", "delivery-failed", "delivery-confirmed"]);
 const ORIGINS = new Set(["web", "ios", "android", "watch", "apple-watch", "garmin"]);
 const MAP_TYPES = new Set(["", "full", "lite", "live"]);
 const OUTCOMES = new Set(["", "cached", "ready", "prepared", "not-mapped", "failed", "timeout", "unreachable",
   "signup-required", "server-busy", "account-error", "no-package", "report-unavailable", "assets-failed", "error",
-  "handover-failed", "watch-offline", "watch-app-missing", "too-large", "watch-memory", "transfer-failed"]);
+  "handover-failed", "watch-offline", "watch-app-missing", "too-large", "watch-memory", "transfer-failed",
+  "played", "part-round", "stopped-early", "off-course", "on-watch"]);
 const VERSION = /^((W-)?v\d{1,6}\.\d{1,6})?$/;
 const MAX_WAIT_MS = 10 * 60 * 1000;
 const RANGES = new Set([7, 30, 90, 0]);
