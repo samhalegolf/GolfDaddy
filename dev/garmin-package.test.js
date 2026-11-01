@@ -212,11 +212,11 @@ function phone(options) {
   const assets = [];
   const requests = [];
   const plugin = {
-    publishWatchMap: async (args) => { published.push(args.manifest); return { published: true }; },
+    publishWatchMap: async (args) => { published.push(args.manifest); return { published: options.published !== false }; },
     publishWatchMapAsset: async (args) => { assets.push(args); return { sent: true }; },
     watchMapInventory: async () => options.inventory || {}
   };
-  if (options.garmin !== undefined) plugin.garminState = async () => ({ selectedDevice: options.garmin ? { deviceId: "d1" } : null });
+  if (options.garmin !== undefined) plugin.garminState = async () => Object.assign({ selectedDevice: options.garmin ? { deviceId: "d1" } : null }, options.garminState);
   /* With no Garmin chosen, the phone in these checks has an Apple Watch paired. */
   plugin.watchState = async () => ({ paired: true, vendor: options.garmin ? "garmin" : "apple" });
   const fetchImpl = async (url) => {
@@ -252,6 +252,16 @@ test("a connected Garmin gets the drawn package: no images, no urls", async () =
   assert.strictEqual(p.d.progress("test-course").complete, false, "not done until the watch says so");
   p.d.noteInventory({ courseKey: "test-course", version: "4242", holes: [] });
   assert.strictEqual(p.d.progress("test-course").complete, true, "the watch naming the version holds every drawn hole");
+});
+
+test("a Garmin that never takes the drawn package is a failed hand-over, never a delivery", async () => {
+  const holes = await builtHoles();
+  const p = phone({ garmin: true, published: false, garminState: { reachable: false }, garminReport: { watchPackageVersion: 4242, holes } });
+  const result = await p.d.deliver("test-course");
+  assert.strictEqual(result.delivered, false);
+  assert.strictEqual(result.sent, undefined, "nothing counts as sent");
+  assert.strictEqual(result.reason, "watch-offline", "and the reason is the watch being out of reach");
+  assert.strictEqual(result.watch, "garmin");
 });
 
 test("a Garmin already holding the package is not sent it again", async () => {

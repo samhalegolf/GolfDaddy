@@ -411,6 +411,9 @@
     var RETRY_COOLDOWN_MAX_MS = 15 * 60 * 1000;
     var inFlight = Object.create(null);
     var completed = Object.create(null);
+    /* Per course: the wrist a package was handed to this session and its version
+       label, until that wrist's own inventory report confirms it (or it never does). */
+    var handedOver = Object.create(null);
     var retryAfter = Object.create(null);
     var attempts = Object.create(null);
 
@@ -524,8 +527,35 @@
       var garmin = await garminConnected();
       if (!garmin && !(await appleWatchPaired())) return { delivered: false, reason: "no-watch" };
       var result = await runFor(courseKey, garmin);
-      if (result) result.watch = garmin ? "garmin" : "apple-watch";
+      if (!result) return result;
+      result.watch = garmin ? "garmin" : "apple-watch";
+      if (result.reason === "handover-failed" && garmin) result.reason = await garminFailure();
+      if (result.sent > 0) handedOver[courseKey] = { watch: result.watch, version: result.versionLabel || "" };
       return result;
+    }
+
+    /* Why a Garmin refused a hand-over, from what the native side already knows:
+       whether the watch is in reach, whether Clarity Caddy is on it, and the SDK's
+       own result for the last send (GarminTransport's lastSendStatus). Android and
+       iOS name those results differently, so they are matched loosely. */
+    async function garminFailure() {
+      var state = null;
+      try { state = typeof plugin.garminState === "function" ? await plugin.garminState() : null; } catch (e) { state = null; }
+      if (!state) return "handover-failed";
+      var status = String(state.lastSendStatus || "").toLowerCase().replace(/[^a-z]/g, "");
+      if (state.reachable === false || /notconnected|notavailable|nodevice/.test(status)) return "watch-offline";
+      if (state.appInstalled === false || /appnotfound/.test(status)) return "watch-app-missing";
+      if (/toolarge/.test(status)) return "too-large";
+      if (/memory/.test(status)) return "watch-memory";
+      if (/transfer|timeout|retries|busy/.test(status)) return "transfer-failed";
+      return "handover-failed";
+    }
+
+    /* Whether the native side says the manifest actually left: a Garmin answers
+       with the Connect IQ SDK's own result, an Apple Watch with whether a session
+       exists to queue it on. */
+    function handedOff(answer) {
+      return !!(answer && answer.published === true);
     }
 
     async function runFor(courseKey, garmin) {
@@ -596,7 +626,10 @@
       if (skeleton) manifest.skeleton = skeleton;
       var outlines = courseOutlines(courseKey, version, holes);
       if (outlines.length) manifest.outlines = outlines;
-      await plugin.publishWatchMap({ manifest: manifest });
+      /* Nothing else is worth sending if the manifest itself never left. */
+      if (!handedOff(await plugin.publishWatchMap({ manifest: manifest }))) {
+        return { delivered: false, reason: "handover-failed", version: version };
+      }
 
       var sent = 0;
       var failed = 0;
@@ -659,7 +692,11 @@
       if (skeleton) manifest.skeleton = skeleton;
       var outlines = courseOutlines(courseKey, version, holes);
       if (outlines.length) manifest.outlines = outlines;
-      await plugin.publishWatchMap({ manifest: manifest });
+      /* The manifest is the whole delivery here, so whether it left is whether
+         anything was delivered at all. */
+      if (!handedOff(await plugin.publishWatchMap({ manifest: manifest }))) {
+        return { delivered: false, reason: "handover-failed", version: version, drawn: true };
+      }
       return { delivered: true, sent: 1, skipped: 0, version: version, drawn: true };
     }
 
@@ -667,10 +704,16 @@
        went to a wrist, or could not. Absent off the app page, so the Studio surfaces
        and tests never count anything. Only real failures count as one - no native
        bridge, a cooldown or a wrist that already held everything are not. */
-    var DELIVERY_FAILURES = { "report-unavailable": true, "no-package": true, error: true };
+    var DELIVERY_FAILURES = {
+      "report-unavailable": true, "no-package": true, error: true, "handover-failed": true,
+      "watch-offline": true, "watch-app-missing": true, "too-large": true, "watch-memory": true, "transfer-failed": true
+    };
+    function usageCounter() {
+      return (typeof window !== "undefined" && window.GDCourseUsage) || null;
+    }
     function reportWatchUsage(courseKey, result) {
       try {
-        var usage = typeof window !== "undefined" && window.GDCourseUsage;
+        var usage = usageCounter();
         if (!usage || !result || !result.watch) return;
         if (result.sent > 0) {
           usage.report({ courseId: courseKey, event: "download", origin: result.watch, version: result.versionLabel });
@@ -678,6 +721,18 @@
           usage.report({ courseId: courseKey, event: "delivery-failed", origin: result.watch,
             outcome: result.failed > 0 ? "assets-failed" : result.reason });
         }
+      } catch (e) {}
+    }
+
+    /* The wrist itself said it holds what was handed to it this session: the
+       only proof a delivery landed, as opposed to having left the phone. */
+    function reportConfirmed(courseKey) {
+      var sent = handedOver[courseKey];
+      if (!sent) return;
+      delete handedOver[courseKey];
+      try {
+        var usage = usageCounter();
+        if (usage) usage.report({ courseId: courseKey, event: "delivery-confirmed", origin: sent.watch, version: sent.version });
       } catch (e) {}
     }
 
@@ -733,7 +788,10 @@
          leave - so without this a wrist that quietly lost eight of them stayed
          short for the whole round. Re-opening the errand is enough; the next
          Scene runs it once the cooldown is out, and it re-sends only the gaps. */
-      if (!settle(courseKey, null) && completed[courseKey]) {
+      var wasComplete = !!completed[courseKey];
+      if (settle(courseKey, null)) {
+        if (!wasComplete) reportConfirmed(courseKey);
+      } else if (wasComplete) {
         delete completed[courseKey];
         retryAfter[courseKey] = now() + cooldownFor(courseKey);
       }

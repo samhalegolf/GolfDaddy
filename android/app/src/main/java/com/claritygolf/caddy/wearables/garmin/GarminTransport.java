@@ -92,6 +92,9 @@ public final class GarminTransport {
 
     private final Context context;
     private final GarminDeviceStore deviceStore;
+    /* The result of the most recent send: an IQMessageStatus name, or one of
+       NO_DEVICE / NOT_READY / NOT_ATTEMPTED when no send could be made. */
+    private volatile String lastSendStatus = "";
     // The Connect IQ app identifier — must always equal garmin/manifest.xml's
     // <iq:application id="...">. See NativeRoundBridge.CONNECT_IQ_APP_ID for
     // why Android holds the undashed spelling and iOS the dashed one.
@@ -759,6 +762,9 @@ public final class GarminTransport {
         out.put("appInstalled", current.appInstalled);
         out.put("reachable", current.reachable);
         out.put("connectionState", String.valueOf(deviceStore.getLastKnownConnectionState()));
+        /* How the most recent send to the watch went, in the SDK's own words, so
+           the phone can say WHY a hand-over failed (watch-map-delivery.js). */
+        out.put("lastSendStatus", lastSendStatus);
         GarminDeviceStore.SelectedDevice selected = deviceStore.getSelectedDevice();
         if (selected != null) {
             java.util.HashMap<String, Object> device = new java.util.HashMap<>();
@@ -771,12 +777,13 @@ public final class GarminTransport {
     }
 
     private void send(Map<String, Object> message, Callback<Boolean> completion) {
-        if (deviceStore.getSelectedDevice() == null) { completion.onResult(false); return; }
-        if (connectIQ == null || !sdkReady || registeredDevice == null) { completion.onResult(false); return; }
+        if (deviceStore.getSelectedDevice() == null) { lastSendStatus = "NO_DEVICE"; completion.onResult(false); return; }
+        if (connectIQ == null || !sdkReady || registeredDevice == null) { lastSendStatus = "NOT_READY"; completion.onResult(false); return; }
         try {
             connectIQ.sendMessage(registeredDevice, app, message, new ConnectIQ.IQSendMessageListener() {
                 @Override
                 public void onMessageStatus(IQDevice device, IQApp sentApp, ConnectIQ.IQMessageStatus status) {
+                    lastSendStatus = String.valueOf(status);
                     /* Reported, never inferred: only the SDK's own SUCCESS
                        counts as sent (Garmin Phase 1 plan step 8). The other
                        seven cases are all genuine failures, and
@@ -792,6 +799,7 @@ public final class GarminTransport {
             });
         } catch (InvalidStateException | ServiceUnavailableException error) {
             Log.w(TAG, "Garmin send could not be attempted", error);
+            lastSendStatus = "NOT_ATTEMPTED";
             completion.onResult(false);
         }
     }

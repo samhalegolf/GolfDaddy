@@ -62,12 +62,13 @@ function fakeEnvironment(report, options) {
      too - otherwise a retry re-sends holes the wrist has already confirmed. */
   const wrist = { report: options.inventory || null };
   const plugin = {
-    publishWatchMap: async manifest => { calls.manifests.push(manifest); },
+    publishWatchMap: async manifest => { calls.manifests.push(manifest); return { published: options.published !== false }; },
     publishWatchMapAsset: async asset => { calls.assets.push(asset); },
     watchMapInventory: async () => wrist.report,
     /* An Apple Watch is paired unless a test says otherwise. */
     watchState: async () => options.watchState || { paired: true, vendor: "apple" }
   };
+  if (options.garminState) plugin.garminState = async () => options.garminState;
   const fetchImpl = async url => {
     calls.fetched.push(url);
     /* Matched anywhere, not at position 0: with an origin set (the native
@@ -270,6 +271,65 @@ function fakeEnvironment(report, options) {
       });
       assert.strictEqual(iphone.calls.fetched.length + android.calls.fetched.length, 0, "the map report is never fetched");
     });
+  })();
+
+  await (async () => {
+    const { instance, calls } = fakeEnvironment(reportFor(frame, [1, 2, 3]), { published: false });
+    const result = await instance.deliver("millbrook-remarkables-18");
+    check("a manifest the watch never took is a failed hand-over, and no images follow it", () => {
+      assert.strictEqual(result.delivered, false);
+      assert.strictEqual(result.reason, "handover-failed");
+      assert.strictEqual(result.watch, "apple-watch");
+      assert.strictEqual(calls.assets.length, 0);
+    });
+  })();
+
+  await (async () => {
+    const garmin = (state) => fakeEnvironment(reportFor(frame, [1]), {
+      published: false,
+      garminState: Object.assign({ selectedDevice: { deviceId: "d1" }, reachable: true, appInstalled: true }, state)
+    });
+    const reasons = {};
+    for (const [name, state] of [
+      ["offline", { reachable: false }],
+      ["notConnected", { lastSendStatus: "FAILURE_DEVICE_NOT_CONNECTED" }],
+      ["iosNotAvailable", { lastSendStatus: "Failure_DeviceNotAvailable" }],
+      ["missing", { appInstalled: false }],
+      ["tooLarge", { lastSendStatus: "FAILURE_MESSAGE_TOO_LARGE" }],
+      ["memory", { lastSendStatus: "Failure_InsufficientMemory" }],
+      ["transfer", { lastSendStatus: "FAILURE_DURING_TRANSFER" }],
+      ["unknown", { lastSendStatus: "FAILURE_UNKNOWN" }]
+    ]) {
+      reasons[name] = (await garmin(state).instance.deliver("millbrook-remarkables-18")).reason;
+    }
+    check("a Garmin's refused hand-over says why, from the native state and the SDK's own result", () => {
+      assert.deepStrictEqual(reasons, {
+        offline: "watch-offline", notConnected: "watch-offline", iosNotAvailable: "watch-offline",
+        missing: "watch-app-missing", tooLarge: "too-large", memory: "watch-memory",
+        transfer: "transfer-failed", unknown: "handover-failed"
+      });
+    });
+  })();
+
+  await (async () => {
+    const reported = [];
+    global.window = { GDCourseUsage: { report: event => reported.push(event) } };
+    try {
+      const { instance } = fakeEnvironment(reportFor(frame, [1, 2]));
+      await instance.deliver("millbrook-remarkables-18");
+      const version = String(reportFor(frame, [1]).watchPackageVersion);
+      instance.noteInventory({ courseKey: "millbrook-remarkables-18", version, holes: [1] });
+      const afterShort = reported.length;
+      instance.noteInventory({ courseKey: "millbrook-remarkables-18", version, holes: [1, 2] });
+      instance.noteInventory({ courseKey: "millbrook-remarkables-18", version, holes: [1, 2] });
+      check("the wrist confirming every hole it was handed is counted once, as delivery-confirmed", () => {
+        assert.deepStrictEqual(reported.map(e => e.event), ["download", "delivery-confirmed"]);
+        assert.strictEqual(afterShort, 1, "a short report confirms nothing");
+        assert.strictEqual(reported[1].origin, "apple-watch");
+      });
+    } finally {
+      delete global.window;
+    }
   })();
 
   await (async () => {
