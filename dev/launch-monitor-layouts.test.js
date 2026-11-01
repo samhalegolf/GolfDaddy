@@ -116,11 +116,24 @@ list.forEach((layout) => {
       const last = geo.columns[geo.columns.length - 1];
       assert.ok(Math.abs(last.x + last.w - (geo.frame.x + geo.frame.w)) < 1, where + ' columns end at the frame edge');
     }
-    assert.strictEqual(geo.rotateHint, layout.tableAspect >= 1.6 && w < h, where + ' rotate hint');
+    assert.strictEqual(geo.rotateHint, layout.tableAspect >= 1 && w < h, where + ' rotate hint: a wide table on a portrait page');
+    assert.strictEqual(layouts.wantsTurn(layout, w, h), geo.rotateHint, where + ' wantsTurn agrees');
   });
 });
 
 assert.ok(layouts.guideGeometry(null, 390, 844).frame.w > 0, 'no layout means the default layout');
+
+/* ---- side rails: the frame clears them and is centred between them ---- */
+{
+  const geo = layouts.guideGeometry(layouts.get('foresight-fsx-ball'), 844, 390, { top: 44, bottom: 60, left: 0, right: 104, gutter: 8 });
+  assert.ok(geo.frame.x >= 8 - 0.5, 'frame clears the left gutter');
+  assert.ok(geo.frame.x + geo.frame.w <= 844 - 104 - 8 + 0.5, 'frame clears the right rail');
+  const slack = (844 - 104 - 16) - geo.frame.w;
+  assert.ok(Math.abs(geo.frame.x - (8 + slack / 2)) <= 1, 'and sits in the middle of what is left');
+  const noRail = layouts.guideGeometry(layouts.get('foresight-fsx-ball'), 844, 390, { top: 44, bottom: 60 });
+  assert.ok(noRail.frame.w >= geo.frame.w, 'a rail never makes the frame bigger');
+}
+
 assert.ok(layouts.guideGeometry(layouts.get('generic'), 0, 0).frame.w > 0, 'a zero viewport does not blow up');
 
 /* ---- coverCrop ---- */
@@ -152,6 +165,30 @@ assert.ok(layouts.guideGeometry(layouts.get('generic'), 0, 0).frame.w > 0, 'a ze
   assert.strictEqual(crop.sx, 0);
   assert.strictEqual(crop.sw, 1080);
   assert.strictEqual(crop.sh, Math.round(400 / (800 / 1080)));
+}
+
+/* ---- coverRect: the same mapping, unclamped ---- */
+{
+  const r = layouts.coverRect(1000, 1000, 500, 500, { x: 100, y: 200, w: 300, h: 100 });
+  assert.deepStrictEqual(r, { x: 200, y: 400, w: 600, h: 200 }, 'a view rect maps to source pixels at the cover scale');
+  const out = layouts.coverRect(640, 480, 640, 480, { x: -50, y: -50, w: 800, h: 600 });
+  assert.ok(out.x < 0 && out.x + out.w > 640, 'and is not clamped');
+  const c = layouts.coverCrop(1000, 1000, 500, 500, { x: 100, y: 200, w: 300, h: 100 }, 0);
+  assert.deepStrictEqual([c.sx, c.sy, c.sw, c.sh], [200, 400, 600, 200], 'coverCrop with no margin is coverRect rounded');
+}
+
+/* ---- the turned stage: a quarter turn clockwise on a portrait page ---- */
+{
+  /* Page 390 x 844. The stage is 844 wide by 390 tall; its top edge runs
+     down the page's right side. */
+  const H = 390;
+  assert.deepStrictEqual(layouts.turnedToPage({ x: 0, y: 0, w: 844, h: 390 }, H), { x: 0, y: 0, w: 390, h: 844 }, 'the whole stage is the whole page');
+  assert.deepStrictEqual(layouts.turnedToPage({ x: 0, y: 0, w: 10, h: 10 }, H), { x: 380, y: 0, w: 10, h: 10 }, 'the stage top-left is the page top-right');
+  assert.deepStrictEqual(layouts.turnedToPage({ x: 100, y: 50, w: 300, h: 120 }, H), { x: 220, y: 100, w: 120, h: 300 }, 'width and height swap');
+  const p = layouts.pageToTurnedPoint(380, 0, H);
+  assert.deepStrictEqual(p, { x: 0, y: 10 }, 'a page point comes back into the stage');
+  const back = layouts.pageToTurnedPoint(220, 100, H);
+  assert.deepStrictEqual(back, { x: 100, y: 170 }, 'page (220,100) is the stage rect\'s bottom-left corner');
 }
 
 console.log('ok - launch monitor layouts: ' + list.length + ' layouts, columns resolve, geometry and crop hold');

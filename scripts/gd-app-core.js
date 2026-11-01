@@ -11691,9 +11691,21 @@ function gdPracticeDefaultManualCheckpoint(reason="manual framing"){
 // header row along the top edge, which the value-shape finder cuts off. When
 // the normaliser perspective-warped the photo the fractions no longer hold,
 // so the shape finder runs as usual.
+// The lines the player set in the guided camera's adjust stage, as fractions
+// of the frame: the left edge of every column (the first is the right edge of
+// the label column) and the bottom of the header. Template mode uses them as
+// the column boundaries instead of snapping equal slots to the ink.
+function gdPracticeTemplateGuideFromFrame(frame){
+  const columns=Array.isArray(frame?.columns)?frame.columns.map(Number).filter(Number.isFinite):[];
+  const headerBottom=Number(frame?.headerBottom);
+  if(!columns.length&&!Number.isFinite(headerBottom))return null;
+  return {columns,headerBottom:Number.isFinite(headerBottom)?headerBottom:null};
+}
+// A photo from the guided camera says where the framed table sits in it. That
+// frame is the quad: no corner pins, no value-shape finder.
 function gdPracticeTemplateFrameCheckpoint(){
   const frame=gdPracticePhotoTemplateFrame;
-  if(!frame||typeof gdPracticeScanTemplateKey!=="function"||!gdPracticeScanTemplateKey())return null;
+  if(!frame)return null;
   const source=gdPracticeNormalizedCanvas||gdNormalizeLaunchMonitorTable(gdPracticePhotoBitmap)||gdPracticePhotoBitmap;
   if(!source)return null;
   const square=source.__gdTableSquare||{};
@@ -11713,7 +11725,73 @@ function gdPracticeTemplateFrameCheckpoint(){
   if(!checkpoint)return null;
   checkpoint.cluster=Object.assign({},checkpoint.cluster,{quad,rawQuad:quad,bufferedRawQuad:quad,templateFrame:true});
   checkpoint.templateFrame=true;
+  checkpoint.templateGuide=gdPracticeTemplateGuideFromFrame(frame);
   return checkpoint;
+}
+// Flatten a quad on `source` into the 1800px scan image and build the
+// checkpoint the scan routes read. Shared by the manual corner stretch and the
+// guided camera frame.
+function gdPracticeFlattenQuadCheckpoint(source,quadIn,previous,clusterMode,normalizeMode){
+  const sourceW=Number(source?.width)||0;
+  const sourceH=Number(source?.height)||0;
+  if(!source||!sourceW||!sourceH||!gdPracticeQuadPoints(quadIn))return null;
+  const quad=quadIn.map(point=>({
+    x:Math.max(0,Math.min(sourceW-1,Number(point.x))),
+    y:Math.max(0,Math.min(sourceH-1,Number(point.y)))
+  }));
+  // SINGLE-WARP QUALITY FIX. source is usually the already-warped 1800px
+  // normalized canvas, so warping it again resamples the photo twice (two
+  // generations of loss before any OCR). When the source carries warp metadata,
+  // map the corners BACK to the original photo and warp once from there.
+  let warpSource=source;
+  let warpQuad=quad;
+  if(source.__gdFlattenedQuad&&source.__gdWarpSource){
+    const mappedQuad=quad.map(point=>gdFlatPointToWarpSourcePoint(source,point.x,point.y));
+    if(mappedQuad.every(point=>point&&Number.isFinite(point.x)&&Number.isFinite(point.y))){
+      warpSource=source.__gdWarpSource;
+      warpQuad=mappedQuad;
+    }
+  }
+  const flattened=gdWarpQuadToCanvas(warpSource,warpQuad,1800);
+  if(!flattened)return null;
+  flattened.__gdNormalizeMode=normalizeMode||"manual-corner-flatten";
+  const prev=previous||{};
+  const cluster=Object.assign({},prev.cluster||{},{
+    quad,
+    rawQuad:quad,
+    bufferedRawQuad:quad,
+    sourceWidth:sourceW,
+    sourceHeight:sourceH,
+    cutoutCanvas:flattened,
+    displayCutoutCanvas:flattened,
+    manualQuad:true,
+    guideLines:null,
+    shapeLines:null
+  });
+  flattened.__gdValueCluster=cluster;
+  return Object.assign({},prev,{
+    source,
+    prepared:source,
+    cluster,
+    scanImage:flattened,
+    directColumnSource:flattened,
+    visualOnly:true,
+    manualQuad:true,
+    clusterMode:clusterMode||"manual corner stretch"
+  });
+}
+// Where a failed photo scan goes to be re-framed: a guided-camera photo back
+// to the camera's adjust stage (the lines on the frozen shot), anything else
+// to the corner pins.
+function gdPracticeReopenPhotoFrameTool(checkpoint,message){
+  const guide=window.GolfDaddyPracticeCameraGuide;
+  if(checkpoint?.templateFrame&&guide&&typeof guide.reopenAdjust==="function"){
+    let reopened=false;
+    try{reopened=!!guide.reopenAdjust(message||"");}catch(e){}
+    if(reopened)return true;
+  }
+  gdOpenPracticeManualQuadTool();
+  return false;
 }
 function gdPracticeManualCanvasPoint(event){
   const state=gdPracticeManualQuadState;
@@ -11913,55 +11991,15 @@ async function gdApplyPracticeManualQuad(){
   gdClosePracticeManualQuadTool();
   gdSetPracticePhotoProcessing(true,{stageIndex:0,progress:8});
   await gdPracticeYieldScanPaint();
-  const quad=state.quad.map(point=>({
-    x:Math.max(0,Math.min(state.sourceW-1,Number(point.x))),
-    y:Math.max(0,Math.min(state.sourceH-1,Number(point.y)))
-  }));
-  // SINGLE-WARP QUALITY FIX. state.source is usually the already-warped 1800px
-  // normalized canvas, so warping it again resamples the photo twice (two
-  // generations of loss before any OCR). When the source carries warp metadata,
-  // map the manual corners BACK to the original photo and warp once from there.
-  let warpSource=state.source;
-  let warpQuad=quad;
-  if(state.source&&state.source.__gdFlattenedQuad&&state.source.__gdWarpSource){
-    const mappedQuad=quad.map(point=>gdFlatPointToWarpSourcePoint(state.source,point.x,point.y));
-    if(mappedQuad.every(point=>point&&Number.isFinite(point.x)&&Number.isFinite(point.y))){
-      warpSource=state.source.__gdWarpSource;
-      warpQuad=mappedQuad;
-    }
-  }
-  const flattened=gdWarpQuadToCanvas(warpSource,warpQuad,1800);
-  if(!flattened){
+  // The player moved the corners, so any lines the guided camera set no
+  // longer apply: template mode goes back to snapping its slots to the ink.
+  const previous=Object.assign({},state.checkpoint||gdPracticeClusterCheckpoint||{},{templateFrame:false,templateGuide:null});
+  const checkpoint=gdPracticeFlattenQuadCheckpoint(state.source,state.quad,previous,"manual corner stretch","manual-corner-flatten");
+  if(!checkpoint){
     gdSetPracticePhotoProcessing(false,{immediate:true,skipJob:true});
     gdPracticeManualQuadStatus(gdT("practice.manualStretchFailed"),"error");
     return;
   }
-  flattened.__gdNormalizeMode="manual-corner-flatten";
-  const previous=state.checkpoint||gdPracticeClusterCheckpoint||{};
-  const previousCluster=previous.cluster||{};
-  const cluster=Object.assign({},previousCluster,{
-    quad,
-    rawQuad:quad,
-    bufferedRawQuad:quad,
-    sourceWidth:state.sourceW,
-    sourceHeight:state.sourceH,
-    cutoutCanvas:flattened,
-    displayCutoutCanvas:flattened,
-    manualQuad:true,
-    guideLines:null,
-    shapeLines:null
-  });
-  flattened.__gdValueCluster=cluster;
-  const checkpoint=Object.assign({},previous,{
-    source:state.source,
-    prepared:state.source,
-    cluster,
-    scanImage:flattened,
-    directColumnSource:flattened,
-    visualOnly:true,
-    manualQuad:true,
-    clusterMode:"manual corner stretch"
-  });
   gdPracticeClusterCheckpoint=checkpoint;
   window.__gdPracticeClusterCheckpoint=checkpoint;
   try{
@@ -13843,7 +13881,7 @@ async function gdClarityTemplateScanFromCheckpoint(checkpoint,opts={}){
   }
   if(!flat||typeof flat.width!=="number"){
     gdPracticeFeedback(gdT("practice.scanFailTable"),"error",{state:"error"});
-    gdOpenPracticeManualQuadTool();
+    gdPracticeReopenPhotoFrameTool(checkpoint,gdT("practice.scanFailTable"));
     return null;
   }
   const job=gdPracticeStartImportJob("clarity-template-ocr",sourceLabel,{status:"scanning",checkpointText:`Fitting ${layout.label} template`,stageIndex:0,progress:8});
@@ -13860,12 +13898,18 @@ async function gdClarityTemplateScanFromCheckpoint(checkpoint,opts={}){
     // ---- fit: template + ink -> header bottom, label column, column slots, shot bands
     gdPracticeDebugCheckpointSafe("value_corridor_mapping","running",{inputSummary:`${flat.width}x${flat.height} flat image, ${layout.label} (${layout.columns.length} columns)`});
     const mask=PIX.inkMask(PIX.imageData(flat));
-    const fit=TPL.fitTemplate(layout,flat.width,flat.height,mask);
+    // The adjust stage's lines, scaled onto the flat image: the column
+    // boundaries as they are, and the header line as the guess the ink refines.
+    const guide=checkpoint?.templateGuide||null;
+    const fitOpts={};
+    if(guide&&Array.isArray(guide.columns)&&guide.columns.length===layout.columns.length)fitOpts.columnBounds=guide.columns.map(f=>Math.round(Number(f)*flat.width));
+    if(guide&&Number.isFinite(Number(guide.headerBottom)))fitOpts.headerGuess=Number(guide.headerBottom)*flat.height;
+    const fit=TPL.fitTemplate(layout,flat.width,flat.height,mask,fitOpts);
     const fitSummary=`header bottom y${fit.headerBottom}, label column 0-${fit.labelRight}, ${fit.columns.length} slots (${fit.columns.filter(c=>c.snapped).length} snapped to ink gaps), ${fit.bands.length} bands (${fit.bands.filter(b=>b.summaryZone).length} in the summary zone). ${fit.notes.join("; ")}`;
     gdPracticeDebugCheckpointSafe("value_corridor_mapping",fit.bands.length?"success":"failed",{outputSummary:fitSummary,counts:{columns:fit.columns.length,bands:fit.bands.length},snapshot:{canvas:gdClarityTemplateOverlay(flat,fit),label:`Template fit: ${layout.label}`}});
     if(!fit.bands.length){
       gdPracticeFeedback(gdT("practice.scanFailTemplateRows"),"error",{state:"error"});
-      gdOpenPracticeManualQuadTool();
+      gdPracticeReopenPhotoFrameTool(checkpoint,gdT("practice.scanFailTemplateRows"));
       return null;
     }
     // ---- label column: one read per band (shot number, club, AVERAGE / STD DEV)
@@ -13955,7 +13999,7 @@ async function gdClarityTemplateScanFromCheckpoint(checkpoint,opts={}){
     gdPracticeDebugCheckpointSafe("extraction_completed",rowCount?"success":"failed",{outputSummary:`Read ${rowCount} shots with the ${layout.label} template (${scanRows.length} rows x ${fit.columns.filter(c=>c.key).length} columns)\n${readDump}\n${dropLog.join("\n")}`,counts:{rows:rowCount,scanRows:scanRows.length},snapshot:{canvas:gdClarityTemplateOverlay(flat,fit),label:`Template extraction: ${rowCount} shots`}});
     if(!rowCount){
       gdPracticeFeedback(gdT("practice.scanFailValues"),"error",{state:"error"});
-      gdOpenPracticeManualQuadTool();
+      gdPracticeReopenPhotoFrameTool(checkpoint,gdT("practice.scanFailValues"));
       return null;
     }
     gdPracticeSetExtractionPreview(payload,sourceLabel);
@@ -14008,6 +14052,27 @@ async function gdRunPracticePhotoOcrFromCheckpoint(checkpoint){
   checkpoint.scanImage=scanImage;
   return await gdRunValueCorridorMappingFromCheckpoint(Object.assign({},checkpoint,{source,prepared,scanImage,directColumnSource:scanImage}),{sourceLabel:gdPracticePhotoName||"Practice photo scan"});
 }
+// A guided-camera photo: flatten the frame the player set and scan it. The
+// route (template mode or the discovery route) follows the Template select,
+// which the camera set to the layout the photo was framed with.
+async function gdRunPracticeTemplateFrameScan(frameCheckpoint){
+  if(!gdPracticeImportCanStart(gdPracticePhotoName||"Practice photo scan"))return null;
+  gdSetPracticePhotoProcessing(true,{stageIndex:0,progress:8});
+  await gdPracticeYieldScanPaint();
+  const data=gdPracticeManualSourceAndQuad(frameCheckpoint);
+  const checkpoint=data?gdPracticeFlattenQuadCheckpoint(data.source,data.quad,frameCheckpoint,"guided camera frame","camera-frame-flatten"):null;
+  if(!checkpoint){
+    gdSetPracticePhotoProcessing(false,{immediate:true,skipJob:true});
+    gdPracticeDebugCheckpointSafe("crop_cleanup","warning",{outputSummary:"Guided camera frame could not be flattened; manual corner stretch opened"});
+    gdOpenPracticeManualQuadTool();
+    return null;
+  }
+  gdPracticeClusterCheckpoint=checkpoint;
+  window.__gdPracticeClusterCheckpoint=checkpoint;
+  const lines=checkpoint.templateGuide?.columns?.length||0;
+  gdPracticeDebugCheckpointSafe("crop_cleanup","success",{outputSummary:lines?`Flattened the guided camera frame with ${lines} column lines from the adjust stage`:"Flattened the guided camera frame",counts:{hasCluster:1,columnLines:lines}});
+  return await gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,{sourceLabel:gdPracticePhotoName||"Practice photo scan"});
+}
 async function gdHandleLaunchMonitorPhoto(file){
   if(!file){
     gdPracticeDebugStartRunSafe({sourceName:"Practice photo",sourceType:"image"});
@@ -14044,14 +14109,25 @@ async function gdHandleLaunchMonitorPhoto(file){
       gdPracticeFeedback(smallMessage,"error");
       return;
     }
-    gdPracticeDebugCheckpointSafe("crop_cleanup","running",{inputSummary:"Finding value-grid crop"});
     const frameCheckpoint=gdPracticeTemplateFrameCheckpoint();
-    const checkpoint=frameCheckpoint||await gdBuildPracticeClusterCheckpoint();
-    gdPracticeClusterCheckpoint=checkpoint;
     if(frameCheckpoint){
-      gdPracticeDebugCheckpointSafe("crop_cleanup","success",{outputSummary:"Pins placed on the guided camera frame (template mode)",counts:{hasCluster:1}});
-      gdOpenPracticeManualQuadTool();
-    }else if(checkpoint){
+      gdPracticeDebugCheckpointSafe("crop_cleanup","running",{inputSummary:"Guided camera frame: flatten and scan, no corner pins"});
+      gdNativePracticeFeedbackBridge({
+        status:"photo_selected",
+        lastAction:"Guided camera photo ready",
+        warnings:[],
+        errors:[],
+        photoAction:true,
+        nextStep:"Scanning the framed table."
+      });
+      gdPracticeRefreshDebugTools();
+      await gdRunPracticeTemplateFrameScan(frameCheckpoint);
+      return;
+    }
+    gdPracticeDebugCheckpointSafe("crop_cleanup","running",{inputSummary:"Finding value-grid crop"});
+    const checkpoint=await gdBuildPracticeClusterCheckpoint();
+    gdPracticeClusterCheckpoint=checkpoint;
+    if(checkpoint){
       gdPracticeDebugCheckpointSafe("crop_cleanup","success",{outputSummary:"Value-grid checkpoint created",counts:{hasCluster:checkpoint.cluster?1:0}});
       gdOpenPracticeManualQuadTool();
     }else{

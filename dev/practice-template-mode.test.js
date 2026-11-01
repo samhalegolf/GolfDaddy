@@ -12,7 +12,9 @@
  *   - the template route never reads headers or splits columns, borrows the
  *     direction deep scan with the layout's own direction columns, and lands
  *     through the same single checkpoint and job boundary as the old route;
- *   - the guided camera tags its photo with the frame and selects the layout.
+ *   - the guided camera tags its photo with the frame and the column lines,
+ *     selects the layout, and its photo is flattened and scanned without the
+ *     corner pins.
  *
  * Run: node dev/practice-template-mode.test.js
  */
@@ -105,7 +107,9 @@ const route = slice(core, 'async function gdClarityTemplateScanFromCheckpoint(ch
 ['gdClarityNameStrips', 'allocateHeaders', 'splitColumns', 'detectNumberBoxes', 'gdClarityOffcutScan', 'trimUnresolvedEdges'].forEach((name) => {
   assert.ok(!route.includes(name), 'template mode does not discover anything: no ' + name);
 });
-assert.ok(route.includes('TPL.fitTemplate(layout,flat.width,flat.height,mask)'), 'it fits the chosen layout to the ink');
+assert.ok(route.includes('TPL.fitTemplate(layout,flat.width,flat.height,mask,fitOpts)'), 'it fits the chosen layout to the ink');
+assert.ok(route.includes('fitOpts.columnBounds=guide.columns.map(f=>Math.round(Number(f)*flat.width))'), 'with the adjust stage\'s column lines scaled onto the flat image');
+assert.ok(route.includes('fitOpts.headerGuess=Number(guide.headerBottom)*flat.height'), 'and its header line as the guess');
 assert.ok(route.includes('TPL.cellRects(fit,3)'), 'and reads one crop per cell');
 assert.ok(route.includes('gdClarityDeepCropCell(flat,cell.rect)'), 'at native resolution through the inverse warp when it can');
 assert.ok(route.includes('TPL.assembleRows(fit,reads,labels,'), 'rows come from the pure module');
@@ -115,7 +119,11 @@ assert.ok(route.includes('await gdImportLaunchMonitorPayload(payload,sourceLabel
 assert.ok(route.includes('payload.inputType="clarity-template-ocr"'), 'marked as a template scan');
 assert.ok(route.includes('gdPracticeStartImportJob("clarity-template-ocr"'), 'inside a durable job');
 assert.ok(/finally\{[\s\S]*gdPracticeFailImportJob\(new Error\("Clarity template scan ended without saving"\)/.test(route), 'with the same fail boundary as the old route');
-assert.ok(route.includes('gdT("practice.scanFailTemplateRows")'), 'no rows under the header says so in the player\'s words and reopens the pins');
+assert.ok(route.includes('gdT("practice.scanFailTemplateRows")'), 'no rows under the header says so in the player\'s words');
+assert.ok(route.includes('gdPracticeReopenPhotoFrameTool(checkpoint,gdT("practice.scanFailTemplateRows"))'), 'and goes back to the adjust stage for a camera photo, the pins for anything else');
+assert.ok(!route.includes('gdOpenPracticeManualQuadTool()'), 'the template route never opens the pins directly');
+const reopen = slice(core, 'function gdPracticeReopenPhotoFrameTool(checkpoint,message){', '\n}\n');
+assert.ok(reopen.includes('checkpoint?.templateFrame&&guide&&typeof guide.reopenAdjust==="function"') && reopen.includes('gdOpenPracticeManualQuadTool();'), 'the chooser asks the camera first, then falls back to the pins');
 
 /* the deep scan accepts the decider the template route passes */
 const deep = slice(core, 'async function gdClarityDeepScanDirections(flat,scanRows,strips,dataRows,Tesseract,opts){', '\n}\n');
@@ -126,17 +134,25 @@ assert.ok(deep.includes('needsDir(s.metricKey)'), 'and filters its strips with i
 const quadOpen = slice(core, 'function gdOpenPracticeManualQuadTool(){', '\n}\n');
 assert.ok(quadOpen.includes('gdT("practice.framePinsTemplate")'), 'in template mode the pins hint asks for the header along the top edge');
 
-/* a guided-camera photo in template mode puts the pins on the frame */
+/* a guided-camera photo is flattened to its frame and scanned, no pins */
 const frameFn = slice(core, 'function gdPracticeTemplateFrameCheckpoint(){', '\n}\n');
-assert.ok(frameFn.includes('gdPracticePhotoTemplateFrame') && frameFn.includes('gdPracticeScanTemplateKey()'), 'only with a camera frame and a template selected');
+assert.ok(frameFn.includes('gdPracticePhotoTemplateFrame') && !frameFn.includes('gdPracticeScanTemplateKey()'), 'whenever the camera tagged the photo, whatever the Template select says');
+assert.ok(frameFn.includes('checkpoint.templateGuide=gdPracticeTemplateGuideFromFrame(frame);'), 'and it carries the column lines');
 assert.ok(frameFn.includes('startsWith("perspective-warp")'), 'and not when the normaliser moved the pixels');
 const handler = slice(core, 'async function gdHandleLaunchMonitorPhoto(file){', '\n}\n');
 assert.ok(handler.includes('gdPracticePhotoTemplateFrame=file.__gdTemplateFrame'), 'the photo handler reads the frame off the file');
-assert.ok(handler.includes('const checkpoint=frameCheckpoint||await gdBuildPracticeClusterCheckpoint();'), 'and prefers it to the value-shape finder');
+assert.ok(handler.includes('await gdRunPracticeTemplateFrameScan(frameCheckpoint);'), 'and scans straight from it');
+assert.ok(!/if\(frameCheckpoint\)\{[\s\S]*?gdOpenPracticeManualQuadTool\(\);[\s\S]*?\}else if/.test(handler), 'the frame branch does not open the corner stretch');
+const frameScan = slice(core, 'async function gdRunPracticeTemplateFrameScan(frameCheckpoint){', '\n}\n');
+assert.ok(frameScan.includes('gdPracticeFlattenQuadCheckpoint(data.source,data.quad,frameCheckpoint,"guided camera frame","camera-frame-flatten")'), 'it flattens the frame with the same warp the pins use');
+assert.ok(frameScan.includes('return await gdRunDefaultPracticePhotoScanFromCheckpoint(checkpoint,'), 'and goes down the normal dispatcher');
+const manualApply = slice(core, 'async function gdApplyPracticeManualQuad(){', '\n}\n');
+assert.ok(manualApply.includes('gdPracticeFlattenQuadCheckpoint(state.source,state.quad,previous,"manual corner stretch","manual-corner-flatten")'), 'the pins share that flatten');
+assert.ok(manualApply.includes('{templateFrame:false,templateGuide:null}'), 'and moved pins drop the camera lines');
 
 /* ---- the camera hands over frame + layout ---- */
-assert.ok(camera.includes('file.__gdTemplateFrame = { x: edge, y: edge, w: frameFrac, h: frameFrac'), 'the camera tags the photo with where the frame is');
-assert.ok(camera.includes("win.gdPracticeSetScanTemplate(layout ? layout.key : '')"), 'and selects the layout it was framed with');
+assert.ok(camera.includes('file.__gdTemplateFrame = templateFrame;') && camera.includes('columns: L.bounds.map(') && camera.includes('headerBottom: clamp((L.headerBottom - L.top) / fh, 0, 1)'), 'the camera tags the photo with the frame, the column lines and the header line');
+assert.ok(camera.includes("win.gdPracticeSetScanTemplate(layout.columns && layout.columns.length ? layout.key : '')"), 'and selects the layout it was framed with, or no template for a layout without columns');
 
 /* ---- words exist ---- */
 {
