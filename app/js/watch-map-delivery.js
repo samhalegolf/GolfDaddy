@@ -501,13 +501,28 @@
       } catch (e) { return null; }
     }
 
-    /* Which wrist the errand served, for the usage count: a Garmin whenever one is
-       chosen (whichever package it got), otherwise an Apple Watch. */
+    /* True when an Apple Watch is paired to this phone. With no Garmin chosen, the
+       native watchState answers for the Apple Watch alone (a Garmin only counts as
+       paired once it is chosen), and Android always reports "garmin" because an
+       Apple Watch cannot pair with it. */
+    async function appleWatchPaired() {
+      if (!plugin || typeof plugin.watchState !== "function") return false;
+      try {
+        var state = await plugin.watchState();
+        return !!(state && state.paired && state.vendor !== "garmin");
+      } catch (e) { return false; }
+    }
+
+    /* Which wrist the errand serves, for the usage count: a Garmin whenever one is
+       chosen (whichever package it got), an Apple Watch when one is paired, and
+       nobody otherwise - a phone with no watch has nothing to deliver to, so it
+       is neither a delivery nor a failure. */
     async function run(courseKey) {
       if (!plugin || typeof plugin.publishWatchMap !== "function" || typeof plugin.publishWatchMapAsset !== "function") {
         return { delivered: false, reason: "no-native-bridge" };
       }
       var garmin = await garminConnected();
+      if (!garmin && !(await appleWatchPaired())) return { delivered: false, reason: "no-watch" };
       var result = await runFor(courseKey, garmin);
       if (result) result.watch = garmin ? "garmin" : "apple-watch";
       return result;
@@ -685,6 +700,9 @@
            errand was finished for good and the eight gaps could never be
            filled. Anything short is retried, but not before the cooldown. */
         if (settle(courseKey, result)) return result;
+        /* No watch is not a failure to back off from: look again in a minute, so a
+           watch paired mid-round gets its maps without a long wait. */
+        if (result && result.reason === "no-watch") { retryAfter[courseKey] = now() + RETRY_COOLDOWN_MS; return result; }
         retryAfter[courseKey] = now() + cooldownFor(courseKey);
         return result;
       }, function (error) {

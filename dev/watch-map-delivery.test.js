@@ -64,7 +64,9 @@ function fakeEnvironment(report, options) {
   const plugin = {
     publishWatchMap: async manifest => { calls.manifests.push(manifest); },
     publishWatchMapAsset: async asset => { calls.assets.push(asset); },
-    watchMapInventory: async () => wrist.report
+    watchMapInventory: async () => wrist.report,
+    /* An Apple Watch is paired unless a test says otherwise. */
+    watchState: async () => options.watchState || { paired: true, vendor: "apple" }
   };
   const fetchImpl = async url => {
     calls.fetched.push(url);
@@ -252,6 +254,39 @@ function fakeEnvironment(report, options) {
     check("an asset name outside the generator's vocabulary never becomes a path", () => {
       assert.strictEqual(result.delivered, false);
       assert.strictEqual(result.reason, "no-package");
+    });
+  })();
+
+  await (async () => {
+    const iphone = fakeEnvironment(reportFor(frame, [1, 2, 3]), { watchState: { paired: false, vendor: "apple" } });
+    const android = fakeEnvironment(reportFor(frame, [1, 2, 3]), { watchState: { paired: false, vendor: "garmin" } });
+    const onIphone = await iphone.instance.deliver("millbrook-remarkables-18");
+    const onAndroid = await android.instance.deliver("millbrook-remarkables-18");
+    check("a phone with no watch paired and no Garmin chosen delivers nothing and fails nothing", () => {
+      [onIphone, onAndroid].forEach(result => {
+        assert.strictEqual(result.delivered, false);
+        assert.strictEqual(result.reason, "no-watch");
+        assert.strictEqual(result.watch, undefined, "no wrist is named, so no usage is counted");
+      });
+      assert.strictEqual(iphone.calls.fetched.length + android.calls.fetched.length, 0, "the map report is never fetched");
+    });
+  })();
+
+  await (async () => {
+    const watchState = { paired: false, vendor: "apple" };
+    const env = fakeEnvironment(reportFor(frame, [1, 2, 3]), { watchState });
+    for (let i = 0; i < 4; i++) { await env.instance.deliver("millbrook-remarkables-18"); env.clock.at += 60 * 1000; }
+    const stillLooking = await env.instance.deliver("millbrook-remarkables-18");
+    watchState.paired = true;
+    env.clock.at += 30 * 1000;
+    const tooSoon = await env.instance.deliver("millbrook-remarkables-18");
+    env.clock.at += 30 * 1000;
+    const afterPairing = await env.instance.deliver("millbrook-remarkables-18");
+    check("with no watch the phone looks again every minute, so one paired mid-round gets its maps", () => {
+      assert.strictEqual(stillLooking.reason, "no-watch", "repeated empty looks never stretch the wait");
+      assert.strictEqual(tooSoon.reason, "cooling-down", "but it does not look inside the minute");
+      assert.strictEqual(afterPairing.delivered, true);
+      assert.strictEqual(afterPairing.sent, 3);
     });
   })();
 

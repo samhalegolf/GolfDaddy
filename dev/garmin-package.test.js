@@ -217,6 +217,8 @@ function phone(options) {
     watchMapInventory: async () => options.inventory || {}
   };
   if (options.garmin !== undefined) plugin.garminState = async () => ({ selectedDevice: options.garmin ? { deviceId: "d1" } : null });
+  /* With no Garmin chosen, the phone in these checks has an Apple Watch paired. */
+  plugin.watchState = async () => ({ paired: true, vendor: options.garmin ? "garmin" : "apple" });
   const fetchImpl = async (url) => {
     requests.push(url);
     const body = url.includes("watch=garmin") ? options.garminReport : options.imageReport;
