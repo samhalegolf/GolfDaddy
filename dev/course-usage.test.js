@@ -53,6 +53,13 @@ function post(body, headers) {
   assert.strictEqual(res.status, 200);
   assert.strictEqual(calls[3].body.p_version, "v2.1");
 
+  res = await courseUsage(post({ courseId: "royal-test-gc", event: "delivery-confirmed", origin: "garmin", version: "v0.1" }), {});
+  assert.strictEqual(res.status, 200, "a watch confirming its map is counted");
+  assert.strictEqual(calls[4].body.p_event, "delivery-confirmed");
+  res = await courseUsage(post({ courseId: "royal-test-gc", event: "delivery-failed", origin: "garmin", outcome: "watch-offline" }), {});
+  assert.strictEqual(res.status, 200, "and so is a Garmin hand-over failing for a named reason");
+  assert.strictEqual(calls[5].body.p_outcome, "watch-offline");
+
   for (const bad of [
     { courseId: "x", event: "view", origin: "ios" },
     { courseId: "x", event: "play", origin: "desktop" },
@@ -64,7 +71,7 @@ function post(body, headers) {
     res = await courseUsage(post(bad), {});
     assert.strictEqual(res.status, 400, JSON.stringify(bad));
   }
-  assert.strictEqual(calls.length, 4, "rejected requests never reach the database");
+  assert.strictEqual(calls.length, 6, "rejected requests never reach the database");
 
   res = await courseUsage(new Request("https://example.test/api/course-usage", { method: "PUT" }), {});
   assert.strictEqual(res.status, 405);

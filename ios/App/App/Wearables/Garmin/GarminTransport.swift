@@ -83,6 +83,9 @@ final class GarminTransport: NSObject, WearableTransport {
     /* Real answer from getAppStatus, not "the device is connected". The two
        differ on a connected watch with no Clarity Caddy installed. */
     private var appInstalledOnDevice = false
+    /* The result of the most recent send, as the SDK names it, or NOT_READY
+       when no send could be made. Read by garminStateDictionary. */
+    private var lastSendStatus = ""
     /* Set while a hand-off to Garmin Connect is outstanding, so the settings
        page can say what it is waiting for. */
     private var awaitingSelection = false
@@ -505,17 +508,21 @@ final class GarminTransport: NSObject, WearableTransport {
             ]
         }
         out["connectionState"] = deviceStore.lastKnownConnectionState.rawValue
+        /* How the most recent send to the watch went, in the SDK's own words, so
+           the phone can say WHY a hand-over failed (watch-map-delivery.js). */
+        out["lastSendStatus"] = lastSendStatus
         return out
     }
 
     // MARK: - Sending
 
     private func send(_ message: [String: Any], completion: @escaping (Bool) -> Void) {
-        guard let app = boundApp else { completion(false); return }
+        guard let app = boundApp else { lastSendStatus = "NOT_READY"; completion(false); return }
         /* Messages go to an APP, not a device — the IQApp carries its device.
            Reported, never inferred: only the SDK's own Success counts as sent
            (Garmin Phase 1 plan step 8). */
         ConnectIQ.sharedInstance().sendMessage(message, to: app, progress: nil) { result in
+            self.lastSendStatus = NSStringFromSendMessageResult(result)
             if result != .success {
                 NSLog("Garmin send failed: %@", NSStringFromSendMessageResult(result))
             }

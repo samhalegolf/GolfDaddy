@@ -29,7 +29,11 @@
     "": "Not recorded (older app)"
   };
   var BAD_OUTCOMES = { "not-mapped": true, failed: true, timeout: true, unreachable: true, "signup-required": true, "server-busy": true, "account-error": true };
-  var WATCH_FAILURES = { "no-package": "No watch map", "report-unavailable": "Watch map unavailable", "assets-failed": "Hole images failed", error: "Delivery error" };
+  var WATCH_FAILURES = {
+    "no-package": "No watch map", "report-unavailable": "Watch map unavailable", "assets-failed": "Hole images failed", error: "Delivery error",
+    "handover-failed": "Watch didn't take the map", "watch-offline": "Watch out of reach", "watch-app-missing": "Clarity Caddy not on the watch",
+    "too-large": "Map too large to send", "watch-memory": "Watch out of memory", "transfer-failed": "Transfer dropped"
+  };
   var MAP_TYPES = [["full", "Full map"], ["lite", "Lite map"], ["live", "Live map only"], ["", "Not recorded"]];
   var SLOW_WAIT_MS = 45000;
 
@@ -67,6 +71,27 @@
   }
 
   function tally(map, key, count) { map[key] = (map[key] || 0) + count; }
+  function watchSlot(e, origin) { return e.watch[origin] || (e.watch[origin] = { sent: 0, confirmed: 0, failed: 0 }); }
+  function watchName(origin) {
+    var pair = WATCH_ORIGINS.filter(function (p) { return p[0] === origin; })[0];
+    return pair ? pair[1] : origin;
+  }
+
+  /* One part per make of watch, so a Garmin's success and an Apple Watch's failure
+     never read as one watch: "Garmin: sent 1, confirmed 1 · Apple Watch: 1 failed".
+     "Sent" is the phone handing the map over; "confirmed" is the watch itself
+     reporting it holds it (app builds from November 2026 on). */
+  function watchLine(e) {
+    return WATCH_ORIGINS.map(function (pair) {
+      var w = e.watch[pair[0]];
+      if (!w) return "";
+      var parts = [];
+      if (w.sent) parts.push("sent " + w.sent);
+      if (w.confirmed) parts.push("confirmed " + w.confirmed);
+      if (w.failed) parts.push(w.failed + " failed");
+      return pair[1] + ": " + parts.join(", ");
+    }).filter(Boolean).join(" · ");
+  }
 
   /* Report rows are per course x event x origin x map type x outcome x version; fold them
      into one entry per course, plus the same totals across every course. */
@@ -78,8 +103,8 @@
     function blank(id, name, info) {
       return {
         id: id, name: name, inDatabase: info ? info.inDatabase : true, currentVersion: info ? info.currentVersion : null,
-        plays: 0, downloads: 0, updates: 0, watchDeliveries: 0, watchFailures: 0,
-        playsBy: {}, downloadsBy: {}, watchBy: {}, watchFailuresBy: {}, mapTypes: {}, outcomes: {},
+        plays: 0, downloads: 0, updates: 0, watchDeliveries: 0, watchConfirmed: 0, watchFailures: 0,
+        playsBy: {}, downloadsBy: {}, watch: {}, watchFailuresBy: {}, mapTypes: {}, outcomes: {},
         waitMs: 0, waitedPlays: 0, versionedPlays: 0, latestPlays: 0, versions: {}, countries: {}, lastSeen: ""
       };
     }
@@ -103,7 +128,10 @@
           }
         } else if (row.event === "download" && isWatch(row.origin)) {
           e.watchDeliveries += count;
-          tally(e.watchBy, row.origin, count);
+          watchSlot(e, row.origin).sent += count;
+        } else if (row.event === "delivery-confirmed") {
+          e.watchConfirmed += count;
+          watchSlot(e, row.origin).confirmed += count;
         } else if (row.event === "download") {
           e.downloads += count;
           tally(e.downloadsBy, row.origin, count);
@@ -111,7 +139,8 @@
           e.updates += count;
         } else if (row.event === "delivery-failed") {
           e.watchFailures += count;
-          tally(e.watchFailuresBy, row.outcome || "error", count);
+          watchSlot(e, row.origin).failed += count;
+          tally(e.watchFailuresBy, row.origin + "|" + (row.outcome || "error"), count);
         }
         String(row.countries || "").split(",").forEach(function (code) { code = code.trim(); if (code) e.countries[code] = true; });
         if (String(row.last_seen || "") > e.lastSeen) e.lastSeen = String(row.last_seen || "");
@@ -131,8 +160,9 @@
     });
     if (c.mapTypes.live) out.push({ weight: c.mapTypes.live, text: plural(c.mapTypes.live, "round") + " on the live map only" });
     if (c.waitedPlays && c.waitMs / c.waitedPlays > SLOW_WAIT_MS) out.push({ weight: c.waitedPlays, text: "Slow to open (avg " + seconds(c.waitMs / c.waitedPlays) + ")" });
-    Object.keys(c.watchFailuresBy).forEach(function (o) {
-      out.push({ weight: c.watchFailuresBy[o], text: (WATCH_FAILURES[o] || o) + " ×" + c.watchFailuresBy[o] });
+    Object.keys(c.watchFailuresBy).forEach(function (key) {
+      var origin = key.split("|")[0], o = key.split("|")[1];
+      out.push({ weight: c.watchFailuresBy[key], text: watchName(origin) + ": " + (WATCH_FAILURES[o] || o) + " ×" + c.watchFailuresBy[key] });
     });
     return out.sort(function (a, b) { return b.weight - a.weight; });
   }
@@ -216,9 +246,7 @@
     var open = c.inDatabase
       ? '<button type="button" class="gdAdminUsageLink" onclick="return gdAdminCourseUsageOpenCourse(\'' + esc(c.id) + '\')">Open in Course Database</button>'
       : '<span class="gdAdminUsageTag">Not in Course Database</span>';
-    var watch = c.watchDeliveries || c.watchFailures
-      ? "Watch " + breakdown(WATCH_ORIGINS, c.watchBy) + (c.watchFailures ? " · " + c.watchFailures + " failed" : "")
-      : "";
+    var watch = watchLine(c);
     return '<div class="gdAdminUsageRow">' +
       '<div class="gdAdminUsageName"><strong>' + esc(c.name) + "</strong><span>" + esc(countries) + (c.lastSeen ? " · last " + esc(c.lastSeen) : "") + "</span>" + open + "</div>" +
       '<div class="gdAdminUsageNums"><b>' + plural(c.plays, "round") + "</b><span>" + esc(breakdown(PHONE_ORIGINS, c.playsBy)) + "</span><span>" + esc(breakdown(MAP_TYPES, c.mapTypes)) + "</span></div>" +
@@ -271,13 +299,14 @@
       metric("Rounds", t.plays),
       metric("Downloads", t.downloads),
       metric("Updates", t.updates, "A newer map version replaced a device's copy"),
-      metric("Watch deliveries", t.watchDeliveries + (t.watchFailures ? " · " + t.watchFailures + " failed" : "")),
+      metric("Watch deliveries", t.watchDeliveries + (t.watchConfirmed ? " · " + t.watchConfirmed + " confirmed" : "") + (t.watchFailures ? " · " + t.watchFailures + " failed" : ""),
+        "Sent: the phone handed the map over. Confirmed: the watch reported holding it."),
       metric("Opens that went wrong", failedOpens + " (" + percent(failedOpens, t.plays) + ")"),
       metric("Avg wait for a map", t.waitedPlays ? seconds(t.waitMs / t.waitedPlays) : "-", "Rounds that had to fetch the map from the server"),
       metric("Rounds on latest version", t.versionedPlays ? percent(t.latestPlays, t.versionedPlays) : "-", "Of rounds whose version was recorded")
     ].join("") + "</div>" +
       '<p class="gdAdminUsageNote">Rounds: ' + esc(breakdown(PHONE_ORIGINS, t.playsBy)) + " · Downloads: " + esc(breakdown(PHONE_ORIGINS, t.downloadsBy)) +
-      (t.watchDeliveries ? " · Watch: " + esc(breakdown(WATCH_ORIGINS, t.watchBy)) : "") + "</p>";
+      (watchLine(t) ? " · Watch: " + esc(watchLine(t)) : "") + "</p>";
 
     var outcomeParts = Object.keys(OUTCOMES).map(function (o) { return { label: OUTCOMES[o], count: t.outcomes[o] || 0, tone: outcomeTone(o) }; });
     var mapParts = MAP_TYPES.map(function (p) { return { label: p[1], count: t.mapTypes[p[0]] || 0, tone: p[0] === "full" ? "good" : p[0] === "lite" ? "ok" : p[0] === "live" ? "bad" : "muted" }; });
