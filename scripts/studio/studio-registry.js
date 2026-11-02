@@ -863,7 +863,7 @@
 
     {
       id: "marketing", label: "Marketing", parent: null,
-      function: "Marketing assets built from the real app rather than mocked up: the Public Facing Hub (which courses get public pages, their headers and publishing) and the Snapshot Machine that shoots the headers.",
+      function: "Marketing assets built from the real app rather than mocked up: the Public Facing Hub (which courses get public pages, their headers and publishing), the Snapshot Machine that shoots the headers, and Websites, where Clarity's own public sites are built with the shared website builder.",
       owner: "n/a (nav grouping only)", runtime: { app: false, studio: true, server: false },
       code: [], inputs: [], outputs: [], owns: [], doesNotOwn: [], connections: [], keyFunctions: [],
       status: "group", needsVerification: false
@@ -892,6 +892,26 @@
       ],
       status: "implemented", needsVerification: false,
       warnings: ["Publishing and the page switch write course_maps.page_public on the live project \u2014 a switched-on page is public and in the sitemap."]
+    },
+    {
+      id: "marketing-websites", label: "Websites", parent: "marketing",
+      function: "Clarity's own public websites: the Clarity Caddy site (home, How it works, and the privacy, terms, support and account deletion pages the app stores link to) and the Clarity Golf Booking site (home, privacy, terms and support at the root of claritygolf.app). They are built with Clarity Booking's website builder, the same editor, renderer and hosting coaches use, so there is one builder and a change to it reaches every site. Studio does not draw an editor: it frames the builder from the Booking deploy (<CLARITY_BOOKING_URL>/studio-sites) and hands it a short-lived Studio pass, signed here with the shared service secret once the admin's own login is proved. Each site is an account of kind 'house' in Booking's database; publishing, pages, pictures and custom domains are Booking's.",
+      owner: "scripts/studio/marketing/websites-page.js (frame + pass) / Clarity Booking's website builder (everything else)",
+      runtime: { app: false, studio: true, server: true },
+      code: [
+        { role: "Studio page (frames the builder, answers its pass requests)", path: "scripts/studio/marketing/websites-page.js" },
+        { role: "Studio pass: admin check + signature", path: "functions/studio-site-pass.mjs" }
+      ],
+      inputs: ["The admin's Supabase bearer token (verifiedAdminEmail)", "CLARITY_SERVICE_SECRET (shared with Clarity Booking)", "CLARITY_BOOKING_URL (default https://claritygolf.app)"],
+      outputs: ["A Studio pass posted to the Booking frame, addressed to the Booking origin only"],
+      owns: ["Who may open the builder from Studio (Studio admins)", "The pass format, together with Booking's _shared/site/house.mts"],
+      doesNotOwn: ["The builder, the site data, publishing and domains (Clarity Booking: src/modules/site-builder, netlify/functions/site.mts, docs/website-builder.md)"],
+      connections: [],
+      keyFunctions: [
+        { name: "signStudioPass", purpose: "v1.<payload>.<HMAC-SHA256> for one admin, 15 minutes; Booking's verifyStudioPass is its other half and both test the same fixed vector.", codePath: "functions/studio-site-pass.mjs" }
+      ],
+      status: "implemented", needsVerification: false,
+      warnings: ["Publishing a site here makes it public at once; the Clarity Golf Booking site replaces the claritygolf.app home, privacy, terms and support pages from its first publish."]
     },
     {
       id: "marketing-snapshots", label: "Snapshot Machine", parent: "marketing",
