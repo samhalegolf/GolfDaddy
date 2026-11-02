@@ -274,6 +274,12 @@ touches the Apple Watch package (`course_watch_maps`).
 - **Fallbacks.**
   - **Package not built yet:** the image package is used, as before; the GET has already
     started the build.
+  - **Package being built, and no image package either:** the server answers
+    `status: "building"`, which the phone treats as a wait, not a failure. It looks again
+    every 15 seconds and counts nothing. This is the course a player maps and tees off on in
+    the same minute (Springfield, 2 Nov 2026: asked three seconds into the first build). After
+    five minutes of "building" it is reported as `no-package` and backs off like any failure.
+    Studio's Course Usage drops a "No watch map" flag once that watch would now be sent a map.
   - **Package behind:** the older one is still served.
   - **Apple Watch:** keeps the image package and its Studio "Generate Watch Maps" bake.
 

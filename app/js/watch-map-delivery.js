@@ -409,6 +409,13 @@
        course whose package is genuinely unreachable - must not become a
        fetch a minute for the rest of the round. */
     var RETRY_COOLDOWN_MAX_MS = 15 * 60 * 1000;
+    /* A Garmin package the server is still building: look again sooner than a failure
+       would, because the first build of a freshly mapped course takes about a minute. A
+       build that has not landed after BUILDING_WAIT_MAX_MS is no longer "on the way" - it
+       is reported as no-package and backs off like any other failure. */
+    var BUILDING_RETRY_MS = 15 * 1000;
+    var BUILDING_WAIT_MAX_MS = 5 * 60 * 1000;
+    var buildingSince = Object.create(null);
     var inFlight = Object.create(null);
     var completed = Object.create(null);
     /* Per course: the wrist a package was handed to this session and its version
@@ -491,17 +498,20 @@
     }
 
     /* The Garmin package (the drawn map, no images), built on the server after every scan.
-       Null while a course has none yet - the server starts building it on this very request -
-       and the image package is used meanwhile, exactly as before this existed. */
+       `holes` is null while a course has none yet, and the image package is used meanwhile,
+       exactly as before this existed. `building` is the server saying the course is mapped
+       and its package is on the way (the GET wakes the builder if a scan's own wake was
+       lost) - the case a player meets when they map a course and tee off the same minute. */
     async function garminPackage(courseKey) {
       try {
         var response = await fetchImpl(apiUrl(REPORT_ENDPOINT + "?courseId=" + encodeURIComponent(courseKey) + "&watch=garmin"));
-        if (!response || !response.ok) return null;
+        if (!response || !response.ok) return { holes: null, building: false };
         var report = await response.json();
         var version = String((report && report.watchPackageVersion) || "");
         var holes = (report && Array.isArray(report.holes) ? report.holes : []).map(function (hole) { return manifestHole(hole, true); }).filter(Boolean);
-        return version && version !== "0" && holes.length ? { version: version, holes: holes } : null;
-      } catch (e) { return null; }
+        if (version && version !== "0" && holes.length) return { version: version, holes: holes, building: false };
+        return { holes: null, building: !!(report && report.status === "building") };
+      } catch (e) { return { holes: null, building: false }; }
     }
 
     /* True when an Apple Watch is paired to this phone. With no Garmin chosen, the
@@ -560,7 +570,7 @@
 
     async function runFor(courseKey, garmin) {
       var drawn = garmin ? await garminPackage(courseKey) : null;
-      if (drawn) return runDrawn(courseKey, drawn.version, drawn.holes);
+      if (drawn && drawn.holes) return runDrawn(courseKey, drawn.version, drawn.holes);
       var response = await fetchImpl(apiUrl(REPORT_ENDPOINT + "?courseId=" + encodeURIComponent(courseKey)));
       if (!response || !response.ok) return { delivered: false, reason: "report-unavailable" };
       var report = await response.json();
@@ -568,6 +578,10 @@
       var version = String((report && report.watchPackageVersion) || "");
       var holes = (report && Array.isArray(report.holes) ? report.holes : []).map(function (hole) { return manifestHole(hole, false); }).filter(Boolean);
       if (!version || version === "0" || !holes.length) {
+        /* Still being built is a wait, not an answer: nothing is marked "none", so the
+           handover does not give up on a map that is a minute away. deliver() looks again
+           shortly, and gives up honestly if the build never lands. */
+        if (drawn && drawn.building) return { delivered: false, reason: "building" };
         /* Known to have nothing is its own answer: the handover need not wait
            for maps that will never come. */
         progress[courseKey] = { none: true, total: 0, have: 0, holes: Object.create(null), version: version };
@@ -744,6 +758,19 @@
       if (retryAfter[courseKey] > now()) return Promise.resolve({ delivered: false, reason: "cooling-down" });
       var promise = run(courseKey).then(function (result) {
         delete inFlight[courseKey];
+        /* The wait is timed from the first "building" and kept until the server answers
+           anything else, so a build that never lands is reported once and then backs off,
+           rather than starting a fresh five-minute wait after every cooldown. */
+        if (result && result.reason === "building") {
+          if (!buildingSince[courseKey]) buildingSince[courseKey] = now();
+          if (now() - buildingSince[courseKey] < BUILDING_WAIT_MAX_MS) {
+            retryAfter[courseKey] = now() + BUILDING_RETRY_MS;
+            return result;
+          }
+          result = Object.assign({}, result, { reason: "no-package" });
+        } else {
+          delete buildingSince[courseKey];
+        }
         reportWatchUsage(courseKey, result);
         /* Only a package the WRIST says it holds is remembered for good.
            Deliberately not `result.delivered && !result.failed`: that counted

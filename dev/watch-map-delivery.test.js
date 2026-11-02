@@ -73,6 +73,11 @@ function fakeEnvironment(report, options) {
     calls.fetched.push(url);
     /* Matched anywhere, not at position 0: with an origin set (the native
        case) these arrive absolute. */
+    /* A test can give the Garmin GET its own answer (options.garminReport, read on
+       every call so it can change mid-test); otherwise both reports are the same. */
+    if (url.indexOf("watch=garmin") !== -1 && options.garminReport) {
+      return { ok: true, json: async () => options.garminReport() };
+    }
     if (url.indexOf("/api/course-watch-maps?") !== -1) {
       return { ok: true, json: async () => report };
     }
@@ -309,6 +314,64 @@ function fakeEnvironment(report, options) {
         transfer: "transfer-failed", unknown: "handover-failed"
       });
     });
+  })();
+
+  await (async () => {
+    /* Springfield, 2 Nov 2026: a guest mapped the course and their Garmin asked for it three
+       seconds into the package's first build. The server said "building"; the phone used to
+       count that as "no watch map" and wait a minute. */
+    const reported = [];
+    global.window = { GDCourseUsage: { report: event => reported.push(event) } };
+    try {
+      const empty = { courseId: "springfield", status: "ready", watchPackageVersion: 0, holes: [] };
+      let garmin = { courseId: "springfield", watch: "garmin", status: "building", watchPackageVersion: 0, holeCount: 0, holes: [] };
+      const env = fakeEnvironment(empty, {
+        garminState: { selectedDevice: { deviceId: "d1" }, reachable: true, appInstalled: true },
+        garminReport: () => garmin
+      });
+      const first = await env.instance.deliver("springfield");
+      const progressWhileBuilding = env.instance.progress("springfield");
+      env.clock.at += 10 * 1000;
+      const tooSoon = await env.instance.deliver("springfield");
+      env.clock.at += 6 * 1000;
+      garmin = Object.assign({}, reportFor(frame, [1, 2]), { courseId: "springfield", watch: "garmin" });
+      const built = await env.instance.deliver("springfield");
+      check("a Garmin package still being built is waited for, not counted as a missing map", () => {
+        assert.strictEqual(first.reason, "building");
+        assert.strictEqual(tooSoon.reason, "cooling-down", "it looks again after a short wait, not on every Scene");
+        assert.strictEqual(built.delivered, true, "fifteen seconds later the finished package goes to the wrist");
+        assert.strictEqual(built.watch, "garmin");
+        assert.ok(!reported.some(e => e.event === "delivery-failed"), "the wait is never reported as a failure");
+        assert.notStrictEqual(progressWhileBuilding.none, true, "the handover is not told there is no map");
+      });
+    } finally {
+      delete global.window;
+    }
+  })();
+
+  await (async () => {
+    const reported = [];
+    global.window = { GDCourseUsage: { report: event => reported.push(event) } };
+    try {
+      const empty = { courseId: "stuck", status: "ready", watchPackageVersion: 0, holes: [] };
+      const env = fakeEnvironment(empty, {
+        garminState: { selectedDevice: { deviceId: "d1" }, reachable: true, appInstalled: true },
+        garminReport: () => ({ courseId: "stuck", watch: "garmin", status: "building", watchPackageVersion: 0, holes: [] })
+      });
+      const reasons = [];
+      for (let i = 0; i < 24; i++) { reasons.push((await env.instance.deliver("stuck")).reason); env.clock.at += 15 * 1000; }
+      const failures = reported.filter(e => e.event === "delivery-failed");
+      check("a build that never lands is reported once as no watch map after five minutes, then backs off", () => {
+        assert.strictEqual(reasons[0], "building");
+        assert.ok(reasons.indexOf("no-package") >= 19 && reasons.indexOf("no-package") <= 21, "given up at about five minutes: " + reasons.indexOf("no-package"));
+        assert.strictEqual(failures.length, 1);
+        assert.strictEqual(failures[0].outcome, "no-package");
+        assert.strictEqual(failures[0].origin, "garmin");
+        assert.ok(reasons.slice(reasons.indexOf("no-package") + 1).every(r => r === "cooling-down"), "after giving up it backs off like any failure");
+      });
+    } finally {
+      delete global.window;
+    }
   })();
 
   await (async () => {
