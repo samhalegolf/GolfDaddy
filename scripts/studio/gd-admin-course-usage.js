@@ -81,7 +81,19 @@
 
   function tally(map, key, count) { map[key] = (map[key] || 0) + count; }
   function resultsLine(e) {
-    return ROUND_RESULTS.map(function (r) { return e.results[r[0]] ? r[1] + " " + e.results[r[0]] : ""; }).filter(Boolean).join(" · ");
+    var line = ROUND_RESULTS.map(function (r) { return e.results[r[0]] ? r[1] + " " + e.results[r[0]] : ""; }).filter(Boolean).join(" · ");
+    var own = e.byBag.own.rounds, known = own + e.byBag["not-set"].rounds;
+    return line + (known ? " · own bag in " + own + " of " + known : "");
+  }
+
+  /* "Played 3 of 4 with their own bag · 1 of 6 without": whether setting a bag goes with
+     finishing rounds. Only rounds whose bag was recorded count on either side. */
+  function bagSplitLine(e) {
+    var parts = [["own", "with their own bag"], ["not-set", "without"]].map(function (pair) {
+      var side = e.byBag[pair[0]];
+      return side.rounds ? "played " + (side.results.played || 0) + " of " + side.rounds + " " + pair[1] : "";
+    }).filter(Boolean);
+    return parts.length ? "Rounds: " + parts.join(" · ") : "";
   }
   function watchSlot(e, origin) { return e.watch[origin] || (e.watch[origin] = { sent: 0, confirmed: 0, failed: 0 }); }
   function watchName(origin) {
@@ -117,6 +129,8 @@
         id: id, name: name, inDatabase: info ? info.inDatabase : true, currentVersion: info ? info.currentVersion : null,
         plays: 0, downloads: 0, updates: 0, watchDeliveries: 0, watchConfirmed: 0, watchFailures: 0, rounds: 0,
         playsBy: {}, downloadsBy: {}, watch: {}, watchFailuresBy: {}, mapTypes: {}, outcomes: {}, results: {},
+        /* Finished rounds by bag (row.bag): "own", "not-set", or "" from builds before it. */
+        byBag: { own: { rounds: 0, results: {} }, "not-set": { rounds: 0, results: {} } },
         waitMs: 0, waitedPlays: 0, versionedPlays: 0, latestPlays: 0, versions: {}, countries: {}, lastSeen: ""
       };
     }
@@ -144,6 +158,8 @@
         } else if (row.event === "round") {
           e.rounds += count;
           tally(e.results, row.outcome || "", count);
+          var side = e.byBag[row.bag];
+          if (side) { side.rounds += count; tally(side.results, row.outcome || "", count); }
         } else if (row.event === "delivery-confirmed") {
           e.watchConfirmed += count;
           watchSlot(e, row.origin).confirmed += count;
@@ -325,7 +341,8 @@
       metric("Rounds on latest version", t.versionedPlays ? percent(t.latestPlays, t.versionedPlays) : "-", "Of rounds whose version was recorded")
     ].join("") + "</div>" +
       '<p class="gdAdminUsageNote">Rounds: ' + esc(breakdown(PHONE_ORIGINS, t.playsBy)) + " · Downloads: " + esc(breakdown(PHONE_ORIGINS, t.downloadsBy)) +
-      (watchLine(t) ? " · Watch: " + esc(watchLine(t)) : "") + "</p>";
+      (watchLine(t) ? " · Watch: " + esc(watchLine(t)) : "") + "</p>" +
+      (bagSplitLine(t) ? '<p class="gdAdminUsageNote">' + esc(bagSplitLine(t)) + "</p>" : "");
 
     var outcomeParts = Object.keys(OUTCOMES).map(function (o) { return { label: OUTCOMES[o], count: t.outcomes[o] || 0, tone: outcomeTone(o) }; });
     var resultParts = ROUND_RESULTS.map(function (r) { return { label: r[1], count: t.results[r[0]] || 0, tone: r[3] }; });

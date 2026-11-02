@@ -34,7 +34,7 @@ function post(body, headers) {
   assert.ok(calls[0].url.endsWith("/rest/v1/rpc/record_course_map_usage"));
   assert.deepStrictEqual(calls[0].body,
     { p_course_id: "royal-test-gc", p_event: "play", p_origin: "ios", p_country: "NZ",
-      p_map_type: "", p_outcome: "", p_version: "", p_wait_ms: 0, p_course_name: "" },
+      p_map_type: "", p_outcome: "", p_version: "", p_wait_ms: 0, p_course_name: "", p_bag: "" },
     "an older install's bare play still counts, and nothing about the player reaches the database");
 
   res = await courseUsage(post({ courseId: "royal-test-gc", event: "download", origin: "watch" }), {});
@@ -46,7 +46,7 @@ function post(body, headers) {
   assert.strictEqual(res.status, 200);
   assert.deepStrictEqual(calls[2].body,
     { p_course_id: "unmapped-links", p_event: "play", p_origin: "android", p_country: "",
-      p_map_type: "live", p_outcome: "not-mapped", p_version: "", p_wait_ms: 600000, p_course_name: "Unmapped Links" },
+      p_map_type: "live", p_outcome: "not-mapped", p_version: "", p_wait_ms: 600000, p_course_name: "Unmapped Links", p_bag: "" },
     "a course with no map is counted, with its name, and the wait is capped");
 
   res = await courseUsage(post({ courseId: "royal-test-gc", event: "update", origin: "web", mapType: "full", version: "v2.1" }), {});
@@ -62,6 +62,10 @@ function post(body, headers) {
   res = await courseUsage(post({ courseId: "royal-test-gc", event: "round", origin: "ios", outcome: "stopped-early", mapType: "lite" }), {});
   assert.strictEqual(res.status, 200, "how an opened round went is counted");
   assert.strictEqual(calls[6].body.p_outcome, "stopped-early");
+  assert.strictEqual(calls[6].body.p_bag, "", "no bag word, an empty bag");
+  res = await courseUsage(post({ courseId: "royal-test-gc", event: "round", origin: "android", outcome: "played", bag: "own" }), {});
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(calls[7].body.p_bag, "own", "a round played with the player's own bag");
 
   for (const bad of [
     { courseId: "x", event: "view", origin: "ios" },
@@ -69,12 +73,13 @@ function post(body, headers) {
     { event: "play", origin: "web" },
     { courseId: "x", event: "play", origin: "web", mapType: "huge" },
     { courseId: "x", event: "play", origin: "web", outcome: "whatever" },
-    { courseId: "x", event: "play", origin: "web", version: "1.4" }
+    { courseId: "x", event: "play", origin: "web", version: "1.4" },
+    { courseId: "x", event: "round", origin: "web", outcome: "played", bag: "their-clubs" }
   ]) {
     res = await courseUsage(post(bad), {});
     assert.strictEqual(res.status, 400, JSON.stringify(bad));
   }
-  assert.strictEqual(calls.length, 7, "rejected requests never reach the database");
+  assert.strictEqual(calls.length, 8, "rejected requests never reach the database");
 
   res = await courseUsage(new Request("https://example.test/api/course-usage", { method: "PUT" }), {});
   assert.strictEqual(res.status, 405);
