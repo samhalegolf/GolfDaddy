@@ -62,6 +62,10 @@ function post(body, headers) {
   res = await courseUsage(post({ courseId: "royal-test-gc", event: "round", origin: "ios", outcome: "stopped-early", mapType: "lite" }), {});
   assert.strictEqual(res.status, 200, "how an opened round went is counted");
   assert.strictEqual(calls[6].body.p_outcome, "stopped-early");
+  assert.ok(!("p_bag" in calls[6].body), "no bag word, no p_bag: the call any version of the function takes");
+  res = await courseUsage(post({ courseId: "royal-test-gc", event: "round", origin: "android", outcome: "played", bag: "own" }), {});
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(calls[7].body.p_bag, "own", "a round played with the player's own bag");
 
   for (const bad of [
     { courseId: "x", event: "view", origin: "ios" },
@@ -69,12 +73,13 @@ function post(body, headers) {
     { event: "play", origin: "web" },
     { courseId: "x", event: "play", origin: "web", mapType: "huge" },
     { courseId: "x", event: "play", origin: "web", outcome: "whatever" },
-    { courseId: "x", event: "play", origin: "web", version: "1.4" }
+    { courseId: "x", event: "play", origin: "web", version: "1.4" },
+    { courseId: "x", event: "round", origin: "web", outcome: "played", bag: "their-clubs" }
   ]) {
     res = await courseUsage(post(bad), {});
     assert.strictEqual(res.status, 400, JSON.stringify(bad));
   }
-  assert.strictEqual(calls.length, 7, "rejected requests never reach the database");
+  assert.strictEqual(calls.length, 8, "rejected requests never reach the database");
 
   res = await courseUsage(new Request("https://example.test/api/course-usage", { method: "PUT" }), {});
   assert.strictEqual(res.status, 405);

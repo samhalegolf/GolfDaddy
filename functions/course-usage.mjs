@@ -28,6 +28,8 @@ const OUTCOMES = new Set(["", "cached", "ready", "prepared", "not-mapped", "fail
   "handover-failed", "watch-offline", "watch-app-missing", "too-large", "watch-memory", "transfer-failed",
   "played", "part-round", "stopped-early", "off-course", "on-watch"]);
 const VERSION = /^((W-)?v\d{1,6}\.\d{1,6})?$/;
+/* For a round: whether the player had set their own bag (scripts/gd-bag-status.js). */
+const BAGS = new Set(["", "own", "not-set"]);
 const MAX_WAIT_MS = 10 * 60 * 1000;
 const RANGES = new Set([7, 30, 90, 0]);
 
@@ -126,19 +128,21 @@ export default async function courseUsage(req, context) {
   const mapType = String(payload.mapType || "");
   const outcome = String(payload.outcome || "");
   const version = String(payload.version || "");
-  if (!MAP_TYPES.has(mapType) || !OUTCOMES.has(outcome) || !VERSION.test(version)) return json(400, { error: "Unknown mapType, outcome or version" });
+  const bag = String(payload.bag || "");
+  if (!MAP_TYPES.has(mapType) || !OUTCOMES.has(outcome) || !VERSION.test(version) || !BAGS.has(bag)) return json(400, { error: "Unknown mapType, outcome, version or bag" });
   const wait = Math.round(Number(payload.waitMs));
   const waitMs = Number.isFinite(wait) ? Math.min(Math.max(wait, 0), MAX_WAIT_MS) : 0;
   const courseName = String(payload.courseName || "").replace(/\s+/g, " ").trim().slice(0, 120);
 
   try {
-    await supabaseFetch("rpc/record_course_map_usage", {
-      method: "POST",
-      body: JSON.stringify({
-        p_course_id: courseId, p_event: event, p_origin: origin, p_country: countryOf(context),
-        p_map_type: mapType, p_outcome: outcome, p_version: version, p_wait_ms: waitMs, p_course_name: courseName
-      })
-    });
+    const args = {
+      p_course_id: courseId, p_event: event, p_origin: origin, p_country: countryOf(context),
+      p_map_type: mapType, p_outcome: outcome, p_version: version, p_wait_ms: waitMs, p_course_name: courseName
+    };
+    /* Only a round carries a bag, so only it names p_bag: every other count is the same
+       call the function took before the bag column existed. */
+    if (bag) args.p_bag = bag;
+    await supabaseFetch("rpc/record_course_map_usage", { method: "POST", body: JSON.stringify(args) });
   } catch (_error) {
     return json(202, { recorded: false });
   }

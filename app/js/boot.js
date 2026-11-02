@@ -33,6 +33,10 @@
   var roundUsage = app.createRoundUsage ? app.createRoundUsage({
     storage: (function () { try { return window.localStorage; } catch (e) { return null; } })(),
     distance: app.distance,
+    /* The same distance-based rule as the Studio Users screen, on the bag this device plays. */
+    bagSet: function () {
+      return window.GDBagStatus && app.bag ? window.GDBagStatus.bagStatus(app.bag.rows()).set : null;
+    },
     report: function (event) { if (window.GDCourseUsage) window.GDCourseUsage.report(event); }
   }) : null;
   if (roundUsage) roundUsage.flushStale();

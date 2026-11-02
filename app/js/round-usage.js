@@ -19,7 +19,9 @@
 
    This is the same signal the course-package request logs show (one request per hole), read
    at the source instead: it survives a dead signal mid-round and is not lost after the logs'
-   seven days. Only the outcome is sent - never a position, a time or an id.
+   seven days. Only the outcome is sent - never a position, a time or an id - plus one word
+   about the bag: "own" when the player had set their own bag by the end of the round
+   (scripts/gd-bag-status.js, read off the distances), "not-set" otherwise.
 
    A round rarely ends cleanly - phones go in pockets and apps get killed - so the summary is
    kept in localStorage as it goes and finalised by whichever comes first: the round's own
@@ -72,6 +74,8 @@
     var now = options.now || function () { return Date.now(); };
     var report = options.report || function () {};
     var distance = options.distance;
+    /* True / false for "has the player set their own bag", or null when it cannot be told. */
+    var bagSet = options.bagSet || function () { return null; };
     var current = load();
     var currentHole = null;
     var savedAt = 0;
@@ -97,8 +101,12 @@
       current = null;
       currentHole = null;
       save(true);
+      /* Asked as the round is counted: a bag set mid-round counts as set for that round. */
+      var own = null;
+      try { own = bagSet(); } catch (e) { own = null; }
       try {
-        report({ courseId: done.courseId, courseName: done.courseName, event: "round", outcome: outcome, mapType: done.mapType, version: done.version });
+        report({ courseId: done.courseId, courseName: done.courseName, event: "round", outcome: outcome, mapType: done.mapType, version: done.version,
+          bag: own === true ? "own" : own === false ? "not-set" : "" });
       } catch (e) {}
       return outcome;
     }

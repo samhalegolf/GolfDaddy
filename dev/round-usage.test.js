@@ -37,11 +37,11 @@ function memoryStorage() {
   };
 }
 
-function setup(start) {
+function setup(start, bagSet) {
   const clock = { t: start || Date.parse("2026-11-01T21:30:00Z") };
   const reported = [];
   const storage = memoryStorage();
-  const make = () => createRoundUsage({ storage, now: () => clock.t, report: e => reported.push(e), distance });
+  const make = () => createRoundUsage({ storage, now: () => clock.t, report: e => reported.push(e), distance, bagSet });
   return { clock, reported, storage, make, usage: make() };
 }
 
@@ -58,7 +58,7 @@ const COURSE = { courseId: "penrith", courseName: "Penrith Golf Club", mapType: 
   usage.end();
   check("on the course, three holes, quiet inside the hour: stopped early", () => {
     assert.strictEqual(reported.length, 1);
-    assert.deepStrictEqual(reported[0], { courseId: "penrith", courseName: "Penrith Golf Club", event: "round", outcome: "stopped-early", mapType: "object", version: "v0.1" });
+    assert.deepStrictEqual(reported[0], { courseId: "penrith", courseName: "Penrith Golf Club", event: "round", outcome: "stopped-early", mapType: "object", version: "v0.1", bag: "" });
   });
 })();
 
@@ -133,6 +133,26 @@ const COURSE = { courseId: "penrith", courseName: "Penrith Golf Club", mapType: 
     assert.strictEqual(reported.length, 1);
     assert.strictEqual(reported[0].outcome, "played");
     assert.strictEqual(reported[0].courseId, "penrith");
+  });
+})();
+
+(() => {
+  const bag = { set: false };
+  const { reported, usage } = setup(undefined, () => bag.set);
+  usage.start(COURSE);
+  usage.hole(1, holeAt(TEE.lat, TEE.lng));
+  bag.set = true;                          // set mid-round
+  usage.end();
+  usage.start(COURSE);
+  bag.set = false;
+  usage.end();
+  const broken = setup(undefined, () => { throw new Error("no bag store"); });
+  broken.usage.start(COURSE);
+  broken.usage.end();
+  check("the round says whether the bag was set when it finished, and never breaks over it", () => {
+    assert.deepStrictEqual(reported.map(e => e.bag), ["own", "not-set"]);
+    assert.strictEqual(broken.reported[0].bag, "");
+    assert.strictEqual(broken.reported[0].outcome, "off-course");
   });
 })();
 

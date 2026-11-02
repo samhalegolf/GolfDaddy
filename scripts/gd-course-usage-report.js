@@ -13,7 +13,7 @@
    player, whose map is fetched fresh on every open, isn't a stream of downloads).
    An update also keys on its version, so two genuine updates in a day both count.
 
-   report({courseId, event, origin?, mapType?, outcome?, version?, waitMs?, courseName?})
+   report({courseId, event, origin?, mapType?, outcome?, version?, waitMs?, courseName?, bag?})
      event    download | update | play | round | delivery-failed | delivery-confirmed
               (round: how an opened round went, from app/js/round-usage.js)
      origin   defaults to this device's platform (web / ios / android); the watch
@@ -67,6 +67,7 @@
     if (opts.outcome) body.outcome = String(opts.outcome);
     if (version) body.version = version;
     if (Number(opts.waitMs) > 0) body.waitMs = Math.round(Number(opts.waitMs));
+    if (opts.bag === "own" || opts.bag === "not-set") body.bag = opts.bag;
     if (opts.courseName) body.courseName = String(opts.courseName).slice(0, 120);
     try {
       fetch(ENDPOINT, {
