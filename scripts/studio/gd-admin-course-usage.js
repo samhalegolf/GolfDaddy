@@ -127,6 +127,7 @@
     function blank(id, name, info) {
       return {
         id: id, name: name, inDatabase: info ? info.inDatabase : true, currentVersion: info ? info.currentVersion : null,
+        watchMapNow: info && info.watchMapNow || null,
         plays: 0, downloads: 0, updates: 0, watchDeliveries: 0, watchConfirmed: 0, watchFailures: 0, rounds: 0,
         playsBy: {}, downloadsBy: {}, watch: {}, watchFailuresBy: {}, mapTypes: {}, outcomes: {}, results: {},
         /* Finished rounds by bag (row.bag): "own", "not-set", or "" from builds before it. */
@@ -194,6 +195,11 @@
     if (c.results["stopped-early"]) out.push({ weight: c.results["stopped-early"], text: "Stopped early on the course ×" + c.results["stopped-early"] });
     Object.keys(c.watchFailuresBy).forEach(function (key) {
       var origin = key.split("|")[0], o = key.split("|")[1];
+      /* "No watch map" is history once that watch would be sent one now: the counts are
+         daily tallies with no times, so the failure stays in the totals but is not a
+         problem left to fix. Typically a course mapped and played in the same minute,
+         asked for while its first watch map was still building. */
+      if (o === "no-package" && c.watchMapNow && c.watchMapNow[origin]) return;
       out.push({ weight: c.watchFailuresBy[key], text: watchName(origin) + ": " + (WATCH_FAILURES[o] || o) + " ×" + c.watchFailuresBy[key] });
     });
     return out.sort(function (a, b) { return b.weight - a.weight; });

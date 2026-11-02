@@ -76,6 +76,31 @@ function currentVersionLabel(course) {
   return version ? version.label : null;
 }
 
+/* Which courses a watch would be sent a map for right now, by watch make. A Garmin takes its
+   own drawn package and falls back to the Apple Watch image package
+   (app/js/watch-map-delivery.js), so either one counts for it. Read whole rather than by the
+   report's course ids: two narrow tables of a few hundred rows, and no id list in a URL.
+   Null when it cannot be read, so the page keeps every flag rather than clearing one on a
+   guess. */
+async function watchMapsNow() {
+  try {
+    const [garmin, apple] = await Promise.all([
+      supabaseFetch("course_garmin_maps?select=course_id&ready_hole_count=gt.0"),
+      supabaseFetch("course_watch_maps?select=course_id&ready_hole_count=gt.0")
+    ]);
+    const ids = rows => new Set((Array.isArray(rows) ? rows : []).map(row => row.course_id));
+    return { garmin: ids(garmin), apple: ids(apple) };
+  } catch (_error) {
+    return null;
+  }
+}
+
+function watchMapNowFor(courseId, maps) {
+  if (!maps) return null;
+  const apple = maps.apple.has(courseId);
+  return { garmin: apple || maps.garmin.has(courseId), "apple-watch": apple };
+}
+
 /* GET (admin): course_map_usage_report for ?days=7|30|90|0 (0 = all time). */
 async function readReport(req) {
   if (!hasSupabase()) return json(503, { error: "Supabase is not configured" });
@@ -83,15 +108,20 @@ async function readReport(req) {
   const asked = Number(new URL(req.url).searchParams.get("days"));
   const days = RANGES.has(asked) ? asked : 30;
   try {
-    const report = await supabaseFetch("rpc/course_map_usage_report", {
-      method: "POST",
-      body: JSON.stringify({ p_days: days })
-    });
+    const [report, maps] = await Promise.all([
+      supabaseFetch("rpc/course_map_usage_report", {
+        method: "POST",
+        body: JSON.stringify({ p_days: days })
+      }),
+      watchMapsNow()
+    ]);
     const courses = (report && Array.isArray(report.courses) ? report.courses : []).map(course => ({
       courseId: course.course_id,
       courseName: course.course_name || course.course_id,
       inDatabase: !!course.in_database,
-      currentVersion: currentVersionLabel(course)
+      currentVersion: currentVersionLabel(course),
+      /* Lets the page drop a "No watch map" flag once the map has been built since. */
+      watchMapNow: watchMapNowFor(course.course_id, maps)
     }));
     return json(200, {
       days,

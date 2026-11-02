@@ -101,6 +101,13 @@ function post(body, headers) {
   global.fetch = async (url, options = {}) => {
     url = String(url);
     if (url.endsWith("/auth/v1/user")) return new Response(JSON.stringify({ id: "u1", email: "samhalegolf@gmail.com" }), { status: 200 });
+    if (url.includes("/rest/v1/course_garmin_maps?")) {
+      assert.ok(url.includes("ready_hole_count=gt.0"), "only packages with holes count as a map");
+      return { ok: true, status: 200, text: async () => JSON.stringify([{ course_id: "lite-only" }]) };
+    }
+    if (url.includes("/rest/v1/course_watch_maps?")) {
+      return { ok: true, status: 200, text: async () => JSON.stringify([{ course_id: "royal-test-gc" }]) };
+    }
     assert.ok(url.endsWith("/rest/v1/rpc/course_map_usage_report"), url);
     asked = JSON.parse(options.body);
     return { ok: true, status: 200, text: async () => JSON.stringify({
@@ -120,13 +127,26 @@ function post(body, headers) {
   assert.deepStrictEqual(report.rows, rows);
   assert.strictEqual(report.daily.length, 1);
   assert.deepStrictEqual(report.courses, [
-    { courseId: "royal-test-gc", courseName: "Royal Test GC", inDatabase: true, currentVersion: "v2.1" },
-    { courseId: "lite-only", courseName: "Lite Only", inDatabase: true, currentVersion: "v0.3" },
-    { courseId: "unmapped-links", courseName: "Unmapped Links", inDatabase: false, currentVersion: null }
-  ], "the current label follows the same rule the package endpoint uses");
+    { courseId: "royal-test-gc", courseName: "Royal Test GC", inDatabase: true, currentVersion: "v2.1",
+      watchMapNow: { garmin: true, "apple-watch": true } },
+    { courseId: "lite-only", courseName: "Lite Only", inDatabase: true, currentVersion: "v0.3",
+      watchMapNow: { garmin: true, "apple-watch": false } },
+    { courseId: "unmapped-links", courseName: "Unmapped Links", inDatabase: false, currentVersion: null,
+      watchMapNow: { garmin: false, "apple-watch": false } }
+  ], "the current label follows the same rule the package endpoint uses, and a Garmin counts either package as a map");
 
   await courseUsage(new Request("https://example.test/api/course-usage?days=12345", { headers: { Authorization: "Bearer t" } }), {});
   assert.deepStrictEqual(asked, { p_days: 30 }, "an unknown range falls back to 30 days");
+
+  /* The watch-map tables failing must not fail the report, or clear a flag on a guess. */
+  const reportFetch = global.fetch;
+  global.fetch = async (url, options = {}) => {
+    if (String(url).includes("_maps?")) return { ok: false, status: 400, text: async () => "{}" };
+    return reportFetch(url, options);
+  };
+  res = await courseUsage(new Request("https://example.test/api/course-usage?days=7", { headers: { Authorization: "Bearer t" } }), {});
+  assert.strictEqual(res.status, 200, "the report still loads");
+  assert.ok((await res.json()).courses.every(c => c.watchMapNow === null), "unknown, so every watch flag stays");
 
   global.fetch = realFetch;
   console.log("course-usage: all checks passed");
