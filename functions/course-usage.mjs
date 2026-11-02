@@ -135,13 +135,14 @@ export default async function courseUsage(req, context) {
   const courseName = String(payload.courseName || "").replace(/\s+/g, " ").trim().slice(0, 120);
 
   try {
-    await supabaseFetch("rpc/record_course_map_usage", {
-      method: "POST",
-      body: JSON.stringify({
-        p_course_id: courseId, p_event: event, p_origin: origin, p_country: countryOf(context),
-        p_map_type: mapType, p_outcome: outcome, p_version: version, p_wait_ms: waitMs, p_course_name: courseName, p_bag: bag
-      })
-    });
+    const args = {
+      p_course_id: courseId, p_event: event, p_origin: origin, p_country: countryOf(context),
+      p_map_type: mapType, p_outcome: outcome, p_version: version, p_wait_ms: waitMs, p_course_name: courseName
+    };
+    /* Only a round carries a bag, so only it names p_bag: every other count is the same
+       call the function took before the bag column existed. */
+    if (bag) args.p_bag = bag;
+    await supabaseFetch("rpc/record_course_map_usage", { method: "POST", body: JSON.stringify(args) });
   } catch (_error) {
     return json(202, { recorded: false });
   }
