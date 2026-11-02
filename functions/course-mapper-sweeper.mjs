@@ -3,7 +3,7 @@
 
 import { createSupabaseStorage } from "./lib/gd-supabase-storage.mjs";
 import { purgeMapperDebugCaptures } from "./lib/gd-mapper-debug-captures.mjs";
-import { sendReadyCourseMapNotifications } from "./course-map-notify.mjs";
+import { sendReadyCourseMapNotifications, sendReadyGarminMapNotifications } from "./course-map-notify.mjs";
 
 /* The mapper-debug captures are temporary by contract (lib/gd-mapper-debug-captures.mjs):
    date folders older than the retention window go here, on the same schedule that wakes
@@ -25,6 +25,8 @@ export default async function courseMapperSweeper(req) {
      On this schedule because a finished map is exactly what this sweeper exists to chase.
      First, and independent of the worker ping: a missed ping must not hold up an email. */
   const notifications = await sendReadyCourseMapNotifications();
+  /* And players who asked to be told when a course's Garmin map finished building. */
+  notifications.garmin = await sendReadyGarminMapNotifications();
   let origin = "";
   try { origin = new URL(req && req.url).origin; } catch (error) { origin = ""; }
   if (!origin || /^https?:\/\/(localhost|127\.)/.test(origin)) {

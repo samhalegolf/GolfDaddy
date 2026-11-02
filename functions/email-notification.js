@@ -315,7 +315,33 @@ async function sendCourseMapReadyEmail(options){
   }, "Email provider rejected the course-ready message");
 }
 
+/* "Your Garmin map is ready": the same shape as the course-ready email, for a player who
+   asked while the course's Garmin package was still being built (course-map-notify.mjs). */
+async function sendGarminMapReadyEmail(options){
+  options = options || {};
+  var to = email(options.to);
+  if(!to)return {sent: false, reason: "invalid_email"};
+  var siteUrl = env("CLARITY_SITE_URL") || templates.DEFAULT_SITE;
+  var ctaUrl = siteUrl;
+  if(!options.hasAccount){
+    var signup = new URL(siteUrl);
+    signup.searchParams.set("claritySignup", "1");
+    signup.searchParams.set("email", to);
+    ctaUrl = signup.toString();
+  }
+  return deliver("garmin_map_ready", {
+    to: to,
+    siteUrl: siteUrl,
+    recipientName: options.recipientName,
+    actorName: "Clarity Golf",
+    courseName: options.courseName,
+    hasAccount: !!options.hasAccount,
+    ctaUrl: ctaUrl
+  }, "Email provider rejected the Garmin-map-ready message");
+}
+
 exports.sendCourseMapReadyEmail = sendCourseMapReadyEmail;
+exports.sendGarminMapReadyEmail = sendGarminMapReadyEmail;
 exports.sendCompedAccessEmail = sendCompedAccessEmail;
 exports.sendAccountSetupEmail = sendAccountSetupEmail;
 exports.sendSignupWelcomeEmail = sendSignupWelcomeEmail;

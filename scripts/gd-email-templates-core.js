@@ -269,6 +269,23 @@
       }
     },
     {
+      id: "garmin_map_ready",
+      eventType: "garmin_map_ready",
+      label: "Your Garmin map is ready",
+      category: "requested",
+      recipient: "Anyone who typed their email address while their Garmin waited for a course's Garmin map to be built - an account is not needed to ask",
+      trigger: "Their Garmin asked for a course whose Garmin map was still being built (usually a course mapped minutes earlier) and they tapped \"Email me when it's ready\". Sent by the course-mapper sweeper once course_garmin_maps holds a map the watch can be sent.",
+      gating: "Once per request - the row is stamped when sent. Only stored when the server confirms a build is under way. Asked for by the player, so it is not held back by EMAIL_NOTIFICATIONS_ENABLED.",
+      sender: "functions/course-mapper-sweeper.mjs → functions/course-map-notify.mjs → functions/email-notification.js",
+      cta: "Open Clarity for an address with an account; Create your free account, linking to the sign-up form, for one without.",
+      sample: {
+        recipientName: "Alex Fenwick",
+        actorName: "Clarity Golf",
+        courseName: "Springfield Country Club",
+        hasAccount: true
+      }
+    },
+    {
       id: "account_activity",
       eventType: "account_activity",
       label: "Connected-account activity",
@@ -590,6 +607,24 @@
         ctaLabel: t("email.openClarity")
       };
     }
+    if (eventType === "garmin_map_ready") {
+      var garminCourse = text(input.courseName, 160);
+      var garminTitle = garminCourse ? t("email.garminReady.subject", { course: garminCourse }) : t("email.garminReady.unnamedSubject");
+      if (!input.hasAccount) {
+        return {
+          subject: garminTitle,
+          title: garminTitle,
+          detail: garminCourse ? t("email.garminReady.signupDetail", { course: garminCourse }) : t("email.garminReady.unnamedSignupDetail"),
+          ctaLabel: t("email.courseReady.signupCta")
+        };
+      }
+      return {
+        subject: garminTitle,
+        title: garminTitle,
+        detail: garminCourse ? t("email.garminReady.detail", { course: garminCourse }) : t("email.garminReady.unnamedDetail"),
+        ctaLabel: t("email.openClarity")
+      };
+    }
     if (eventType === "password_recovery") {
       return {
         subject: t("email.reset.subject"),
@@ -724,6 +759,7 @@
     var detailHtml = escapeHTML(message.detail).replace(/\r?\n/g, "<br>");
     var footer = lang.t(isServiceEventType(message.eventType) ? "email.footerService"
       : message.eventType === "course_map_ready" ? "email.footerCourseReady"
+        : message.eventType === "garmin_map_ready" ? "email.footerGarminReady"
         : "email.footerActivity");
     var updateFrom = lang.t("email.updateFrom", { actor: message.actorName });
     var storeCta = storeBadges(message, site, lang);
