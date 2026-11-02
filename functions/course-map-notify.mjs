@@ -17,7 +17,15 @@
    in Studio notifies people exactly like one a later scan fixed.
 
    An address with no Clarity account is asked to sign up in that email: the course is ready,
-   and an account is how they play it. */
+   and an account is how they play it.
+
+   The same POST with {kind: "garmin"} is "email me when my Garmin map is ready": offered by
+   the app when a Garmin asked for a course whose Garmin package is still being built (a
+   course mapped and teed off on in the same minute - Springfield, 2026-11-02). It is only
+   stored when the server agrees a build is under way: the course has a published map and no
+   usable Garmin package yet. Those rows live in garmin_map_notify_requests, and
+   sendReadyGarminMapNotifications() emails them from the same sweep once course_garmin_maps
+   holds a package a watch can be sent. */
 
 import { buildCoursePackage } from "./course-package.mjs";
 import emailNotification from "./email-notification.js";
@@ -26,6 +34,7 @@ import authUtils from "./auth-utils.js";
 import { courseSlug } from "./lib/gd-course-slug.mjs";
 
 const TABLE = "course_map_notify_requests";
+const GARMIN_TABLE = "garmin_map_notify_requests";
 /* An address can wait on a handful of courses, not the whole directory: every pending course
    costs the sweeper a package read on every run. */
 const MAX_PENDING_PER_EMAIL = 20;
@@ -78,17 +87,30 @@ export default async function courseMapNotify(req) {
   const email = cleanEmail(payload && payload.email);
   if (!email) return json(400, { error: "Enter a valid email address" });
   const courseName = text(payload.courseName, 160);
+  const garmin = payload.kind === "garmin";
+  const table = garmin ? GARMIN_TABLE : TABLE;
   const user = await verifiedUser(req);
 
+  if (garmin) {
+    let state;
+    try { state = await garminBuildState(courseId); } catch (error) {
+      console.warn("course-map-notify: could not check the Garmin build", error && error.message || error);
+      return json(502, { error: "Could not save your request" });
+    }
+    /* Already built between the phone asking and the player tapping: nothing to wait for. */
+    if (state === "ready") return json(200, { requested: false, ready: true, courseId });
+    if (state !== "building") return json(409, { error: "This course has no map to build a Garmin map from yet" });
+  }
+
   try {
-    const pending = await supabaseFetch(TABLE + "?select=course_id&email=eq." + encodeURIComponent(email) + "&notified_at=is.null&limit=" + (MAX_PENDING_PER_EMAIL + 1));
+    const pending = await supabaseFetch(table + "?select=course_id&email=eq." + encodeURIComponent(email) + "&notified_at=is.null&limit=" + (MAX_PENDING_PER_EMAIL + 1));
     const list = Array.isArray(pending) ? pending : [];
     if (list.length >= MAX_PENDING_PER_EMAIL && !list.some(row => row.course_id === courseId)) {
       return json(429, { error: "That address is already waiting on " + MAX_PENDING_PER_EMAIL + " courses" });
     }
     /* An upsert, so asking again is harmless, and asking again after being told re-arms the
        row: notified_at goes back to null. */
-    await supabaseFetch(TABLE + "?on_conflict=course_id,email", {
+    await supabaseFetch(table + "?on_conflict=course_id,email", {
       method: "POST",
       headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
       body: JSON.stringify({
@@ -108,6 +130,22 @@ export default async function courseMapNotify(req) {
   }
 }
 
+/* A Garmin package a watch can be sent: the same test the phone's GET applies before it
+   hands a package over (course-watch-maps.mjs garminReport). */
+const GARMIN_USABLE = "garmin_package_version=gt.0&ready_hole_count=gt.0";
+
+/* "ready" (a usable Garmin package exists), "building" (the course has a published map and
+   no usable package yet - the state the phone's GET answers "building" for), or "none". */
+async function garminBuildState(courseId) {
+  const id = encodeURIComponent(courseId);
+  const [built, map] = await Promise.all([
+    supabaseFetch("course_garmin_maps?select=course_id&course_id=eq." + id + "&" + GARMIN_USABLE + "&limit=1"),
+    supabaseFetch("course_maps?select=course_id&course_id=eq." + id + "&published=eq.true&limit=1")
+  ]);
+  if (Array.isArray(built) && built.length) return "ready";
+  return Array.isArray(map) && map.length ? "building" : "none";
+}
+
 /* Whether an address already has a Clarity account, so the ready email can say "open
    Clarity" to a player and "sign up" to everyone else. Unknown counts as no account: the
    worst case is a player being offered a sign-up form that recognises their address. */
@@ -125,42 +163,75 @@ export async function sendReadyCourseMapNotifications() {
     return { checked: 0, sent: 0, reason: String(error && error.message || error).slice(0, 200) };
   }
   rows = Array.isArray(rows) ? rows : [];
+  const byCourse = groupByCourse(rows);
+  const tally = { sent: 0, failed: 0 };
+  for (const [courseId, waiting] of byCourse) {
+    let pkg = null;
+    try { pkg = await buildCoursePackage(courseId); } catch (error) { pkg = null; }
+    if (!pkg || !READY_STATUSES.has(pkg.status) || pkg.readiness !== "complete") continue;
+    await emailWaiting(TABLE, courseId, waiting, emailNotification.sendCourseMapReadyEmail, tally);
+  }
+  return { checked: byCourse.size, sent: tally.sent, failed: tally.failed };
+}
+
+/* Run by the sweeper beside the course-ready pass. One read for every waiting course's Garmin
+   package rather than one per course. Returns a small summary; never throws. */
+export async function sendReadyGarminMapNotifications() {
+  if (!hasSupabase()) return { checked: 0, sent: 0, reason: "no supabase" };
+  let rows, built;
+  try {
+    rows = await supabaseFetch(GARMIN_TABLE + "?select=id,course_id,course_name,email,recipient_name&notified_at=is.null&order=created_at.asc&limit=" + SWEEP_BATCH);
+    rows = Array.isArray(rows) ? rows : [];
+    const byCourse = groupByCourse(rows);
+    if (!byCourse.size) return { checked: 0, sent: 0, failed: 0 };
+    const ids = [...byCourse.keys()].map(id => encodeURIComponent(id)).join(",");
+    built = await supabaseFetch("course_garmin_maps?select=course_id&" + GARMIN_USABLE + "&course_id=in.(" + ids + ")");
+    const ready = new Set((Array.isArray(built) ? built : []).map(row => row.course_id));
+    const tally = { sent: 0, failed: 0 };
+    for (const [courseId, waiting] of byCourse) {
+      if (ready.has(courseId)) await emailWaiting(GARMIN_TABLE, courseId, waiting, emailNotification.sendGarminMapReadyEmail, tally);
+    }
+    return { checked: byCourse.size, sent: tally.sent, failed: tally.failed };
+  } catch (error) {
+    return { checked: 0, sent: 0, reason: String(error && error.message || error).slice(0, 200) };
+  }
+}
+
+function groupByCourse(rows) {
   const byCourse = new Map();
   for (const row of rows) {
     if (!byCourse.has(row.course_id)) byCourse.set(row.course_id, []);
     byCourse.get(row.course_id).push(row);
   }
-  let sent = 0, failed = 0;
-  for (const [courseId, waiting] of byCourse) {
-    let pkg = null;
-    try { pkg = await buildCoursePackage(courseId); } catch (error) { pkg = null; }
-    if (!pkg || !READY_STATUSES.has(pkg.status) || pkg.readiness !== "complete") continue;
-    const courseName = (waiting.find(row => row.course_name) || {}).course_name || "";
-    for (const row of waiting) {
-      let result;
-      try {
-        result = await emailNotification.sendCourseMapReadyEmail({ to: row.email, recipientName: row.recipient_name, courseName, hasAccount: await hasAccount(row.email) });
-      } catch (error) {
-        failed++;
-        console.warn("course-map-notify: send failed for " + courseId, error && error.status, error && error.message);
-        /* A rejection the provider will repeat (a bad address) is stamped so it is not retried
-           every three minutes forever. Rate limits and outages stay pending for the next run. */
-        const status = Number(error && error.status) || 0;
-        if (status >= 400 && status < 500 && status !== 429) await markNotified(row.id);
-        continue;
-      }
-      /* Email not configured: leave the row waiting rather than claim it was sent. */
-      if (!result || !result.sent) { failed++; continue; }
-      await markNotified(row.id);
-      sent++;
-    }
-  }
-  return { checked: byCourse.size, sent, failed };
+  return byCourse;
 }
 
-async function markNotified(id) {
+/* Emails everyone waiting on one ready course and stamps each row that went. */
+async function emailWaiting(table, courseId, waiting, send, tally) {
+  const courseName = (waiting.find(row => row.course_name) || {}).course_name || "";
+  for (const row of waiting) {
+    let result;
+    try {
+      result = await send({ to: row.email, recipientName: row.recipient_name, courseName, hasAccount: await hasAccount(row.email) });
+    } catch (error) {
+      tally.failed++;
+      console.warn("course-map-notify: send failed for " + courseId, error && error.status, error && error.message);
+      /* A rejection the provider will repeat (a bad address) is stamped so it is not retried
+         every three minutes forever. Rate limits and outages stay pending for the next run. */
+      const status = Number(error && error.status) || 0;
+      if (status >= 400 && status < 500 && status !== 429) await markNotified(table, row.id);
+      continue;
+    }
+    /* Email not configured: leave the row waiting rather than claim it was sent. */
+    if (!result || !result.sent) { tally.failed++; continue; }
+    await markNotified(table, row.id);
+    tally.sent++;
+  }
+}
+
+async function markNotified(table, id) {
   try {
-    await supabaseFetch(TABLE + "?id=eq." + encodeURIComponent(id), {
+    await supabaseFetch(table + "?id=eq." + encodeURIComponent(id), {
       method: "PATCH",
       headers: { Prefer: "return=minimal" },
       body: JSON.stringify({ notified_at: new Date().toISOString() })

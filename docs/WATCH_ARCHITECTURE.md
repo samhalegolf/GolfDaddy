@@ -279,6 +279,12 @@ touches the Apple Watch package (`course_watch_maps`).
     every 15 seconds and counts nothing. This is the course a player maps and tees off on in
     the same minute (Springfield, 2 Nov 2026: asked three seconds into the first build). After
     five minutes of "building" it is reported as `no-package` and backs off like any failure.
+    The first "building" also offers the player an email when the map is ready
+    (`scripts/gd-course-map-notify.js`, wired in `app/js/native-round-bridge.js`; any address,
+    no account needed). The server keeps the request only if a build really is under way, in
+    `garmin_map_notify_requests`, and the course-mapper sweeper sends it once
+    `course_garmin_maps` holds a package a watch can be sent. The card comes down if the map
+    reaches the watch first.
     Studio's Course Usage drops a "No watch map" flag once that watch would now be sent a map.
   - **Package behind:** the older one is still served.
   - **Apple Watch:** keeps the image package and its Studio "Generate Watch Maps" bake.

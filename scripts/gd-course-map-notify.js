@@ -16,6 +16,13 @@
  * row is linked to the account). The email itself goes out from the server
  * (course-mapper-sweeper.mjs) once the course has a playable map, however it got one, and asks
  * an address with no account to sign up.
+ *
+ * offer(course, {garmin: true}) is the same card for a Garmin waiting on a course's Garmin map
+ * while it is still being built (the /app/ shell's native-round-bridge.js calls it when the
+ * watch delivery hears "building" - a course mapped and teed off on in the same minute). The
+ * request goes up with kind "garmin" and the server only keeps it if a build really is under
+ * way; if the map finished in the meantime it says so and the card says the map is on its
+ * way. dismiss(courseId, "garmin") takes the card down once the map reaches the watch.
  */
 (function () {
   "use strict";
@@ -79,14 +86,20 @@
 
   function validEmail(value) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value); }
 
-  async function sendRequest(ref, email) {
+  /* Garmin requests are remembered apart from course ones: asking about a course's map says
+     nothing about its Garmin map, and the other way round. */
+  function requestKey(ref, garmin) { return garmin ? "garmin:" + ref.courseId : ref.courseId; }
+
+  async function sendRequest(ref, email, garmin) {
     var headers = { "Content-Type": "application/json" };
     var token = await accessToken();
     if (token) headers.Authorization = "Bearer " + token;
+    var body = { courseId: ref.courseId, courseName: ref.courseName, email: email };
+    if (garmin) body.kind = "garmin";
     var res = await fetch("/api/course-map-notify", {
       method: "POST",
       headers: headers,
-      body: JSON.stringify({ courseId: ref.courseId, courseName: ref.courseName, email: email })
+      body: JSON.stringify(body)
     });
     var body = await res.json().catch(function () { return null; });
     if (!res.ok) {
@@ -94,8 +107,10 @@
       error.status = res.status;
       throw error;
     }
-    rememberRequested(ref.courseId);
     writeJson(EMAIL_KEY, email);
+    /* Built while the player was typing: nothing was stored, so nothing is remembered. */
+    if (body && body.ready) return body;
+    rememberRequested(requestKey(ref, garmin));
     return body || {};
   }
 
@@ -128,17 +143,31 @@
     try { var el = document.getElementById(CARD_ID); if (el) el.classList.add("hidden"); } catch (e) {}
   }
 
-  function showDone(card, name, email) {
-    card.innerHTML = "<strong>" + H("mapNotify.letYouKnow") + "</strong><span>"
-      + H(name ? "mapNotify.willEmailAddress" : "mapNotify.willEmailAddressThis", { email: email, course: name }) + "</span>";
+  function showDone(card, name, email, garmin) {
+    var line = garmin
+      ? H(name ? "mapNotify.willEmailGarmin" : "mapNotify.willEmailGarminThis", { email: email, course: name })
+      : H(name ? "mapNotify.willEmailAddress" : "mapNotify.willEmailAddressThis", { email: email, course: name });
+    card.innerHTML = "<strong>" + H("mapNotify.letYouKnow") + "</strong><span>" + line + "</span>";
+    setTimeout(hide, 4000);
+  }
+
+  function showGarminReady(card) {
+    card.innerHTML = "<strong>" + H("mapNotify.garminReady") + "</strong>";
     setTimeout(hide, 4000);
   }
 
   /* The card's wording. A failed scan says the map is not available; a partial one says what
      is missing. `incomplete` is {mapped, expected, missing:[holeNumbers]} from the server
      package's readiness fields. */
-  function wording(ref, incomplete) {
+  function wording(ref, incomplete, garmin) {
     var name = ref.courseName;
+    if (garmin) {
+      return {
+        title: H(name ? "mapNotify.garminBuilding" : "mapNotify.garminBuildingThis", { course: name }),
+        detail: H("mapNotify.garminDetail"),
+        onList: H("mapNotify.garminOnList")
+      };
+    }
     if (incomplete) {
       var missing = Array.isArray(incomplete.missing) ? incomplete.missing.filter(function (n) { return Number.isFinite(Number(n)); }) : [];
       return {
@@ -162,12 +191,14 @@
     var ref = courseRef(course);
     var offerId = ++currentOffer;
     var name = ref.courseName;
-    var incomplete = opts && opts.incomplete ? opts.incomplete : null;
-    var words = wording(ref, incomplete);
+    var garmin = !!(opts && opts.garmin);
+    var incomplete = !garmin && opts && opts.incomplete ? opts.incomplete : null;
+    var words = wording(ref, incomplete, garmin);
     var card = ensureCard();
     card.dataset.gdNotifyOffer = String(offerId);
-    card.dataset.gdNotifyKind = incomplete ? "incomplete" : "failed";
-    if (!ref.courseId || alreadyRequested(ref.courseId)) {
+    card.dataset.gdNotifyKind = garmin ? "garmin" : incomplete ? "incomplete" : "failed";
+    card.dataset.gdNotifyCourse = ref.courseId;
+    if (!ref.courseId || alreadyRequested(requestKey(ref, garmin))) {
       card.innerHTML = "<strong>" + words.title + "</strong><span>" + (ref.courseId ? words.onList : words.detail) + "</span>"
         + '<div class="gdCourseMapNotifyActions"><button type="button" data-gd-notify-close>' + H("mapNotify.ok") + '</button></div>';
     } else {
@@ -183,8 +214,9 @@
         if (!validEmail(email)) { toastSafe(L("auth.errValidEmail")); input.focus(); return; }
         go.disabled = true;
         try {
-          var result = await sendRequest(ref, email);
-          showDone(card, name, result.email || email);
+          var result = await sendRequest(ref, email, garmin);
+          if (result.ready) showGarminReady(card);
+          else showDone(card, name, result.email || email, garmin);
         } catch (e) {
           go.disabled = false;
           toastSafe(e && e.message || L("mapNotify.couldNotSave"));
@@ -199,5 +231,15 @@
     return offerId;
   }
 
-  window.GDCourseMapNotify = { offer: offer, hide: hide };
+  /* Takes the card down only if it is still the one for this course and kind - a card the
+     player has since moved on from (another course, a failed scan) is left alone. */
+  function dismiss(courseId, kind) {
+    var el = document.getElementById(CARD_ID);
+    if (!el || el.classList.contains("hidden")) return false;
+    if (el.dataset.gdNotifyCourse !== String(courseId || "") || el.dataset.gdNotifyKind !== String(kind || "")) return false;
+    hide();
+    return true;
+  }
+
+  window.GDCourseMapNotify = { offer: offer, hide: hide, dismiss: dismiss };
 })();

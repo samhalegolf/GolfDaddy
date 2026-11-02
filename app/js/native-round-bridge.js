@@ -23,7 +23,29 @@
     function deliverMaps(scene) {
       var key = scene && scene.course && scene.course.key;
       if (!key || !window.GDWatchMapDelivery) return;
-      try { window.GDWatchMapDelivery.deliver(key); } catch (e) {}
+      try {
+        var pending = window.GDWatchMapDelivery.deliver(key);
+        if (pending && typeof pending.then === "function") {
+          pending.then(function (result) { garminMapWait(scene.course, result); }, function () {});
+        }
+      } catch (e) {}
+    }
+
+    /* A Garmin waiting on a Garmin map that is still being built (a course mapped and teed
+       off on in the same minute): offer to email the player when it is ready, once per
+       course this session, and take the offer down when the map reaches the watch. The
+       server keeps the request only if a build really is under way (course-map-notify.mjs). */
+    var garminOffered = Object.create(null);
+    function garminMapWait(course, result) {
+      var notify = window.GDCourseMapNotify;
+      var key = course && course.key;
+      if (!notify || !key || !result) return;
+      if (result.reason === "building" && !garminOffered[key]) {
+        garminOffered[key] = true;
+        try { notify.offer({ courseId: key, courseName: course.name || "" }, { garmin: true }); } catch (e) {}
+      } else if (result.delivered && garminOffered[key]) {
+        try { notify.dismiss(key, "garmin"); } catch (e) {}
+      }
     }
 
     /* The bag and the saved My Bubble, so the wrist can size a Bubble without

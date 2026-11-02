@@ -45,6 +45,12 @@ function stubFetch(world) {
     const method = String(options.method || "GET").toUpperCase();
     if (method !== "GET") { world.writes.push({ table, method, query: rest, body: options.body ? JSON.parse(options.body) : null }); return jsonResponse(201, null); }
     if (table === "course_map_notify_requests") return jsonResponse(200, world.requests || []);
+    if (table === "garmin_map_notify_requests") return jsonResponse(200, world.garminRequests || []);
+    /* Usable Garmin packages: world.garminBuilt lists the course ids that have one. */
+    if (table === "course_garmin_maps") {
+      world.garminQueries = (world.garminQueries || []).concat(rest);
+      return jsonResponse(200, (world.garminBuilt || []).filter(id => rest.includes("eq." + id) || /in\.\(/.test(rest) && rest.includes(id)).map(id => ({ course_id: id })));
+    }
     if (table === "app_accounts") return jsonResponse(200, (world.accounts || []).filter(a => rest.includes("email=eq." + encodeURIComponent(a.email))));
     if (table === "course_maps") return jsonResponse(200, rest.includes("course_id=eq.pupuke") ? (world.maps || []) : []);
     if (table === "course_mapper_jobs") return jsonResponse(200, world.mapperJobs || []);
@@ -175,6 +181,67 @@ test("one address cannot queue the whole directory", async () => {
   assert.strictEqual((await mod.default(req)).status, 429);
   const again = new Request("https://x.test/api/course-map-notify", { method: "POST", body: JSON.stringify({ courseId: "course-3", email: "a@example.com" }) });
   assert.strictEqual((await mod.default(again)).status, 200, "re-asking for a course already on the list is fine");
+});
+
+function garminPost(body, headers) {
+  return new Request("https://x.test/api/course-map-notify", { method: "POST", headers: headers || {}, body: JSON.stringify(Object.assign({ kind: "garmin" }, body)) });
+}
+
+test("a Garmin request is kept when the course has a map and its Garmin map is still building", async () => {
+  /* Springfield, 2026-11-02: mapped and teed off on in the same minute. */
+  const world = { user: null, maps: [READY_MAP], garminBuilt: [], requests: [] };
+  stubFetch(world);
+  const res = await mod.default(garminPost({ courseId: "pupuke", courseName: "Pupuke", email: "guest@example.com" }));
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(await res.json(), { requested: true, courseId: "pupuke", email: "guest@example.com" });
+  const write = world.writes.find(w => w.method === "POST");
+  assert.strictEqual(write.table, "garmin_map_notify_requests", "its own table, never the course-ready one");
+  assert.ok(write.query.includes("on_conflict=course_id,email"));
+  assert.strictEqual(write.body.email, "guest@example.com");
+  assert.ok(world.garminQueries.every(q => q.includes("garmin_package_version=gt.0") && q.includes("ready_hole_count=gt.0")),
+    "only a package a watch can be sent counts as built");
+});
+
+test("a Garmin request for a map that finished meanwhile says so and stores nothing", async () => {
+  const world = { user: null, maps: [READY_MAP], garminBuilt: ["pupuke"], requests: [] };
+  stubFetch(world);
+  const res = await mod.default(garminPost({ courseId: "pupuke", email: "guest@example.com" }));
+  assert.strictEqual(res.status, 200);
+  assert.deepStrictEqual(await res.json(), { requested: false, ready: true, courseId: "pupuke" });
+  assert.strictEqual(world.writes.length, 0);
+});
+
+test("a Garmin request for a course with no map is refused: there is no build to wait for", async () => {
+  const world = { user: null, maps: [], garminBuilt: [], requests: [] };
+  stubFetch(world);
+  const res = await mod.default(garminPost({ courseId: "nowhere", email: "guest@example.com" }));
+  assert.strictEqual(res.status, 409);
+  assert.strictEqual(world.writes.length, 0);
+});
+
+test("the Garmin sweep emails only courses whose Garmin map is now built, and stamps its own table", async () => {
+  const world = { garminBuilt: ["springfield"], accounts: [{ email: "a@example.com" }], garminRequests: [
+    { id: "g1", course_id: "springfield", course_name: "Springfield Country Club", email: "a@example.com", recipient_name: "Alex" },
+    { id: "g2", course_id: "springfield", course_name: null, email: "b@example.com" },
+    { id: "g3", course_id: "still-building", course_name: "Still Building", email: "c@example.com" }
+  ] };
+  stubFetch(world);
+  const result = await mod.sendReadyGarminMapNotifications();
+  assert.deepStrictEqual(result, { checked: 2, sent: 2, failed: 0 });
+  assert.deepStrictEqual(world.emails.map(e => e.to[0]), ["a@example.com", "b@example.com"]);
+  assert.strictEqual(world.emails[0].subject, "Your Garmin map for Springfield Country Club is ready");
+  assert.ok(world.emails[0].html.includes(">Open Clarity<"));
+  assert.ok(world.emails[1].html.includes(">Create your free account<"), "an address with no account is asked to sign up");
+  const stamps = world.writes.filter(w => w.method === "PATCH");
+  assert.deepStrictEqual(stamps.map(w => w.table + ":" + w.query.split("id=eq.")[1]), ["garmin_map_notify_requests:g1", "garmin_map_notify_requests:g2"]);
+  assert.strictEqual(world.garminQueries.length, 1, "one read for every waiting course");
+});
+
+test("the Garmin sweep with nobody waiting reads nothing else", async () => {
+  const world = { garminRequests: [] };
+  stubFetch(world);
+  assert.deepStrictEqual(await mod.sendReadyGarminMapNotifications(), { checked: 0, sent: 0, failed: 0 });
+  assert.strictEqual(world.garminQueries, undefined);
 });
 
 (async () => {
