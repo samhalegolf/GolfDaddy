@@ -1171,3 +1171,8 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
 #gdStudioShellRoot .gdHubTable td { vertical-align: top; }
 #gdStudioShellRoot .gdHubActions { white-space: nowrap; }
 #gdStudioShellRoot .gdHubActions button { margin-right: 4px; }
+
+/* Marketing › Websites: the website builder, framed from Clarity Booking. Tall enough for the
+   editor's three columns; the builder scrolls inside its own frame. */
+#gdStudioShellRoot .gdSitesRoot { display: grid; gap: 12px; }
+#gdStudioShellRoot .gdSitesFrame { width: 100%; height: calc(100vh - 160px); min-height: 640px; border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 12px; background: #fff; }
