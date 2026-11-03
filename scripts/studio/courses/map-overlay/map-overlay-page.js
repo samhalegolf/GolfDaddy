@@ -375,8 +375,10 @@
   var STYLE = {
     fairway: { color: "#3cff8d", weight: 2, fillColor: "#3cff8d", fillOpacity: 0.22 },
     fairwaySelected: { color: "#ffffff", weight: 3, fillColor: "#3cff8d", fillOpacity: 0.35 },
-    hole: { color: "#3cff8d", weight: 3, dashArray: "8 6" },
-    holeSelected: { color: "#ffffff", weight: 4, dashArray: "8 6" },
+    /* A hole line - a hole's allocation, tee to green - in a colour nothing else uses, so it
+       never reads as a fairway edge. */
+    hole: { color: "#ff4dd2", weight: 3, opacity: 0.95, dashArray: "10 5", lineCap: "round" },
+    holeSelected: { color: "#ffffff", weight: 4, dashArray: "10 5", lineCap: "round" },
     green: { color: "#b7ff5c", weight: 2, fillColor: "#b7ff5c", fillOpacity: 0.4 },
     greenSelected: { color: "#ffffff", weight: 3, fillColor: "#b7ff5c", fillOpacity: 0.5 },
     tee: { color: "#6cc7ff", weight: 2, fillColor: "#6cc7ff", fillOpacity: 0.4 },
@@ -612,7 +614,7 @@
       "<strong>Link</strong>: click the shapes that belong to one hole (click again to drop one), then <strong>Enter</strong> or <strong>Space</strong> links them and the next click starts a new link. Or drag the marker over them: every shape the stroke touches joins the pick, and Enter or Space links it the same way. A link only says they are one hole - it never numbers them. One shape and Enter takes it out of its link; <strong>Esc</strong> clears the pick. " +
       "<strong>Number</strong>: click each hole's fairway (or any shape on it) and the whole hole takes the <em>Next hole</em> number; with <em>Auto</em> on, the number then moves on, so 1 to 18 is eighteen clicks. Each hole shows one number on its fairway - click it with any tool to type a different one. A number on two holes shows red. The mapper keeps every numbered hole as numbered and works the rest out around it, so one number - hole 1 by the clubhouse, say - is enough to set the rest straight. " +
       "<strong>Play order</strong>: where the mapper gets a site's courses wrong, say them by hand. <strong>+ New play order</strong>, name it, then click its holes in the order they are played - an OSM hole line, or any shape of a hole you have linked (link a hole's tee and green first). Click a hole again to take it out. A hole can be in several play orders, so the same nines played in a different order are just another play order. With play orders on a ready overlay, the mapper publishes exactly those courses under those names. " +
-      "<strong>Measure</strong>: a measuring tape. Click on the green, then on the tee - click on the way to bend it round a dogleg; Backspace takes back a point, Esc takes the tape up. <strong>Manual resolver</strong> lists the scorecard's holes and distances down the side: a hole glows when the tape is within " + TAPE_NEAR_M + "m of its distance, and green within " + TAPE_MATCH_M + "m. Click a hole with the tape laid and it gets the green and the fairway the tape crosses most, and the tee under the tape's end - or a new tee dropped there - all linked as that hole. Any other hole carrying that number loses it. " +
+      "<strong>Measure</strong>: a measuring tape. Click on the green, then on the tee - click on the way to bend it round a dogleg; Backspace takes back a point, Esc takes the tape up. <strong>Manual resolver</strong> lists the scorecard's holes and distances down the side: a hole glows when the tape is within " + TAPE_NEAR_M + "m of its distance, and green within " + TAPE_MATCH_M + "m. Click a hole with the tape laid and the green under the tape's start and the tee under its end (or a new tee dropped there) take that number, and the tape is kept as the hole's line - pink, tee to green, which the mapper reads like an OSM hole line. Nothing is linked. Any other green, tee or hole line with that number loses it. The × beside an allocated hole takes it off again. " +
       "<strong>Undo</strong> (the arrow at the top of the right-hand buttons, or Ctrl+Z / ⌘Z) takes back the last change, one at a time. " +
       "<strong>AI help</strong>: the AI is shown a screenshot of exactly this view, with your pins, shapes and OSM's greens drawn on it, and whatever it finds is put back on the map in the same place. <em>Find greens, tees and fairways</em> drops pins for you to shape with the wands; it works on an empty view, better with a green and a tee already pinned as samples, best when a sample carries its hole number. The other tasks trace, shape your pins or refit outlines. Every task's words can be edited and saved, and the panel shows what is sent around them. " +
       "Everything saves as you go. <strong>Apply shapes</strong> puts the bunkers, water, hazards, waste, woods and fairways drawn here on the course's holes straight away, no rescan, and takes off any you binned - draft or ready. " +
@@ -3759,8 +3761,8 @@
       return out;
     }
 
-    /* A pin, or a fairway pinned as its start and end, has no outline: it covers this far round it. */
-    function tapeReachM(kind) { return kind === "fairway" ? session.fairwayWidth / 2 : kind === "green" ? shapes.GREEN_RADIUS_M : shapes.TEE_RADIUS_M; }
+    /* A green or tee pin has no outline: it covers this far round it. */
+    function tapeReachM(kind) { return kind === "green" ? shapes.GREEN_RADIUS_M : shapes.TEE_RADIUS_M; }
     function hasOutline(f) { return !f.pin && f.points.length >= 3; }
     function onShape(p, f) { return hasOutline(f) ? shapes.insideLatLngRing(p, f.points) : gapToShapeM(p, f.points) <= tapeReachM(f.kind); }
 
@@ -3786,46 +3788,58 @@
       return best;
     }
 
-    /* A hole row clicked with the tape laid: the green and the fairway the tape crosses most and
-       the tee under its far end - or a new tee dropped there - become hole n, linked. The green
-       is the hole: its link, and whatever else is on it, carries on as hole n. Shapes numbered n
-       on no link join it; any other hole numbered n loses the number, so n is on one hole. */
+    /* Hole lines the tape made: what an allocation is, beside the green and tee it numbers. */
+    var TAPE_LINE_SOURCE = "measure";
+    function tapeLines(n) {
+      return session.features.filter(function (f) { return f.kind === "hole" && f.source === TAPE_LINE_SOURCE && f.hole === n; });
+    }
+    function allocated(n) { return session.features.some(function (f) { return f.hole === n && (f.kind === "green" || f.kind === "tee" || f.kind === "hole"); }); }
+
+    /* A hole row clicked with the tape laid: the green under the tape's start and the tee under
+       its end - or a new tee dropped there - take hole n, and the tape is kept as hole n's line
+       (tee to green, bends and all), which the mapper reads like an OSM hole line. Nothing is
+       linked. Hole n is on one green, tee and line only: any other green, tee or hole line
+       numbered n loses the number, and a line the tape made for this green or tee before goes. */
     function allocateTapeHole(n) {
       if (!session.course) { setStatus("Pick a course first."); return; }
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
       if (tape.points.length < 2) { setStatus("Lay the tape first: click on the green, then on the tee.", true); return; }
-      settle();
       var start = tape.points[0], end = tape.points[tape.points.length - 1];
-      var samples = tapeSamples(tape.points);
-      var green = mostCrossed("green", samples) || nearestWithin("green", start, TAPE_GREEN_REACH_M);
-      var fairway = mostCrossed("fairway", samples);
+      var green = mostCrossed("green", tapeSamples(tape.points)) || nearestWithin("green", start, TAPE_GREEN_REACH_M);
+      if (!green) { setStatus("No green under the tape's start - start the tape on the green.", true); return; }
       var tee = nearestWithin("tee", end, TAPE_TEE_REACH_M);
+      if (roomFor("hole") < (tee ? 1 : 2)) { setStatus("No room for the " + (tee ? "" : "tee and the ") + "hole line - bin a shape or two first.", true); return; }
+      settle();
+      var gone = [n, green.hole, tee && tee.hole].filter(Boolean);
+      session.features = session.features.filter(function (f) { return !(f.kind === "hole" && f.source === TAPE_LINE_SOURCE && gone.indexOf(f.hole) >= 0); });
+      session.features.forEach(function (f) { if (f.hole === n && (f.kind === "green" || f.kind === "tee" || f.kind === "hole")) f.hole = null; });
       var dropped = !tee;
-      if (dropped) {
-        if (full("tee")) return;
-        tee = addFeature(session.mode === "pins" ? { kind: "tee", hole: n, pin: true, points: [end] } : { kind: "tee", hole: n, points: shapes.teeAt(end) }, true);
-      }
-      var id = (green && green.link) || newLinkId();
-      [green, fairway, tee].forEach(function (f) { if (f) f.link = id; });
-      var cleared = {};
-      session.features.forEach(function (f) {
-        if (f.link === id || f.hole !== n) return;
-        if (!f.link) f.link = id;
-        else { f.hole = null; cleared[f.link] = true; }
-      });
-      var members = session.features.filter(function (f) { return f.link === id; });
-      members.forEach(function (f) { f.hole = n; });
+      if (dropped) tee = addFeature(session.mode === "pins" ? { kind: "tee", pin: true, points: [end] } : { kind: "tee", points: shapes.teeAt(end) }, true);
+      green.hole = n;
+      tee.hole = n;
+      var line = addFeature({ kind: "hole", hole: n, source: TAPE_LINE_SOURCE, points: tape.points.slice().reverse() }, true);
       var len = Math.round(tapeLengthM(false));
+      if (selectedId && !findFeature(selectedId)) selectedId = "";
       clearTape();
       drawFeatures();
       changed();
       updateHint();
-      flashLinked(members);
-      var got = [green ? "green" : "", fairway ? "fairway" : "", dropped ? "a new tee" : "tee"].filter(Boolean);
-      var others = Object.keys(cleared).length;
-      setStatus("Hole " + n + " (" + len + "m): " + got.join(", ") + " linked." +
-        (others ? " The number came off the other hole that had " + n + "." : "") +
-        (green ? "" : " No green under the tape's start - start it on the green to take it too."), !green);
+      flashLinked([green, tee, line], "Hole " + n);
+      setStatus("Hole " + n + " (" + len + "m): green, " + (dropped ? "a new tee" : "tee") + " and hole line.");
+    }
+
+    /* Takes hole n off: its tape-made line goes, and its green and tee lose the number. */
+    function removeAllocation(n) {
+      if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
+      if (!allocated(n)) { setStatus("Hole " + n + " is not on the overlay."); return; }
+      var lines = tapeLines(n);
+      session.features = session.features.filter(function (f) { return lines.indexOf(f) < 0; });
+      session.features.forEach(function (f) { if (f.hole === n && (f.kind === "green" || f.kind === "tee" || f.kind === "hole")) f.hole = null; });
+      if (selectedId && !findFeature(selectedId)) selectedId = "";
+      drawFeatures();
+      changed();
+      updateHint();
+      setStatus("Hole " + n + " taken off - its line is gone and its green and tee are unnumbered.");
     }
 
     /* ---- the manual resolver ----
@@ -3888,7 +3902,8 @@
         html += '<ol class="gdStudioOverlayResolverHoles">' + card.card.holes.map(function (h) {
           var m = Array.isArray(h.distances) ? num(h.distances[scorecard.tee]) : null;
           return '<li><button type="button" class="gdStudioOverlayResolverHole" data-resolver-hole="' + h.hole + '" data-resolver-m="' + (m == null ? "" : m) + '">' +
-            "<b>" + h.hole + "</b><span>" + (h.par ? "Par " + h.par : "") + "</span><em>" + (m == null ? "–" : Math.round(m) + "m") + "</em></button></li>";
+            "<b>" + h.hole + "</b><span>" + (h.par ? "Par " + h.par : "") + "</span><em>" + (m == null ? "–" : Math.round(m) + "m") + "</em></button>" +
+            '<button type="button" class="gdStudioOverlayResolverRemove" data-resolver-remove="' + h.hole + '" title="Take hole ' + h.hole + ' off: its line goes, its green and tee lose the number" aria-label="Take hole ' + h.hole + ' off">×</button></li>';
         }).join("") + "</ol>" +
           '<p class="gdStudioOverlayOrdersNote">Lay the tape from the green to the tee, then click its hole.</p>';
       }
@@ -3896,12 +3911,16 @@
       refreshResolverRows();
     }
 
-    /* The glow follows the tape as it moves; a tick marks a hole already on the overlay. */
+    /* The glow follows the tape as it moves; a tick, and the × that takes it off, mark a hole
+       already on the overlay. */
     function refreshResolverRows() {
       if (destroyed || !el.resolver || el.resolver.hidden) return;
       var len = tapeLengthM(true);
       var done = {};
-      holeGroups().forEach(function (g) { g.numbers.forEach(function (n) { done[n] = true; }); });
+      session.features.forEach(function (f) { if (f.hole && (f.kind === "green" || f.kind === "tee" || f.kind === "hole")) done[f.hole] = true; });
+      Array.prototype.forEach.call(el.resolver.querySelectorAll("[data-resolver-remove]"), function (b) {
+        b.hidden = !done[Number(b.getAttribute("data-resolver-remove"))];
+      });
       Array.prototype.forEach.call(el.resolver.querySelectorAll("[data-resolver-hole]"), function (b) {
         var n = Number(b.getAttribute("data-resolver-hole"));
         var m = b.getAttribute("data-resolver-m") === "" ? null : Number(b.getAttribute("data-resolver-m"));
@@ -3909,7 +3928,7 @@
         b.classList.toggle("isMatch", off <= TAPE_MATCH_M);
         b.classList.toggle("isNear", off > TAPE_MATCH_M && off <= TAPE_NEAR_M);
         b.classList.toggle("isDone", !!done[n]);
-        b.title = (tape.points.length >= 2 ? "Make this hole " + n + ": the green and fairway under the tape, and the tee at its end" : "Lay the tape from the green to the tee first") +
+        b.title = (tape.points.length >= 2 ? "Make this hole " + n + ": the green under the tape's start, the tee at its end, and the tape as its line" : "Lay the tape from the green to the tee first") +
           (len != null && m != null ? " · tape " + Math.round(len) + "m, card " + Math.round(m) + "m" : "") + (done[n] ? " · already on the overlay" : "");
       });
     }
@@ -3927,6 +3946,8 @@
         else if (what === "retry") loadScorecard();
         return;
       }
+      var off = event.target.closest && event.target.closest("[data-resolver-remove]");
+      if (off) { removeAllocation(Number(off.getAttribute("data-resolver-remove"))); return; }
       var row = event.target.closest && event.target.closest("[data-resolver-hole]");
       if (row) allocateTapeHole(Number(row.getAttribute("data-resolver-hole")));
     }
@@ -4438,8 +4459,9 @@
     }
 
     /* The quick "linked" confirmation: the shapes pulse and a tick shows over them, so it is
-       plain the link was made and the next click starts a new one. */
-    function flashLinked(members) {
+       plain the link was made and the next click starts a new one. A hole allocated with the tape
+       flashes the same way, under its own label. */
+    function flashLinked(members, label) {
       members.forEach(function (f) {
         var node = el.stage.querySelector('[data-gd-feature="' + f.id + '"]');
         if (!node) return;
@@ -4452,7 +4474,7 @@
       if (!pts.length) return;
       var centre = L.latLngBounds(pts).getCenter();
       /* A tooltip, not a marker - see drawHoleTags. */
-      var badge = L.tooltip({ permanent: true, direction: "center", className: "gdStudioOverlayLinkedBadge" }).setLatLng(centre).setContent("<span>✓ Linked</span>");
+      var badge = L.tooltip({ permanent: true, direction: "center", className: "gdStudioOverlayLinkedBadge" }).setLatLng(centre).setContent("<span>✓ " + esc(label || "Linked") + "</span>");
       mapObj.addLayer(badge);
       setTimeout(function () { try { mapObj.removeLayer(badge); } catch (e) {} }, 900);
     }

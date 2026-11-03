@@ -107,10 +107,14 @@ test("Measure and the manual resolver read the scorecard and write only overlay 
   assert.ok(page.includes('api("GET", "?courseId=" + encodeURIComponent(id), null, SCORECARDS_API)'), "the scorecard is only ever read - a GET");
   assert.ok(page.includes("var TAPE_NEAR_M = 20;") && page.includes("var TAPE_MATCH_M = 2;"), "rows glow within 20m and go green within 2m");
   assert.ok(page.includes('b.classList.toggle("isMatch", off <= TAPE_MATCH_M)') && shell.includes(".gdStudioOverlayResolverHole.isMatch") && shell.includes(".gdStudioOverlayResolverHole.isNear"), "the glow follows the tape");
-  const alloc = page.slice(page.indexOf("function allocateTapeHole(n)"), page.indexOf("/* ---- the manual resolver ----"));
-  assert.ok(alloc.includes('mostCrossed("green", samples)') && alloc.includes('mostCrossed("fairway", samples)'), "the green and fairway the tape crosses most");
+  const alloc = page.slice(page.indexOf("function allocateTapeHole(n)"), page.indexOf("function removeAllocation(n)"));
+  assert.ok(alloc.includes('mostCrossed("green", tapeSamples(tape.points))') && !alloc.includes('"fairway"'), "an allocation is the green under the tape - no fairway");
   assert.ok(alloc.includes('nearestWithin("tee", end, TAPE_TEE_REACH_M)') && alloc.includes("shapes.teeAt(end)"), "the tee under the tape's end, or a new one dropped there");
+  assert.ok(!alloc.includes(".link") && !alloc.includes("newLinkId"), "the tape never links shapes");
+  assert.ok(alloc.includes('addFeature({ kind: "hole", hole: n, source: TAPE_LINE_SOURCE, points: tape.points.slice().reverse() }, true)'), "the tape is kept as the hole's line, tee to green");
   assert.ok(alloc.includes("changed();") && !alloc.includes("fetch("), "an allocation is an overlay change like any other - saved, and undoable");
+  const remove = page.slice(page.indexOf("function removeAllocation(n)"), page.indexOf("/* ---- the manual resolver ----"));
+  assert.ok(remove.includes("tapeLines(n)") && remove.includes("changed();") && page.includes("data-resolver-remove"), "an allocated hole comes off with one click");
 });
 
 /* ---------- placing by eye ---------- */
@@ -395,7 +399,7 @@ test("Link: click the shapes on one hole, Enter or Space links them, and never n
   assert.ok(!/freeHole|linkFeatures|beginConnect/.test(page), "linking must never make up a hole number, and the old drag-to-link is gone");
   const commit = page.slice(page.indexOf("function commitLink()"), page.indexOf("function flashLinked("));
   assert.ok(!/\.hole\s*=[^=]/.test(commit), "commitLink must not write a hole number");
-  assert.ok(page.includes("function flashLinked(members)") && shell.includes("gdStudioOverlayLinkedFlash"), "a link shows a quick linked confirmation");
+  assert.ok(page.includes("function flashLinked(members, label)") && shell.includes("gdStudioOverlayLinkedFlash"), "a link shows a quick linked confirmation");
   assert.ok(page.includes("function drawLinks()"), "shapes on one hole must be drawn joined");
 });
 
