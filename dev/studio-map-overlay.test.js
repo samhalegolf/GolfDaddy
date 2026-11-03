@@ -100,6 +100,19 @@ test("the mapper run is gated on a saved overlay, so what runs is what is on scr
   assert.ok(page.includes("el.run.disabled = !has || session.dirty"), "Run mapper must be disabled while there are unsaved shapes");
 });
 
+test("Measure and the manual resolver read the scorecard and write only overlay shapes", () => {
+  assert.ok(page.includes('railButton("tool-measure"') && page.includes('m: "measure"'), "Measure is on the toolbar, on M");
+  assert.ok(page.includes('var SCORECARDS_API = "/api/course-scorecards"'), "the resolver reads the facility's stored cards");
+  assert.strictEqual((page.match(/SCORECARDS_API\)/g) || []).length, 1, "the scorecards endpoint is called once");
+  assert.ok(page.includes('api("GET", "?courseId=" + encodeURIComponent(id), null, SCORECARDS_API)'), "the scorecard is only ever read - a GET");
+  assert.ok(page.includes("var TAPE_NEAR_M = 20;") && page.includes("var TAPE_MATCH_M = 2;"), "rows glow within 20m and go green within 2m");
+  assert.ok(page.includes('b.classList.toggle("isMatch", off <= TAPE_MATCH_M)') && shell.includes(".gdStudioOverlayResolverHole.isMatch") && shell.includes(".gdStudioOverlayResolverHole.isNear"), "the glow follows the tape");
+  const alloc = page.slice(page.indexOf("function allocateTapeHole(n)"), page.indexOf("/* ---- the manual resolver ----"));
+  assert.ok(alloc.includes('mostCrossed("green", samples)') && alloc.includes('mostCrossed("fairway", samples)'), "the green and fairway the tape crosses most");
+  assert.ok(alloc.includes('nearestWithin("tee", end, TAPE_TEE_REACH_M)') && alloc.includes("shapes.teeAt(end)"), "the tee under the tape's end, or a new one dropped there");
+  assert.ok(alloc.includes("changed();") && !alloc.includes("fetch("), "an allocation is an overlay change like any other - saved, and undoable");
+});
+
 /* ---------- placing by eye ---------- */
 
 test("every change autosaves, and leaving the page flushes what is waiting", () => {
@@ -179,7 +192,7 @@ test("the tool picked stays picked: placing never switches tools, and there is n
   assert.ok(fast.includes("var cycle = fastCycle();") && fast.includes("if (at < 0 || draft.length) return;") && fast.includes("setTool(next)"), "fastAdvance moves the tool on only inside a Fast cycle");
   assert.strictEqual(page.split("fastAdvance();").length, 3, "fastAdvance is called from the pin click and the finished fairway, nothing else");
   assert.ok(!page.includes("fastClickEcho") && !page.includes("lastFastClick") && !page.includes("if (fastPins()) fastAdvance()"), "the double-click flow is gone");
-  assert.ok(page.includes('if (lineTool()) mapObj.doubleClickZoom.disable();'), "double-click zoom is off only while laying a line");
+  assert.ok(page.includes('if (lineTool() || tool === "measure") mapObj.doubleClickZoom.disable();'), "double-click zoom is off only while laying a line or the tape");
 });
 
 test("fast pins: Single, Green → Tee and Tee → Green; a click pins (and a cycle moves on), Space links the hole", () => {

@@ -74,6 +74,17 @@
   var SOURCE_TEST_API = "/api/course-map-source-test";
   /* When the imagery in view was taken (functions/course-map-capture-date.mjs). */
   var CAPTURE_API = "/api/course-map-capture-date";
+  /* The facility's stored scorecards (functions/course-scorecards.mjs), read - never written -
+     for the manual resolver's hole list. */
+  var SCORECARDS_API = "/api/course-scorecards";
+  /* Manual resolver: a hole's row glows once the tape is this close to its card distance, and
+     goes green this close. */
+  var TAPE_NEAR_M = 20;
+  var TAPE_MATCH_M = 2;
+  /* The tape's start counts as on a green this close to its edge (or its pin), when the tape
+     itself never crosses one. A tee is under the tape's end inside its outline or this close. */
+  var TAPE_GREEN_REACH_M = 10;
+  var TAPE_TEE_REACH_M = 3;
   /* Tree heights under a capture, for the tree finder near play (functions/course-map-canopy-height.mjs). */
   var CANOPY_API = "/api/course-map-canopy-height";
   /* The course's tree layer (functions/course-trees.mjs): what a tree run found, edited here and
@@ -390,6 +401,11 @@
     /* A cluster oval while it is stretched, and the box the tree finder looks in. */
     stretchOval: { color: "#2fbf5a", weight: 2, dashArray: "6 6", fillColor: "#1f8a3c", fillOpacity: 0.2, interactive: false },
     stretchBox: { color: "#ffffff", weight: 2, dashArray: "6 6", fill: false, interactive: false },
+    /* The measuring tape, its bend points and its two ends (green end, tee end). */
+    tape: { color: "#ffe14d", weight: 3, opacity: 0.95, interactive: false },
+    tapePoint: { radius: 4, color: "#06120b", weight: 2, fillColor: "#ffe14d", fillOpacity: 1, interactive: false },
+    tapeStart: { radius: 6, color: "#06120b", weight: 2, fillColor: "#b7ff5c", fillOpacity: 1, interactive: false },
+    tapeEnd: { radius: 6, color: "#06120b", weight: 2, fillColor: "#6cc7ff", fillOpacity: 1, interactive: false },
     /* The Link marker's stroke: a highlighter, as wide as its reach. */
     marker: { color: "#ffe14d", weight: 28, opacity: 0.35, lineCap: "round", lineJoin: "round", interactive: false },
     /* The box everything inside goes to the bin from (Shift-drag in Move). */
@@ -440,6 +456,7 @@
     number: svgIcon('<path d="M9 4L7 20M17 4l-2 16M4.5 9h15M3.5 15h15"/>'),
     order: svgIcon('<path d="M10 6h10M10 12h10M10 18h10"/><path d="M4 4.5l1.5-.8V8M4 11h2.5L4 14.5h2.5M4 16.5h2.5v3.5H4M4 18.2h2"/>'),
     connect: svgIcon('<circle cx="6" cy="18" r="2.6"/><circle cx="18" cy="6" r="2.6"/><path d="M8 16l8-8" stroke-dasharray="2 3"/>'),
+    measure: svgIcon('<path d="M3 16.5L16.5 3 21 7.5 7.5 21z"/><path d="M7 13l2 2M10 10l2 2M13 7l2 2"/>'),
     fairway: svgIcon('<path d="M7 21c-1-5 2-7 4-10s2-6 1-8"/><path d="M13 21c-1-5 2-7 4-10s2-6 1-8"/>'),
     green: svgIcon('<path d="M9 18V3l8 3.5L9 10"/><ellipse cx="10" cy="19" rx="7" ry="2.4"/>'),
     tee: svgIcon('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/>'),
@@ -460,7 +477,7 @@
     star: svgIcon('<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>'),
     starOn: svgIcon('<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z" fill="currentColor"/>')
   };
-  var TOOL_LABEL = { move: "Move", connect: "Link", number: "Number", order: "Play order", fairway: "Fairway", green: "Green", tee: "Tee", bunker: "Bunker", water: "Water", trees: "Trees", hazard: "Hazard", waste: "Waste" };
+  var TOOL_LABEL = { move: "Move", connect: "Link", number: "Number", order: "Play order", measure: "Measure", fairway: "Fairway", green: "Green", tee: "Tee", bunker: "Bunker", water: "Water", trees: "Trees", hazard: "Hazard", waste: "Waste" };
   function railButton(name, icon, label, title) {
     return '<button type="button" class="gdStudioOverlayRailBtn" data-gd-overlay="' + name + '" title="' + esc(title) + '" aria-label="' + esc(label) + '">' + ICON[icon] + "<span>" + esc(label) + "</span></button>";
   }
@@ -522,6 +539,11 @@
     /* The colour wand's selection, waiting for Enter. */
     var colourSel = null;
     var colourCap = null;
+    /* Measure: the tape's points (green end first), where the pointer is while it is laid, and
+       what draws it. The manual resolver's scorecard: { for: courseId, status, cards, key, tee }. */
+    var tape = { points: [], cursor: null, line: null, dots: [], label: null };
+    var scorecard = null;
+    var resolverOpen = true;
 
     /* One screen, laid out like the booking app's video workspace: the map takes everything,
        the tools float over it (placing tools down the left, view controls down the right, the
@@ -590,6 +612,7 @@
       "<strong>Link</strong>: click the shapes that belong to one hole (click again to drop one), then <strong>Enter</strong> or <strong>Space</strong> links them and the next click starts a new link. Or drag the marker over them: every shape the stroke touches joins the pick, and Enter or Space links it the same way. A link only says they are one hole - it never numbers them. One shape and Enter takes it out of its link; <strong>Esc</strong> clears the pick. " +
       "<strong>Number</strong>: click each hole's fairway (or any shape on it) and the whole hole takes the <em>Next hole</em> number; with <em>Auto</em> on, the number then moves on, so 1 to 18 is eighteen clicks. Each hole shows one number on its fairway - click it with any tool to type a different one. A number on two holes shows red. The mapper keeps every numbered hole as numbered and works the rest out around it, so one number - hole 1 by the clubhouse, say - is enough to set the rest straight. " +
       "<strong>Play order</strong>: where the mapper gets a site's courses wrong, say them by hand. <strong>+ New play order</strong>, name it, then click its holes in the order they are played - an OSM hole line, or any shape of a hole you have linked (link a hole's tee and green first). Click a hole again to take it out. A hole can be in several play orders, so the same nines played in a different order are just another play order. With play orders on a ready overlay, the mapper publishes exactly those courses under those names. " +
+      "<strong>Measure</strong>: a measuring tape. Click on the green, then on the tee - click on the way to bend it round a dogleg; Backspace takes back a point, Esc takes the tape up. <strong>Manual resolver</strong> lists the scorecard's holes and distances down the side: a hole glows when the tape is within " + TAPE_NEAR_M + "m of its distance, and green within " + TAPE_MATCH_M + "m. Click a hole with the tape laid and it gets the green and the fairway the tape crosses most, and the tee under the tape's end - or a new tee dropped there - all linked as that hole. Any other hole carrying that number loses it. " +
       "<strong>Undo</strong> (the arrow at the top of the right-hand buttons, or Ctrl+Z / ⌘Z) takes back the last change, one at a time. " +
       "<strong>AI help</strong>: the AI is shown a screenshot of exactly this view, with your pins, shapes and OSM's greens drawn on it, and whatever it finds is put back on the map in the same place. <em>Find greens, tees and fairways</em> drops pins for you to shape with the wands; it works on an empty view, better with a green and a tee already pinned as samples, best when a sample carries its hole number. The other tasks trace, shape your pins or refit outlines. Every task's words can be edited and saved, and the panel shows what is sent around them. " +
       "Everything saves as you go. <strong>Apply shapes</strong> puts the bunkers, water, hazards, waste, woods and fairways drawn here on the course's holes straight away, no rescan, and takes off any you binned - draft or ready. " +
@@ -605,6 +628,7 @@
       railButton("tool-connect", "connect", "Link", "Link shapes to the same hole (C)") +
       railButton("tool-number", "number", "Number", "Click each hole to number it - Auto steps 1, 2, 3... (N)") +
       railButton("tool-order", "order", "Play order", "Build a course by hand: name it, then click its holes in the order they are played (O)") +
+      railButton("tool-measure", "measure", "Measure", "Measuring tape: click the green, then the tee (click on the way for a dogleg). The manual resolver lists the scorecard down the side (M)") +
       '<span class="gdStudioOverlayRailRule"></span>' +
       railButton("tool-fairway", "fairway", "Fairway", "") +
       railButton("tool-green", "green", "Green", "") +
@@ -628,7 +652,10 @@
       "</span>" +
       '<span class="gdStudioOverlayOpt" data-gd-overlay="number-label" hidden>Next hole <input type="number" min="1" max="36" step="1" data-gd-overlay="number-next" class="gdStudioOverlayWidth gdStudioOverlayHole">' +
       '<label title="Each click numbers a hole and moves on to the next number"><input type="checkbox" data-gd-overlay="number-auto"> Auto</label></span>' +
-      '<label class="gdStudioOverlayOpt" data-gd-overlay="hole-label">Hole <input type="number" min="1" max="36" step="1" placeholder="–" data-gd-overlay="hole" class="gdStudioOverlayWidth gdStudioOverlayHole"></label>' +
+      '<span class="gdStudioOverlayOpt" data-gd-overlay="tape-label" hidden>Tape <strong class="gdStudioOverlayTapeLength" data-gd-overlay="tape-length">–</strong>' +
+      '<button type="button" class="gdStudioOverlayOptBtn" data-gd-overlay="tape-clear" title="Take the tape up (Esc)">Clear</button>' +
+      '<button type="button" class="gdStudioOverlayOptBtn" data-gd-overlay="resolver-toggle" title="The scorecard\'s holes and distances down the side: click one with the tape laid to give it the green, fairway and tee under the tape (R)">Manual resolver</button></span>' +
+      '<label class="gdStudioOverlayOpt" data-gd-overlay="hole-label">Hole<input type="number" min="1" max="36" step="1" placeholder="–" data-gd-overlay="hole" class="gdStudioOverlayWidth gdStudioOverlayHole"></label>' +
       '<label class="gdStudioOverlayOpt" data-gd-overlay="width-label">Width <input type="number" min="10" max="90" step="1" data-gd-overlay="width" class="gdStudioOverlayWidth"> m</label>' +
       '<span class="gdStudioOverlayModes" data-gd-overlay="method" hidden>' +
       '<button type="button" data-gd-overlay="method-width" title="Click a line down the fairway; it becomes a fairway of the set width (F again switches)">Width</button>' +
@@ -665,6 +692,7 @@
       '<span class="gdStudioOverlayFavList" data-gd-overlay="fav-list"></span>' +
       "</div>" +
       '<div class="gdStudioOverlayOrders" data-gd-overlay="orders" hidden></div>' +
+      '<div class="gdStudioOverlayResolver" data-gd-overlay="resolver" hidden></div>' +
       '<div class="gdStudioOverlayViewRail" role="toolbar" aria-label="View">' +
       viewButton("undo", "undo", "Undo the last change (Ctrl+Z / ⌘Z)") +
       viewButton("fullscreen", "expand", "Full screen") +
@@ -702,7 +730,7 @@
       "</div>";
 
     var el = {};
-    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "ai-panel", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "mode-fast", "fast-order", "fast-single", "fast-green-tee", "fast-tee-green", "tool-move", "tool-connect", "tool-number", "tool-order", "orders", "tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-auto", "method-along", "method-grow", "method-colour", "tree-auto-label", "tree-band", "tree-heights", "tree-auto", "hazard-auto-label", "hazard-corridor", "hazard-auto", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "fav-add", "fav-list", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "tree-bar", "tree-text", "tree-less", "tree-more", "tree-publish", "tree-rerun", "tree-close", "undo", "trees", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "apply", "run", "pin-move", "status"].forEach(function (name) {
+    ["courses", "inbox", "inbox-count", "pick", "convert", "fresh", "course", "provider", "osm", "objects", "ai", "ai-panel", "source-test", "source-panel", "course-map", "course-map-state", "last-run", "menu", "menu-toggle", "save", "mode-shapes", "mode-pins", "mode-fast", "fast-order", "fast-single", "fast-green-tee", "fast-tee-green", "tool-move", "tool-connect", "tool-number", "tool-order", "tool-measure", "orders", "resolver", "tape-label", "tape-length", "tape-clear", "resolver-toggle","tool-fairway", "tool-green", "tool-tee", "tool-bunker", "tool-water", "tool-trees", "tool-hazard", "tool-waste", "method", "method-width", "method-wand", "method-round", "method-draw", "method-line", "method-single", "method-oval", "method-find", "method-auto", "method-along", "method-grow", "method-colour", "tree-auto-label", "tree-band", "tree-heights", "tree-auto", "hazard-auto-label", "hazard-corridor", "hazard-auto", "width", "width-label", "wand-size-label", "wand-size-name", "wand-smaller", "wand-size", "wand-bigger", "merge", "merge-label", "seams", "seams-label", "collar", "hole", "hole-label", "number-label", "number-next", "number-auto", "shape-pins", "fav-add", "fav-list", "workspace", "draft-bar", "draft-finish", "draft-undo", "draft-cancel", "tree-bar", "tree-text", "tree-less", "tree-more", "tree-publish", "tree-rerun", "tree-close", "undo", "trees", "fit", "zoom-shape", "zoom-in", "zoom-out", "fullscreen", "google", "google-pane", "google-map", "google-credit", "stage", "map", "hint", "bin", "readout", "credit", "draft", "ready", "ready-choice", "osm-mode", "unnumber", "clear", "apply", "run", "pin-move", "status"].forEach(function (name) {
       el[name] = containerEl.querySelector('[data-gd-overlay="' + name + '"]');
     });
 
@@ -859,7 +887,7 @@
       return !!session.course && session.loadedFor === courseIdOf(session.course) && !scanning && !busy;
     }
 
-    var TOOLS = ["move", "connect", "number", "order", "fairway", "green", "tee", "bunker", "water", "trees", "hazard", "waste"];
+    var TOOLS = ["move", "connect", "number", "order", "measure", "fairway", "green", "tee", "bunker", "water", "trees", "hazard", "waste"];
 
     /* Whatever was just placed is kept: the live shape, and the trees the finder dropped. The
        colour wand's selection is not a shape yet - it goes, unless `keepColour`. */
@@ -887,6 +915,9 @@
       var ordering = tool === "order";
       if (ordering !== wasOrdering) { wasOrdering = ordering; drawOsm(); drawHoleTags(); }
       renderOrders();
+      /* The tape belongs to the Measure tool: putting it down takes the tape up. */
+      if (tool !== "measure") clearTape();
+      renderResolver();
       /* Double-click zooms, except while laying a fairway line, where it would move the ground
          under the last point. */
       syncDoubleClick();
@@ -968,7 +999,10 @@
       });
       el["width-label"].hidden = !shapesMode || (tool === "fairway" && session.method.fairway !== "width");
       el["number-label"].hidden = tool !== "number";
-      el["hole-label"].hidden = tool === "number";
+      el["hole-label"].hidden = tool === "number" || tool === "measure";
+      el["tape-label"].hidden = tool !== "measure";
+      if (tool === "measure") el["width-label"].hidden = true;
+      renderTapeLength();
       if (tool === "number") renderNumberField();
       el["tree-auto-label"].hidden = methodOf(tool) !== "auto";
       renderTreeAuto();
@@ -985,7 +1019,7 @@
        so theirs carry none. */
     var MAX_FAVOURITES = 12;
     var FAST_LABEL = { single: "Fast", "green-tee": "Fast G→T", "tee-green": "Fast T→G" };
-    function placesShapes(name) { return TOOLS.indexOf(name) >= 4; }
+    function placesShapes(name) { return TOOLS.indexOf(name) > TOOLS.indexOf("measure"); }
     function currentFavourite() {
       if (!placesShapes(tool)) return { mode: "", fast: "", tool: tool, method: "" };
       return { mode: fastPins() ? "fast" : session.mode, fast: fastPins() ? session.fast : "", tool: tool, method: methodOf(tool) || "" };
@@ -1138,7 +1172,7 @@
        last point (and finishes the line instead). */
     function syncDoubleClick() {
       if (!mapObj) return;
-      try { if (lineTool()) mapObj.doubleClickZoom.disable(); else mapObj.doubleClickZoom.enable(); } catch (e) {}
+      try { if (lineTool() || tool === "measure") mapObj.doubleClickZoom.disable(); else mapObj.doubleClickZoom.enable(); } catch (e) {}
     }
 
     /* Drawing round, stretching an oval or a box, and the colour wand are a press-and-drag, so
@@ -2532,6 +2566,8 @@
       /* Empty ground under the Link tool does nothing: the pick waits for Enter or Esc. */
       if (tool === "connect" || tool === "number" || tool === "order") return;
       if (tool === "move") { if (selectedId) select(""); return; }
+      /* The tape is only a measurement - it can be laid while the overlay loads or saves. */
+      if (tool === "measure") { addTapePoint({ lat: latlng.lat, lng: latlng.lng }); return; }
       if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
       if (methodOf(tool) === "auto") { setStatus("Find trees near play looks along every fairway and green on its own - press the button up top.", false); return; }
       if (methodOf(tool) === "along") { setStatus("Along play walks the hole lines on its own - press the button up top.", false); return; }
@@ -3252,6 +3288,7 @@
       updateBin();
       updateReadout();
       renderHoleField();
+      refreshResolverRows();
     }
 
     function pinStyle(kind, selected) {
@@ -3628,6 +3665,278 @@
         html += "</div>";
       });
       el.orders.innerHTML = html;
+    }
+
+    /* ---- Measure: the measuring tape ----
+       A click on the green starts the tape, every click after adds a point - one on the way
+       bends it round a dogleg, the last is the tee. While it is being laid the tape runs on to
+       the pointer, so its length is live. The tape is only a measurement: nothing on it is
+       saved, and it goes when the tool is put down. */
+
+    function tapeLine() { return tape.cursor && tape.points.length ? tape.points.concat([tape.cursor]) : tape.points; }
+    /* The tape's length in metres - to the pointer while it is over the map (live), or as laid. */
+    function tapeLengthM(live) {
+      var pts = live ? tapeLine() : tape.points;
+      return pts.length >= 2 ? shapes.lineLengthM(pts) : null;
+    }
+
+    function addTapePoint(p) {
+      var last = tape.points[tape.points.length - 1];
+      /* A double-click lands twice in one spot - once is a point. */
+      if (last && shapes.distanceM(last, p) < 0.5) return;
+      tape.points.push(p);
+      tapeChanged(true);
+    }
+
+    function undoTapePoint() {
+      if (!tape.points.length) return;
+      tape.points.pop();
+      if (!tape.points.length) tape.cursor = null;
+      tapeChanged(true);
+    }
+
+    function clearTape() {
+      if (!tape.points.length && !tape.line && !tape.label) return;
+      tape.points = [];
+      tape.cursor = null;
+      tapeChanged(true);
+    }
+
+    function tapeChanged(pointsMoved) {
+      drawTape(pointsMoved);
+      renderTapeLength();
+      refreshResolverRows();
+      if (pointsMoved) updateHint();
+    }
+
+    function drawTape(pointsMoved) {
+      if (!mapObj) return;
+      var pts = tapeLine();
+      if (pts.length >= 2) {
+        if (!tape.line) tape.line = L.polyline(toLatLngs(pts), STYLE.tape).addTo(mapObj);
+        else tape.line.setLatLngs(toLatLngs(pts));
+        tape.line.bringToFront();
+      } else if (tape.line) { try { mapObj.removeLayer(tape.line); } catch (e) {} tape.line = null; }
+      if (pointsMoved) {
+        tape.dots.forEach(function (d) { try { mapObj.removeLayer(d); } catch (e) {} });
+        tape.dots = tape.points.map(function (p, i) {
+          var style = i === 0 ? STYLE.tapeStart : i === tape.points.length - 1 ? STYLE.tapeEnd : STYLE.tapePoint;
+          return L.circleMarker([p.lat, p.lng], style).addTo(mapObj);
+        });
+      }
+      var len = tapeLengthM(true);
+      if (len == null) { if (tape.label) { try { mapObj.removeLayer(tape.label); } catch (e) {} tape.label = null; } return; }
+      var at = pts[pts.length - 1];
+      /* A tooltip, not a marker: the app's stylesheet hides Leaflet marker icons on Studio's screens. */
+      if (!tape.label) {
+        tape.label = L.tooltip({ permanent: true, interactive: false, direction: "right", offset: [12, 0], className: "gdStudioOverlayTapeTag" });
+        tape.label.setLatLng([at.lat, at.lng]).setContent(Math.round(len) + "m");
+        mapObj.addLayer(tape.label);
+      } else tape.label.setLatLng([at.lat, at.lng]).setContent(Math.round(len) + "m");
+    }
+
+    function renderTapeLength() {
+      if (destroyed || !el["tape-length"]) return;
+      var len = tapeLengthM(true);
+      el["tape-length"].textContent = len == null ? "–" : Math.round(len) + "m";
+      el["tape-clear"].disabled = !tape.points.length;
+      el["resolver-toggle"].classList.toggle("isActive", resolverOpen);
+    }
+
+    function onTapeHover(e) {
+      if (tool !== "measure" || !tape.points.length) return;
+      tape.cursor = e && e.latlng ? { lat: e.latlng.lat, lng: e.latlng.lng } : null;
+      tapeChanged(false);
+    }
+
+    /* Points along the laid tape a metre apart, both ends included: what "crosses most" counts. */
+    function tapeSamples(points) {
+      var out = [points[0]];
+      for (var i = 1; i < points.length; i++) {
+        var a = points[i - 1], b = points[i], steps = Math.max(1, Math.ceil(shapes.distanceM(a, b)));
+        for (var s = 1; s <= steps; s++) out.push({ lat: a.lat + (b.lat - a.lat) * s / steps, lng: a.lng + (b.lng - a.lng) * s / steps });
+      }
+      return out;
+    }
+
+    /* A pin, or a fairway pinned as its start and end, has no outline: it covers this far round it. */
+    function tapeReachM(kind) { return kind === "fairway" ? session.fairwayWidth / 2 : kind === "green" ? shapes.GREEN_RADIUS_M : shapes.TEE_RADIUS_M; }
+    function hasOutline(f) { return !f.pin && f.points.length >= 3; }
+    function onShape(p, f) { return hasOutline(f) ? shapes.insideLatLngRing(p, f.points) : gapToShapeM(p, f.points) <= tapeReachM(f.kind); }
+
+    /* The shape of a kind the tape runs over furthest, or null when it crosses none. */
+    function mostCrossed(kind, samples) {
+      var best = null, most = 0;
+      session.features.forEach(function (f) {
+        if (f.kind !== kind || !f.points.length) return;
+        var n = samples.filter(function (p) { return onShape(p, f); }).length;
+        if (n > most) { best = f; most = n; }
+      });
+      return best;
+    }
+
+    /* The shape of a kind nearest a point, within reachM of its edge (or of its pin). */
+    function nearestWithin(kind, p, reachM) {
+      var best = null, gap = Infinity;
+      session.features.forEach(function (f) {
+        if (f.kind !== kind || !f.points.length) return;
+        var g = hasOutline(f) ? (shapes.insideLatLngRing(p, f.points) ? 0 : gapToShapeM(p, f.points.concat([f.points[0]]))) : Math.max(0, gapToShapeM(p, f.points) - (f.pin ? tapeReachM(kind) : 0));
+        if (g <= reachM && g < gap) { best = f; gap = g; }
+      });
+      return best;
+    }
+
+    /* A hole row clicked with the tape laid: the green and the fairway the tape crosses most and
+       the tee under its far end - or a new tee dropped there - become hole n, linked. The green
+       is the hole: its link, and whatever else is on it, carries on as hole n. Shapes numbered n
+       on no link join it; any other hole numbered n loses the number, so n is on one hole. */
+    function allocateTapeHole(n) {
+      if (!session.course) { setStatus("Pick a course first."); return; }
+      if (!canEdit()) { setStatus(scanning ? "Wait for the AI scan to finish." : "Still loading this course's overlay…"); return; }
+      if (tape.points.length < 2) { setStatus("Lay the tape first: click on the green, then on the tee.", true); return; }
+      settle();
+      var start = tape.points[0], end = tape.points[tape.points.length - 1];
+      var samples = tapeSamples(tape.points);
+      var green = mostCrossed("green", samples) || nearestWithin("green", start, TAPE_GREEN_REACH_M);
+      var fairway = mostCrossed("fairway", samples);
+      var tee = nearestWithin("tee", end, TAPE_TEE_REACH_M);
+      var dropped = !tee;
+      if (dropped) {
+        if (full("tee")) return;
+        tee = addFeature(session.mode === "pins" ? { kind: "tee", hole: n, pin: true, points: [end] } : { kind: "tee", hole: n, points: shapes.teeAt(end) }, true);
+      }
+      var id = (green && green.link) || newLinkId();
+      [green, fairway, tee].forEach(function (f) { if (f) f.link = id; });
+      var cleared = {};
+      session.features.forEach(function (f) {
+        if (f.link === id || f.hole !== n) return;
+        if (!f.link) f.link = id;
+        else { f.hole = null; cleared[f.link] = true; }
+      });
+      var members = session.features.filter(function (f) { return f.link === id; });
+      members.forEach(function (f) { f.hole = n; });
+      var len = Math.round(tapeLengthM(false));
+      clearTape();
+      drawFeatures();
+      changed();
+      updateHint();
+      flashLinked(members);
+      var got = [green ? "green" : "", fairway ? "fairway" : "", dropped ? "a new tee" : "tee"].filter(Boolean);
+      var others = Object.keys(cleared).length;
+      setStatus("Hole " + n + " (" + len + "m): " + got.join(", ") + " linked." +
+        (others ? " The number came off the other hole that had " + n + "." : "") +
+        (green ? "" : " No green under the tape's start - start it on the green to take it too."), !green);
+    }
+
+    /* ---- the manual resolver ----
+       The scorecard down the side, under Measure: each hole, its par and its distance from the
+       tee picked. A hole glows when the tape comes within TAPE_NEAR_M of its distance and goes
+       green within TAPE_MATCH_M; a click gives it what is under the tape (allocateTapeHole).
+       The card is read from the facility's stored scorecards - this page never writes one. */
+
+    function scorecardCard() {
+      if (!scorecard || scorecard.status !== "ok") return null;
+      return scorecard.cards.filter(function (c) { return c.key === scorecard.key; })[0] || scorecard.cards[0] || null;
+    }
+
+    function loadScorecard() {
+      var id = session.loadedFor;
+      if (!id) return;
+      scorecard = { for: id, status: "loading", cards: [], key: "", tee: 0, error: "" };
+      renderResolver();
+      api("GET", "?courseId=" + encodeURIComponent(id), null, SCORECARDS_API).then(function (data) {
+        if (destroyed || !scorecard || scorecard.for !== id) return;
+        var cards = (data && Array.isArray(data.cards) ? data.cards : []).filter(function (c) { return c && c.card && Array.isArray(c.card.holes) && c.card.holes.length; });
+        var own = cards.filter(function (c) { return c.gps; })[0] || cards[0];
+        scorecard.cards = cards;
+        scorecard.key = own ? own.key : "";
+        scorecard.status = "ok";
+      }).catch(function (error) {
+        if (destroyed || !scorecard || scorecard.for !== id) return;
+        scorecard.status = "failed";
+        scorecard.error = String(error && error.message || error);
+      }).then(function () { if (!destroyed) renderResolver(); });
+    }
+
+    function renderResolver() {
+      if (destroyed || !el.resolver) return;
+      renderTapeLength();
+      var show = tool === "measure" && resolverOpen && !!session.loadedFor;
+      el.resolver.hidden = !show;
+      if (!show) return;
+      if (!scorecard || scorecard.for !== session.loadedFor) { loadScorecard(); return; }
+      var html = '<div class="gdStudioOverlayOrdersHead"><strong>Manual resolver</strong>' +
+        '<button type="button" class="gdStudioOverlayOptBtn" data-resolver-act="close" title="Hide the scorecard (R)">Hide</button></div>';
+      var card = scorecardCard();
+      if (scorecard.status === "loading") html += '<p class="gdStudioOverlayOrdersNote">Loading the scorecard…</p>';
+      else if (scorecard.status === "failed") html += '<p class="gdStudioOverlayOrdersNote gdStudioWarnText">Could not load the scorecard: ' + esc(scorecard.error) + "</p>" +
+        '<button type="button" class="gdStudioOverlayOptBtn" data-resolver-act="retry">Try again</button>';
+      else if (!card) html += '<p class="gdStudioOverlayOrdersNote">No scorecard is stored for this course yet - find or paste one in Course Database.</p>';
+      else {
+        var tees = card.card.tees || [];
+        if (scorecard.tee >= tees.length) scorecard.tee = 0;
+        if (scorecard.cards.length > 1) {
+          html += '<label class="gdStudioOverlayOrderName">Card <select data-resolver-field="card">' + scorecard.cards.map(function (c) {
+            return '<option value="' + esc(c.key) + '"' + (c.key === card.key ? " selected" : "") + ">" + esc(c.label || c.name || c.key) + "</option>";
+          }).join("") + "</select></label>";
+        }
+        if (tees.length > 1) {
+          html += '<label class="gdStudioOverlayOrderName">Tee <select data-resolver-field="tee">' + tees.map(function (name, i) {
+            return '<option value="' + i + '"' + (i === scorecard.tee ? " selected" : "") + ">" + esc(name || "Tee " + (i + 1)) + "</option>";
+          }).join("") + "</select></label>";
+        }
+        html += '<ol class="gdStudioOverlayResolverHoles">' + card.card.holes.map(function (h) {
+          var m = Array.isArray(h.distances) ? num(h.distances[scorecard.tee]) : null;
+          return '<li><button type="button" class="gdStudioOverlayResolverHole" data-resolver-hole="' + h.hole + '" data-resolver-m="' + (m == null ? "" : m) + '">' +
+            "<b>" + h.hole + "</b><span>" + (h.par ? "Par " + h.par : "") + "</span><em>" + (m == null ? "–" : Math.round(m) + "m") + "</em></button></li>";
+        }).join("") + "</ol>" +
+          '<p class="gdStudioOverlayOrdersNote">Lay the tape from the green to the tee, then click its hole.</p>';
+      }
+      el.resolver.innerHTML = html;
+      refreshResolverRows();
+    }
+
+    /* The glow follows the tape as it moves; a tick marks a hole already on the overlay. */
+    function refreshResolverRows() {
+      if (destroyed || !el.resolver || el.resolver.hidden) return;
+      var len = tapeLengthM(true);
+      var done = {};
+      holeGroups().forEach(function (g) { g.numbers.forEach(function (n) { done[n] = true; }); });
+      Array.prototype.forEach.call(el.resolver.querySelectorAll("[data-resolver-hole]"), function (b) {
+        var n = Number(b.getAttribute("data-resolver-hole"));
+        var m = b.getAttribute("data-resolver-m") === "" ? null : Number(b.getAttribute("data-resolver-m"));
+        var off = len != null && m != null ? Math.abs(len - m) : Infinity;
+        b.classList.toggle("isMatch", off <= TAPE_MATCH_M);
+        b.classList.toggle("isNear", off > TAPE_MATCH_M && off <= TAPE_NEAR_M);
+        b.classList.toggle("isDone", !!done[n]);
+        b.title = (tape.points.length >= 2 ? "Make this hole " + n + ": the green and fairway under the tape, and the tee at its end" : "Lay the tape from the green to the tee first") +
+          (len != null && m != null ? " · tape " + Math.round(len) + "m, card " + Math.round(m) + "m" : "") + (done[n] ? " · already on the overlay" : "");
+      });
+    }
+
+    function setResolverOpen(open) {
+      resolverOpen = !!open;
+      renderResolver();
+    }
+
+    function onResolverClick(event) {
+      var act = event.target.closest && event.target.closest("[data-resolver-act]");
+      if (act) {
+        var what = act.getAttribute("data-resolver-act");
+        if (what === "close") setResolverOpen(false);
+        else if (what === "retry") loadScorecard();
+        return;
+      }
+      var row = event.target.closest && event.target.closest("[data-resolver-hole]");
+      if (row) allocateTapeHole(Number(row.getAttribute("data-resolver-hole")));
+    }
+
+    function onResolverChange(event) {
+      var field = event.target.getAttribute && event.target.getAttribute("data-resolver-field");
+      if (!field || !scorecard) return;
+      if (field === "card") { scorecard.key = event.target.value; scorecard.tee = 0; }
+      else if (field === "tee") scorecard.tee = Number(event.target.value) || 0;
+      renderResolver();
     }
 
     /* ---- the facility's courses ----
@@ -4714,6 +5023,7 @@
       else if (scanning) text = "AI scan running - shapes are locked until it finishes";
       else if (tool === "connect") text = linkPick.length > 1 ? linkPick.length + " picked · Enter or Space links them · click or mark more · Esc clears" : linkPick.length ? "Click or mark the other shapes on this hole · Enter alone takes this one out of its link · Esc clears" : "Click the shapes that belong to one hole, or drag the marker over them, then Enter or Space";
       else if (tool === "order") text = orderHint();
+      else if (tool === "measure") text = !tape.points.length ? "Click on the green to start the tape" : tape.points.length === 1 ? "Click on the tee - or on the way, to bend the tape round a dogleg · Esc takes it up" : "Click a hole in the manual resolver to give it what is under the tape · click on to move the tee end on · Backspace takes back a point · Esc takes it up";
       else if (tool === "number") text = "Click each hole's fairway (or any shape on it) to give it hole " + session.numberNext + (session.numberAuto ? " · Auto moves on to the next number" : "") + " · click a number to type it";
       else if (fastPins() && TOOL_TEXT.pins[tool]) text = fastHint();
       else if (tool === "fairway" && session.mode === "pins") text = draft.length ? "Click where the fairway ends · Esc cancels" : "Click where the fairway starts";
@@ -4737,7 +5047,7 @@
       else if (tool === "green") text = "Click the middle of a green";
       else if (tool === "bunker") text = "Click the middle of a bunker - the wand outlines it · B switches method";
       else if (tool === "tee") text = "Click where the tee is";
-      if (lastPlacedId && tool !== "move" && tool !== "connect" && tool !== "number" && tool !== "order" && !draft.length && findFeature(lastPlacedId)) text += " · drag the one you just placed to adjust it";
+      if (lastPlacedId && placesShapes(tool) && !draft.length && findFeature(lastPlacedId)) text += " · drag the one you just placed to adjust it";
       else if (selectedId && (findFeature(selectedId) || {}).kind === "tree") text = "Drag to move · Delete or the bin removes it";
       else if (selectedId && isSmooth(findFeature(selectedId) || {})) text = "Drag to move · drag its " + shapes.SMOOTH[findFeature(selectedId).kind].handles + " points to reshape · Delete or the bin removes it";
       else if (selectedId && (findFeature(selectedId) || {}).pin) text = "Drag to move · Shape this pin turns it into an outline · Delete or the bin removes it";
@@ -4956,7 +5266,7 @@
         /* A course with nothing in its overlay yet starts from what OSM has, ready to reshape. It
            saves as a draft, which the mapper ignores until it is marked ready. */
         if (session.loadedFor === id && !hasOverlay() && session.osmMode !== "exclude") convertOsm(true);
-        updateActions(); updateReadout(); updateHint(); updateBin();
+        updateActions(); updateReadout(); updateHint(); updateBin(); renderResolver();
       });
     }
 
@@ -5691,6 +6001,7 @@
       }
       if (session.loadedFor !== id) {
         forgetCourse();
+        clearTape();
         sourceTest = null;
         renderSourceTest();
         selectedId = "";
@@ -5920,6 +6231,8 @@
       drawDraft();
     });
     mapObj.on("mouseout", function () { if (cursorLatLng) { cursorLatLng = null; drawDraft(); } });
+    mapObj.on("mousemove", onTapeHover);
+    mapObj.on("mouseout", function () { onTapeHover(null); });
     mapObj.on("moveend zoomend", function () { buildProviderOptions(); updateReadout(); refreshCaptureDate(); });
     /* The colour wand reads the view on screen: a moved map is a new picture. */
     mapObj.on("movestart zoomstart", function () { colourCap = null; });
@@ -5955,6 +6268,10 @@
         if (event.key === "Enter" || event.key === " " || event.key === "Spacebar") { event.preventDefault(); commitLink(); return; }
         if (event.key === "Escape") { event.preventDefault(); clearLinkPick(); return; }
       }
+      if (tool === "measure" && tape.points.length) {
+        if (event.key === "Escape") { event.preventDefault(); clearTape(); setStatus("Tape taken up."); return; }
+        if (event.key === "Backspace") { event.preventDefault(); undoTapePoint(); return; }
+      }
       if (navKey(event)) return;
       if (draft.length) {
         if (event.key === "Enter") { event.preventDefault(); finishFairway(); }
@@ -5982,11 +6299,12 @@
       if (key === "s" || key === "p") { setMode(key === "p" ? "pins" : "shapes"); return; }
       if (key === "[" || key === "]") { stepWandSize(key === "]" ? 1 : -1); return; }
       if (key === "k" && collarGreen()) { addCollar(); return; }
+      if (key === "r" && tool === "measure") { setResolverOpen(!resolverOpen); return; }
       /* The tool's own key again steps through its methods: wand, draw round, line + wand. */
       var own = { f: "fairway", g: "green", t: "tee", b: "bunker", w: "water", e: "trees", x: "hazard", a: "waste" }[key];
       if (own && own === tool && methodOf(own) && canEdit()) { cycleMethod(own); return; }
-      var shortcut = { v: "move", c: "connect", n: "number", o: "order", f: "fairway", g: "green", t: "tee", b: "bunker", w: "water", e: "trees", x: "hazard", a: "waste" }[key];
-      if (shortcut && (shortcut === "move" || canEdit())) setTool(shortcut);
+      var shortcut = { v: "move", c: "connect", n: "number", o: "order", m: "measure", f: "fairway", g: "green", t: "tee", b: "bunker", w: "water", e: "trees", x: "hazard", a: "waste" }[key];
+      if (shortcut && (shortcut === "move" || shortcut === "measure" || canEdit())) setTool(shortcut);
     }
     document.addEventListener("keydown", onKey);
     document.addEventListener("keydown", onFavKey, true);
@@ -6007,6 +6325,11 @@
     el["tool-connect"].addEventListener("click", function () { setTool("connect"); });
     el["tool-number"].addEventListener("click", function () { setTool("number"); });
     el["tool-order"].addEventListener("click", function () { setTool("order"); });
+    el["tool-measure"].addEventListener("click", function () { setTool("measure"); });
+    el["tape-clear"].addEventListener("click", function () { clearTape(); setStatus("Tape taken up."); });
+    el["resolver-toggle"].addEventListener("click", function () { setResolverOpen(!resolverOpen); });
+    el.resolver.addEventListener("click", onResolverClick);
+    el.resolver.addEventListener("change", onResolverChange);
     el.orders.addEventListener("click", onOrdersClick);
     el.courses.addEventListener("click", onCoursesClick);
     el.orders.addEventListener("change", onOrdersChange);
