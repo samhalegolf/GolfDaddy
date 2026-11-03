@@ -606,6 +606,8 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
   cursor: pointer;
 }
 #gdStudioShellRoot .gdStudioOverlayOptBtn:disabled { opacity: 0.4; cursor: default; }
+#gdStudioShellRoot .gdStudioOverlayOptBtn.isActive { background: var(--gdStudioAccent); color: var(--gdOverlayInk); }
+#gdStudioShellRoot .gdStudioOverlayTapeLength { display: inline-block; min-width: 46px; font-variant-numeric: tabular-nums; }
 /* The favourites bar, under the options: the ☆ keeps the tool in hand, each chip picks one up. */
 #gdStudioShellRoot .gdStudioOverlayFavs {
   position: absolute;
@@ -900,6 +902,65 @@ html.gdStudioOverlayNoScroll, html.gdStudioOverlayNoScroll body { overflow: hidd
   cursor: pointer;
 }
 #gdStudioShellRoot .gdStudioOverlayOrderDelete:disabled { opacity: 0.4; cursor: default; }
+
+/* The manual resolver: the scorecard down the side under Measure, in the Play order panel's
+   place (the two never show together). A hole glows as the tape nears its distance and goes
+   green when it is on it. */
+#gdStudioShellRoot .gdStudioOverlayResolver {
+  position: absolute;
+  top: 62px;
+  right: 66px;
+  z-index: 800;
+  width: 220px;
+  max-width: calc(100% - 160px);
+  max-height: calc(100% - 140px);
+  overflow-y: auto;
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--gdOverlayScrim);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--gdStudioText);
+  font-size: 12px;
+}
+#gdStudioShellRoot .gdStudioOverlayResolver select {
+  flex: 1;
+  min-width: 0;
+  min-height: 30px;
+  border: 1px solid rgba(231, 243, 236, 0.25);
+  border-radius: 8px;
+  background: rgba(231, 243, 236, 0.08);
+  color: var(--gdStudioText);
+  font: inherit;
+}
+#gdStudioShellRoot .gdStudioOverlayResolverHoles { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+#gdStudioShellRoot .gdStudioOverlayResolverHole {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 26px 1fr auto;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid rgba(231, 243, 236, 0.12);
+  border-radius: 8px;
+  background: rgba(231, 243, 236, 0.04);
+  color: var(--gdStudioText);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: box-shadow 0.15s, border-color 0.15s, background 0.15s;
+}
+#gdStudioShellRoot .gdStudioOverlayResolverHole:hover { background: rgba(231, 243, 236, 0.1); }
+#gdStudioShellRoot .gdStudioOverlayResolverHole b { font-size: 13px; }
+#gdStudioShellRoot .gdStudioOverlayResolverHole span { color: var(--gdStudioMuted); }
+#gdStudioShellRoot .gdStudioOverlayResolverHole em { font-style: normal; font-weight: 700; font-variant-numeric: tabular-nums; }
+#gdStudioShellRoot .gdStudioOverlayResolverHole.isDone b::after { content: " ✓"; color: #3cff8d; font-size: 11px; }
+#gdStudioShellRoot .gdStudioOverlayResolverHole.isNear { border-color: rgba(255, 225, 77, 0.6); background: rgba(255, 225, 77, 0.1); box-shadow: 0 0 8px rgba(255, 225, 77, 0.35); }
+#gdStudioShellRoot .gdStudioOverlayResolverHole.isMatch { border-color: #3cff8d; background: rgba(60, 255, 141, 0.2); box-shadow: 0 0 12px rgba(60, 255, 141, 0.65); }
+#gdStudioShellRoot .gdStudioOverlayResolverHole.isMatch em { color: #3cff8d; }
+/* The tape's length, at its end. */
+.leaflet-tooltip.gdStudioOverlayTapeTag { background: rgba(5, 10, 7, 0.85); color: #ffe14d; border: 1px solid #ffe14d; border-radius: 999px; padding: 1px 8px; font-size: 13px; font-weight: 700; box-shadow: none; pointer-events: none; }
+.leaflet-tooltip.gdStudioOverlayTapeTag::before { display: none; }
 
 @media (max-width: 860px) {
   #gdStudioShellRoot .gdStudioShell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
