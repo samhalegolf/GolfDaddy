@@ -317,10 +317,18 @@
      speaks, so pxPerMetre is framePx / metres rather than the shader's canvas figure - the
      canvas is styled to the frame's size, so the two agree on screen.
 
-     lift(px) is the shader's px + uShear * h. ground(px) is its inverse for taps: the height
-     under a screen point depends on where the tap lands on the ground, so it is solved by a
-     few fixed-point steps - the field is smooth and the offset is a few metres, so three
-     rounds are well inside a pixel. */
+     lift(px) is the shader's px + uShear * h. ground(px) is its inverse for taps and drags.
+     Every lift runs along one direction (screen-up after the frame's rotation), so the ground
+     under a screen point p is p - t.dir for the t that solves t = shear . h(p - t.dir): a
+     one-dimensional root, found by walking t down from the highest lift the frame can have
+     and refining the first crossing. The first crossing is the HIGHEST ground under the
+     point, which is the ground the mesh shows there (higher is nearer, so it wins the depth
+     test where a bank folds over what is behind it).
+
+     It used to be a fixed-point iteration, g = p - offset(g). That only converges while
+     exaggeration . tan(tilt) . slope stays under 1 - a 25-degree bank at Enhanced relief in
+     lock, 13 degrees at Dramatic - and past that it bounced, so a drag over a raised green's
+     bank put the aim metres from the finger or refused to move it. */
   function makeDisplacer(opts) {
     const heightAt = opts.heightAt;
     const framePx = opts.framePx;
@@ -331,16 +339,81 @@
       const t = Math.min(1, Math.max(0, e / 0.012));
       return t * t * (3 - 2 * t);
     }
-    function offsetAt(px) {
+    /* Pixels of lift per metre of exaggerated height, or 0 when nothing is lifted. */
+    function shear() {
       const tilt = Number(state.tiltDeg) || 0;
-      if (!(tilt > 0) || !framePx || !metres || !(metres[0] > 0)) return { x: 0, y: 0 };
-      const u = px.x / framePx[0], v = px.y / framePx[1];
-      if (!(u >= 0 && u <= 1 && v >= 0 && v <= 1)) return { x: 0, y: 0 };
-      let h = (heightAt(u, v) - (Number(state.seaLevel) || 0)) * (Number(state.exaggeration) || 0);
-      h *= edgeFade(u, v);
-      const shear = (framePx[0] / metres[0]) * Math.tan(tilt * Math.PI / 180);
+      if (!(tilt > 0) || !framePx || !metres || !(metres[0] > 0)) return 0;
+      return (framePx[0] / metres[0]) * Math.tan(tilt * Math.PI / 180);
+    }
+    /* Screen-up after the frame's rotation: the one direction every lift runs along. */
+    function upDir() {
       const rot = -(Number(state.frameRotationDeg) || 0) * Math.PI / 180;
-      return { x: Math.sin(rot) * shear * h, y: -Math.cos(rot) * shear * h };
+      return { x: Math.sin(rot), y: -Math.cos(rot) };
+    }
+    /* How far px is lifted along upDir, in frame pixels. */
+    function liftLength(px, k) {
+      const u = px.x / framePx[0], v = px.y / framePx[1];
+      if (!(u >= 0 && u <= 1 && v >= 0 && v <= 1)) return 0;
+      const h = (heightAt(u, v) - (Number(state.seaLevel) || 0)) * (Number(state.exaggeration) || 0);
+      return k * h * edgeFade(u, v);
+    }
+    /* The heights the DEM spans, read once on a coarse grid (the DEM does not change for a
+       displacer's life; exaggeration and sea level do, so they are applied per call). Padded
+       by a metre so a peak between grid points cannot sit above the bound. */
+    let span = null;
+    function heightSpan() {
+      if (span) return span;
+      let lo = Infinity, hi = -Infinity;
+      const n = 128;
+      for (let j = 0; j <= n; j++) {
+        for (let i = 0; i <= n; i++) {
+          const h = heightAt(i / n, j / n);
+          if (h < lo) lo = h;
+          if (h > hi) hi = h;
+        }
+      }
+      span = Number.isFinite(lo) && Number.isFinite(hi) ? { lo: lo - 1, hi: hi + 1 } : { lo: 0, hi: 0 };
+      return span;
+    }
+    function offsetAt(px) {
+      const k = shear();
+      if (!k) return { x: 0, y: 0 };
+      const t = liftLength(px, k), dir = upDir();
+      return { x: dir.x * t, y: dir.y * t };
+    }
+    function ground(px) {
+      const k = shear();
+      if (!px || !k) return px;
+      const dir = upDir();
+      const at = function (t) { return { x: px.x - dir.x * t, y: px.y - dir.y * t }; };
+      /* f(t) = t - lift under (p - t.dir). Its roots are the ground points that lift onto p. */
+      const f = function (t) { return t - liftLength(at(t), k); };
+      const sea = Number(state.seaLevel) || 0, ex = Number(state.exaggeration) || 0;
+      const s = heightSpan();
+      /* Every lift lies between these, edge fade included (it only pulls toward 0). */
+      const a = k * (s.lo - sea) * ex, b = k * (s.hi - sea) * ex;
+      const tMin = Math.min(0, a, b), tMax = Math.max(0, a, b);
+      /* Half a frame pixel per step: finer than the DEM, so no bank is stepped over. */
+      const STEP = 0.5;
+      let hiT = tMax, hiF = f(hiT);
+      if (hiF <= 0) return at(hiT);
+      for (let t = tMax - STEP; t > tMin - STEP; t -= STEP) {
+        const lo = Math.max(t, tMin), loF = f(lo);
+        if (loF <= 0) {
+          /* Crossing between lo and hiT: halve it down to well inside a pixel. */
+          let l = lo, h = hiT;
+          for (let i = 0; i < 20 && h - l > 1e-3; i++) {
+            const m = (l + h) / 2;
+            if (f(m) <= 0) l = m; else h = m;
+          }
+          /* One last read of the lift at the answer: exact on flat ground, and on a bank it
+             moves the point by a thousandth of a pixel times the slope. */
+          return at(liftLength(at((l + h) / 2), k));
+        }
+        hiT = lo; hiF = loF;
+      }
+      /* Unreachable with honest bounds (f(tMin) <= 0); flat ground is the safe answer. */
+      return { x: px.x, y: px.y };
     }
     return {
       offsetAt: offsetAt,
@@ -349,18 +422,7 @@
         const d = offsetAt(px);
         return { x: px.x + d.x, y: px.y + d.y };
       },
-      ground: function (px) {
-        if (!px) return px;
-        let g = { x: px.x, y: px.y };
-        for (let i = 0; i < 8; i++) {
-          const d = offsetAt(g);
-          const next = { x: px.x - d.x, y: px.y - d.y };
-          const step = Math.hypot(next.x - g.x, next.y - g.y);
-          g = next;
-          if (step < 0.01) break;
-        }
-        return g;
-      }
+      ground: ground
     };
   }
 
