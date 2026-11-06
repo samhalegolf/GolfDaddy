@@ -61,6 +61,32 @@ const tan30 = Math.tan(Math.PI / 6);
   });
 }
 
+/* A raised green with steep banks, steeper than 1 / (exaggeration . tan(tilt)) - about 25
+   degrees at Enhanced relief in lock (40 degrees), 13 at Dramatic. Real ground: the volcanic
+   banks round Maungakiekie's 9th green run past it. Every screen point the player can drag
+   through must ground back onto the ground the picture shows there, from the fairway below
+   the front bank up onto the green. */
+{
+  const lock = Object.assign({}, state, { tiltDeg: 40 });
+  /* Green 8m up, a 30-degree bank (tan 0.58) in front of it, flat fairway below. In v: the
+     green is the top of the frame, the tee the bottom; up the screen is -y. */
+  const bank = 0.58, greenUp = 8;
+  const raised = (u, v) => {
+    const m = v * metres[1];                             // metres down from the frame's top edge
+    const front = 150;                                   // the bank's foot, 150m below the top
+    return 100 + Math.min(greenUp, Math.max(0, (front - m) * bank));
+  };
+  [2.5, 5].forEach(ex => {
+    const d = makeDisplacer({ heightAt: raised, framePx, metres, state: Object.assign({}, lock, { exaggeration: ex }) });
+    for (let y = 400; y <= 1200; y += 7) {
+      const g = { x: 500, y: y };
+      const back = d.ground(d.lift(g));
+      assert.ok(Math.hypot(back.x - g.x, back.y - g.y) < 0.5,
+        "x" + ex + " relief: ground at y=" + y + " lifts to " + JSON.stringify(d.lift(g)) + " and grounds back to " + JSON.stringify(back));
+    }
+  });
+}
+
 /* Outside the frame and on its rim: no lift, matching the shader's edge tuck. */
 {
   const d = makeDisplacer({ heightAt: () => 150, framePx, metres, state });
